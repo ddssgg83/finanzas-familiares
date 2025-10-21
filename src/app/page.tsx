@@ -1,21 +1,33 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
 type Transaction = {
   id: string;
-  date: string;
-  type: string;
+  date: string;       // YYYY-MM-DD
+  type: 'gasto' | 'ingreso';
   category: string;
-  amount: number;
+  amount: number;     // aseguramos number
   method: string;
   notes?: string;
 };
 
+type FormState = {
+  date: string;
+  type: 'gasto' | 'ingreso';
+  category: string;
+  amount: string;     // input de texto, luego lo convertimos
+  method: string;
+  notes: string;
+};
+
 export default function Home() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<FormState>({
     date: '',
     type: 'gasto',
     category: '',
@@ -24,57 +36,110 @@ export default function Home() {
     notes: '',
   });
 
-  // ✅ Load data from Supabase when page loads
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
   useEffect(() => {
     fetchTransactions();
   }, []);
 
   async function fetchTransactions() {
+    setLoading(true);
+    setErr(null);
     const { data, error } = await supabase
       .from('transactions')
       .select('*')
       .order('date', { ascending: false });
 
-    if (error) console.error('Error fetching transactions:', error);
-    else setTransactions(data || []);
+    if (error) {
+      console.error('Error fetching transactions:', error);
+      setErr('No se pudo cargar la información');
+      setLoading(false);
+      return;
+    }
+
+    // normalizar tipos
+    const rows: Transaction[] = (data || []).map((r: any) => ({
+      id: r.id,
+      date: r.date,
+      type: r.type,
+      category: r.category,
+      amount: Number(r.amount) || 0,
+      method: r.method,
+      notes: r.notes ?? '',
+    }));
+
+    setTransactions(rows);
+    setLoading(false);
   }
 
-  // ✅ Handle form changes
-  function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) {
-    setForm({ ...form, [e.target.name]: e.target.value });
+  function handleChange(
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
+  ) {
+    setForm({ ...form, [e.target.name]: e.target.value } as FormState);
   }
 
-  // ✅ Save a transaction to Supabase
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
-    const { error } = await supabase.from('transactions').insert([
-      {
-        date: form.date || new Date().toISOString().split('T')[0],
-        type: form.type,
-        category: form.category,
-        amount: parseFloat(form.amount),
-        method: form.method,
-        notes: form.notes,
-      },
-    ]);
+    const amt = Number(form.amount);
+    if (Number.isNaN(amt) || amt <= 0) {
+      alert('Ingresa un monto válido');
+      return;
+    }
+
+    const payload = {
+      date: form.date || new Date().toISOString().slice(0, 10),
+      type: form.type,
+      category: form.category || 'Sin categoría',
+      amount: amt,
+      method: form.method || 'Sin método',
+      notes: form.notes?.trim() || '',
+    };
+
+    const { data, error } = await supabase
+      .from('transactions')
+      .insert(payload)
+      .select()
+      .single();
 
     if (error) {
       console.error('Error adding transaction:', error);
-      alert('❌ Error adding transaction');
-    } else {
-      alert('✅ Transaction added successfully!');
-      setForm({ date: '', type: 'gasto', category: '', amount: '', method: '', notes: '' });
-      fetchTransactions();
+      alert('❌ Error al guardar el movimiento');
+      return;
     }
+
+    // añadir el registro real que quedó en DB
+    setTransactions(prev => [
+      {
+        id: data!.id,
+        date: data!.date,
+        type: data!.type,
+        category: data!.category,
+        amount: Number(data!.amount),
+        method: data!.method,
+        notes: data!.notes ?? '',
+      },
+      ...prev,
+    ]);
+
+    setForm({ date: '', type: 'gasto', category: '', amount: '', method: '', notes: '' });
   }
 
-  // ✅ Calculate totals
-  const totalIncome = transactions
+  // === Totales del mes actual ===
+  const now = new Date();
+  const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`; // yyyy-mm
+
+  const monthTx = useMemo(
+    () => transactions.filter(t => t.date.startsWith(monthKey)),
+    [transactions, monthKey]
+  );
+
+  const totalIncome = monthTx
     .filter(t => t.type === 'ingreso')
     .reduce((sum, t) => sum + t.amount, 0);
 
-  const totalExpense = transactions
+  const totalExpense = monthTx
     .filter(t => t.type === 'gasto')
     .reduce((sum, t) => sum + t.amount, 0);
 
@@ -97,23 +162,73 @@ export default function Home() {
           </div>
           <div>
             <p className="text-gray-500">Flujo (Ingresos - Gastos)</p>
-            <p className="text-blue-600 font-bold text-xl">${flow.toFixed(2)}</p>
+            <p className={`font-bold text-xl ${flow >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+              ${flow.toFixed(2)}
+            </p>
           </div>
         </div>
 
         {/* Add Transaction Form */}
         <form onSubmit={handleSubmit} className="grid grid-cols-6 gap-3 mb-6">
-          <select name="type" value={form.type} onChange={handleChange} className="col-span-1 border rounded p-2">
+          <select
+            name="type"
+            value={form.type}
+            onChange={handleChange}
+            className="col-span-1 border rounded p-2"
+          >
             <option value="gasto">Gasto</option>
             <option value="ingreso">Ingreso</option>
           </select>
 
-          <input name="date" type="date" value={form.date} onChange={handleChange} className="col-span-1 border rounded p-2" />
-          <input name="category" placeholder="Categoría" value={form.category} onChange={handleChange} className="col-span-1 border rounded p-2" />
-          <input name="amount" type="number" placeholder="Monto" value={form.amount} onChange={handleChange} className="col-span-1 border rounded p-2" />
-          <input name="method" placeholder="Método de pago" value={form.method} onChange={handleChange} className="col-span-1 border rounded p-2" />
-          <button type="submit" className="col-span-1 bg-blue-600 text-white rounded p-2 hover:bg-blue-700">Agregar</button>
+          <input
+            name="date"
+            type="date"
+            value={form.date}
+            onChange={handleChange}
+            className="col-span-1 border rounded p-2"
+          />
+          <input
+            name="category"
+            placeholder="Categoría"
+            value={form.category}
+            onChange={handleChange}
+            className="col-span-1 border rounded p-2"
+          />
+          <input
+            name="amount"
+            type="number"
+            step="0.01"
+            placeholder="Monto"
+            value={form.amount}
+            onChange={handleChange}
+            className="col-span-1 border rounded p-2"
+          />
+          <input
+            name="method"
+            placeholder="Método de pago"
+            value={form.method}
+            onChange={handleChange}
+            className="col-span-1 border rounded p-2"
+          />
+          <button
+            type="submit"
+            className="col-span-1 bg-blue-600 text-white rounded p-2 hover:bg-blue-700"
+          >
+            Agregar
+          </button>
+
+          <textarea
+            name="notes"
+            placeholder="Notas (opcional)"
+            value={form.notes}
+            onChange={handleChange}
+            className="col-span-6 border rounded p-2 mt-1"
+          />
         </form>
+
+        {/* Loading / Error */}
+        {loading && <p className="text-gray-500 mb-2">Cargando movimientos…</p>}
+        {err && <p className="text-red-600 mb-2">{err}</p>}
 
         {/* Transaction List */}
         <table className="w-full border-collapse">
@@ -138,6 +253,13 @@ export default function Home() {
                 <td className="p-2">{t.notes}</td>
               </tr>
             ))}
+            {!loading && transactions.length === 0 && (
+              <tr>
+                <td colSpan={6} className="p-4 text-center text-gray-500">
+                  Sin movimientos todavía.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
