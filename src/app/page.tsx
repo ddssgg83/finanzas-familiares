@@ -1,7 +1,9 @@
 'use client';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+// Quita esto si lo tenías: export const revalidate = 0;
+// Opcional (aún más agresivo contra caché):
+export const fetchCache = 'force-no-store';
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
