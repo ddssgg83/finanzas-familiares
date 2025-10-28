@@ -4,8 +4,8 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-// arriba de todo, con el resto de imports
-import DashboardCharts from '../components/DashboardCharts';
+import DashboardCharts from '@/components/ui/DashboardCharts';
+
 
 type Tx = {
   id: string;
