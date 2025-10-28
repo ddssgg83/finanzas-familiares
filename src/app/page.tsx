@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import DashboardCharts from '@/components/DashboardCharts';
 
 type Tx = {
   id: string;
@@ -404,6 +405,9 @@ export default function Home() {
             )}
           </tbody>
         </table>
+
+        <DashboardCharts transactions={transactions} />
+
       </div>
     </div>
   );
