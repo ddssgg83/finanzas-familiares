@@ -19,14 +19,13 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es">
       <head>
-        {/* Manifest + colores barra del sistema */}
-        <link rel="manifest" href="/manifest.json" />
+        {/* Manifest + cache-buster */}
+        <link rel="manifest" href="/manifest.json?v=2" />
+        {/* Fallback para navegadores que ignoren viewport.themeColor */}
         <meta name="theme-color" content="#0ea5e9" />
         <link rel="icon" href="/icons/icon-192.png" sizes="192x192" />
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
