@@ -1,16 +1,18 @@
 {
   "name": "Finanzas Familiares",
   "short_name": "Finanzas",
+  "description": "Control familiar de ingresos y gastos.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#ffffff",
   "theme_color": "#0ea5e9",
   "icons": [
     { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
     { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
-  ]
-}
+  ],
   "screenshots": [
     {
       "src": "/icons/screenshot-1080x1920.png",
@@ -18,18 +20,5 @@
       "type": "image/png",
       "form_factor": "narrow"
     }
-  ],
-  "shortcuts": [
-    {
-      "name": "Agregar gasto",
-      "short_name": "Gasto",
-      "url": "/?quick=gasto"
-    },
-    {
-      "name": "Agregar ingreso",
-      "short_name": "Ingreso",
-      "url": "/?quick=ingreso"
-    }
-  ],
-  "categories": ["finance", "productivity"]
+  ]
 }
