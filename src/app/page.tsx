@@ -1,33 +1,44 @@
 'use client';
 
-export const dynamic = 'force-dynamic';
-
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import DashboardCharts from '@/components/ui/DashboardCharts';
+import { savePending, flushPending, PendingTx } from '@/lib/offline';
 
+// Si tienes tus propios componentes, puedes usarlos.
+// import DashboardCharts from '@/components/DashboardCharts';
 
 type Tx = {
   id: string;
-  date: string;                  // YYYY-MM-DD
+  date: string;                 // YYYY-MM-DD
   type: 'gasto' | 'ingreso';
   category: string;
   amount: number;
   method: string;
-  notes?: string;
+  notes?: string | null;
 };
 
 type FormState = {
   date: string;
   type: 'gasto' | 'ingreso';
   category: string;
-  amount: string;
+  amount: string;               // como string del input
   method: string;
   notes: string;
 };
 
 export default function Home() {
+  // ------------------ Estado ------------------
   const [transactions, setTransactions] = useState<Tx[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Filtro de mes (YYYY-MM)
+  const [month, setMonth] = useState<string>(() => {
+    const d = new Date();
+    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    return ym;
+  });
+
   const [form, setForm] = useState<FormState>({
     date: '',
     type: 'gasto',
@@ -37,380 +48,334 @@ export default function Home() {
     notes: '',
   });
 
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  // ------------------ Utilidades ------------------
+  function monthRange(ym: string) {
+    // ym = '2025-11'
+    const [y, m] = ym.split('-').map(Number);
+    const start = new Date(y, (m - 1), 1);
+    const end = new Date(y, (m - 1) + 1, 1);
+    const toISO = (d: Date) => d.toISOString().slice(0, 10); // YYYY-MM-DD
+    return { gte: toISO(start), lt: toISO(end) };
+  }
 
-  // Filtro por mes (yyyy-mm)
-  const [month, setMonth] = useState<string>(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  });
+  const totals = useMemo(() => {
+    let ingresos = 0;
+    let gastos = 0;
+    for (const t of transactions) {
+      if (t.type === 'ingreso') ingresos += t.amount;
+      else gastos += t.amount;
+    }
+    return { ingresos, gastos, flujo: ingresos - gastos };
+  }, [transactions]);
 
-  // Editar
-  const [editId, setEditId] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  // ------------------ Cargar datos ------------------
+  async function fetchTransactions() {
+    try {
+      setLoading(true);
+      setErr(null);
 
-  // Catálogos persistentes
-  const [categories, setCategories] = useState<string[]>([]);
-  const [methods, setMethods] = useState<string[]>([]);
+      const { gte, lt } = monthRange(month);
+
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('id, date, type, category, amount, method, notes')
+        .gte('date', gte)
+        .lt('date', lt)
+        .order('date', { ascending: false });
+
+      if (error) throw error;
+
+      // Normaliza a Tx
+      setTransactions(
+        (data ?? []).map((r: any) => ({
+          id: String(r.id),
+          date: r.date,
+          type: r.type,
+          category: r.category,
+          amount: Number(r.amount),
+          method: r.method,
+          notes: r.notes ?? null,
+        }))
+      );
+    } catch (e: any) {
+      console.error(e);
+      setErr(e?.message ?? 'Error al cargar');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    fetchCatalogs();
-  }, []);
-
-  useEffect(() => {
-    fetchTransactions(month);
+    fetchTransactions();
   }, [month]);
 
-  async function fetchCatalogs() {
-    // categories
-    const { data: cData, error: cErr } = await supabase
-      .from('categories').select('name').order('name', { ascending: true });
-    if (!cErr) setCategories((cData || []).map((r: any) => r.name));
+  // Al volver online, intenta mandar la cola
+  useEffect(() => {
+    async function onOnline() {
+      const sender = async (tx: PendingTx) => {
+        const { error } = await supabase.from('transactions').insert({
+          date: tx.date,
+          type: tx.type,
+          category: tx.category,
+          amount: tx.amount,
+          method: tx.method,
+          notes: tx.notes ?? null,
+        });
+        if (error) throw error;
+      };
+      await flushPending(sender);
+      // refresca la vista del mes actual
+      await fetchTransactions();
+    }
 
-    // payment methods
-    const { data: mData, error: mErr } = await supabase
-      .from('payment_methods').select('name').order('name', { ascending: true });
-    if (!mErr) setMethods((mData || []).map((r: any) => r.name));
+    window.addEventListener('online', onOnline);
+    // Por si hay pendientes y ya hay internet al abrir
+    onOnline();
+
+    return () => window.removeEventListener('online', onOnline);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ------------------ Acciones ------------------
+  function handleChange<K extends keyof FormState>(key: K, val: FormState[K]) {
+    setForm((p) => ({ ...p, [key]: val }));
   }
 
-  function monthRange(yyyyMm: string) {
-    const [y, m] = yyyyMm.split('-').map(Number);
-    const start = `${yyyyMm}-01`;
-    const endDate = new Date(y, m, 0); // último día del mes
-    const end = endDate.toISOString().slice(0, 10);
-    return { start, end };
+  function validateForm(): string | null {
+    if (!form.date) return 'Falta la fecha';
+    if (!form.category.trim()) return 'Falta la categoría';
+    const amount = Number(form.amount);
+    if (!amount || amount <= 0) return 'Monto inválido';
+    if (!form.method.trim()) return 'Falta el método de pago';
+    return null;
   }
 
-  async function fetchTransactions(selectedMonth?: string) {
-    setLoading(true);
-    setErr(null);
-    const m = selectedMonth ?? month;
-    const { start, end } = monthRange(m);
-
-    const { data, error } = await supabase
-      .from('transactions')
-      .select('*')
-      .gte('date', start)
-      .lte('date', end)
-      .order('date', { ascending: false });
-
-    if (error) {
-      console.error('Error fetching transactions:', error);
-      setErr('No se pudo cargar la información');
-      setLoading(false);
+  async function onAdd() {
+    const v = validateForm();
+    if (v) {
+      alert(`⚠️ ${v}`);
       return;
     }
 
-    const rows: Tx[] = (data || []).map((r: any) => ({
-      id: r.id,
-      date: r.date,
-      type: r.type,
-      category: r.category,
-      amount: Number(r.amount) || 0,
-      method: r.method,
-      notes: r.notes ?? '',
-    }));
-
-    setTransactions(rows);
-    setLoading(false);
-  }
-
-  // Añadir "nuevo" catálogo desde el select
-  async function maybeAddNewCatalog(kind: 'category' | 'method', value: string) {
-    if (value !== '__new__') return;
-
-    const label = kind === 'category' ? 'Nueva categoría' : 'Nuevo método de pago';
-    const name = prompt(`${label}:`);
-    if (!name) return;
-
-    if (kind === 'category') {
-      const { error } = await supabase.from('categories').insert({ name: name.trim() });
-      if (error) return alert('No se pudo crear la categoría');
-      setCategories(prev => Array.from(new Set([...prev, name.trim()])).sort());
-      setForm(f => ({ ...f, category: name.trim() }));
-    } else {
-      const { error } = await supabase.from('payment_methods').insert({ name: name.trim() });
-      if (error) return alert('No se pudo crear el método');
-      setMethods(prev => Array.from(new Set([...prev, name.trim()])).sort());
-      setForm(f => ({ ...f, method: name.trim() }));
-    }
-  }
-
-  function handleChange(
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
-  ) {
-    const { name, value } = e.target;
-    if (name === 'category' && value === '__new__') return maybeAddNewCatalog('category', value);
-    if (name === 'method' && value === '__new__') return maybeAddNewCatalog('method', value);
-    setForm({ ...form, [name]: value } as FormState);
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-
-    const amt = Number(form.amount);
-    if (Number.isNaN(amt) || amt <= 0) return alert('Ingresa un monto válido');
-    if (!form.category) return alert('Selecciona una categoría');
-    if (!form.method) return alert('Selecciona método de pago');
-
     const payload = {
-      date: form.date || new Date().toISOString().slice(0, 10),
+      date: form.date,
       type: form.type,
-      category: form.category,
-      amount: amt,
-      method: form.method,
-      notes: form.notes?.trim() || '',
+      category: form.category.trim(),
+      amount: Number(form.amount),
+      method: form.method.trim(),
+      notes: form.notes.trim(),
     };
 
-    if (editId) {
-      const { error, data } = await supabase
-        .from('transactions')
-        .update(payload)
-        .eq('id', editId)
-        .select()
-        .single();
+    try {
+      if (!navigator.onLine) {
+        // OFFLINE: guarda en la cola y pinto el registro "local"
+        savePending(payload);
+        alert('💾 Guardado offline. Se enviará cuando vuelvas a tener internet.');
 
-      if (error) {
-        console.error('Update error:', error);
-        return alert('❌ No se pudo actualizar');
+        setTransactions((prev) => [
+          {
+            id: 'local-' + Date.now(),
+            ...payload,
+          },
+          ...prev,
+        ]);
+
+        // Limpia formulario
+        setForm((p) => ({ ...p, category: '', amount: '', method: '', notes: '' }));
+        return;
       }
 
-      setTransactions(prev =>
-        prev.map(t => (t.id === editId ? { ...t, ...payload } : t))
-      );
-      setEditId(null);
-    } else {
-      const { data, error } = await supabase
-        .from('transactions')
-        .insert(payload)
-        .select()
-        .single();
+      // ONLINE: guardado normal en Supabase
+      const { error } = await supabase.from('transactions').insert({
+        date: payload.date,
+        type: payload.type,
+        category: payload.category,
+        amount: payload.amount,
+        method: payload.method,
+        notes: payload.notes || null,
+      });
+      if (error) throw error;
 
-      if (error) {
-        console.error('Insert error:', error);
-        return alert('❌ No se pudo guardar');
-      }
-      setTransactions(prev => [
-        { id: data!.id, ...payload },
-        ...prev,
-      ]);
+      await fetchTransactions();
+      setForm((p) => ({ ...p, category: '', amount: '', method: '', notes: '' }));
+    } catch (e: any) {
+      console.error(e);
+      alert('❌ No se pudo guardar');
     }
-
-    setForm({ date: '', type: 'gasto', category: '', amount: '', method: '', notes: '' });
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('¿Eliminar este movimiento?')) return;
-    setDeletingId(id);
-    const { error } = await supabase.from('transactions').delete().eq('id', id);
-    setDeletingId(null);
-    if (error) {
-      console.error('Delete error:', error);
-      return alert('❌ No se pudo eliminar');
-    }
-    setTransactions(prev => prev.filter(t => t.id !== id));
-  }
-
-  function startEdit(t: Tx) {
-    setEditId(t.id);
-    setForm({
-      date: t.date,
-      type: t.type,
-      category: t.category,
-      amount: String(t.amount),
-      method: t.method,
-      notes: t.notes || '',
-    });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  // Totales del mes (ya traemos filtrado por mes)
-  const totalIncome = useMemo(
-    () => transactions.filter(t => t.type === 'ingreso').reduce((s, t) => s + t.amount, 0),
-    [transactions]
-  );
-  const totalExpense = useMemo(
-    () => transactions.filter(t => t.type === 'gasto').reduce((s, t) => s + t.amount, 0),
-    [transactions]
-  );
-  const flow = totalIncome - totalExpense;
-
+  // ------------------ UI ------------------
   return (
     <div className="min-h-screen bg-gray-100 p-6">
       <div className="max-w-5xl mx-auto bg-white shadow rounded-lg p-6">
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-4">
-          <h1 className="text-2xl font-bold">💰 Finanzas Familiares</h1>
+        <h1 className="text-2xl font-semibold mb-6">Finanzas Familiares</h1>
 
-          {/* Filtro por mes */}
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600">Mes</label>
-            <input
-              type="month"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="border rounded p-2"
-            />
-            <button
-              onClick={() => fetchTransactions(month)}
-              className="border rounded px-3 py-2 hover:bg-gray-50"
-            >
-              Aplicar
-            </button>
-          </div>
+        {/* Filtro de mes */}
+        <div className="flex items-center gap-2 mb-6">
+          <input
+            className="border rounded px-3 py-2"
+            type="month"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+          />
+          <button
+            className="px-3 py-2 rounded bg-gray-100 border"
+            onClick={fetchTransactions}
+          >
+            Aplicar
+          </button>
+          {err ? <span className="text-red-600 ml-3">Error: {err}</span> : null}
         </div>
 
-        {/* Summary */}
-        <div className="grid grid-cols-3 gap-4 mb-6 text-center">
-          <div>
-            <p className="text-gray-500">Ingresos del mes</p>
-            <p className="text-green-600 font-bold text-xl">${totalIncome.toFixed(2)}</p>
-          </div>
-          <div>
-            <p className="text-gray-500">Gastos del mes</p>
-            <p className="text-red-600 font-bold text-xl">${totalExpense.toFixed(2)}</p>
-          </div>
-          <div>
-            <p className="text-gray-500">Flujo (Ingresos - Gastos)</p>
-            <p className={`font-bold text-xl ${flow >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
-              ${flow.toFixed(2)}
-            </p>
-          </div>
+        {/* KPIs */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          <Kpi title="Ingresos del mes" value={totals.ingresos} color="text-green-600" />
+          <Kpi title="Gastos del mes" value={totals.gastos} color="text-red-600" />
+          <Kpi
+            title="Flujo (Ingresos - Gastos)"
+            value={totals.flujo}
+            color={totals.flujo >= 0 ? 'text-blue-600' : 'text-red-600'}
+          />
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="grid grid-cols-6 gap-3 mb-6">
+        {/* Formulario */}
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-4">
           <select
-            name="type"
+            className="border rounded px-3 py-2"
             value={form.type}
-            onChange={handleChange}
-            className="col-span-1 border rounded p-2"
+            onChange={(e) => handleChange('type', e.target.value as 'gasto' | 'ingreso')}
           >
             <option value="gasto">Gasto</option>
             <option value="ingreso">Ingreso</option>
           </select>
 
           <input
-            name="date"
             type="date"
+            className="border rounded px-3 py-2"
             value={form.date}
-            onChange={handleChange}
-            className="col-span-1 border rounded p-2"
+            onChange={(e) => handleChange('date', e.target.value)}
           />
-
-          {/* Categorías persistentes */}
-          <select
-            name="category"
-            value={form.category}
-            onChange={handleChange}
-            className="col-span-1 border rounded p-2"
-          >
-            <option value="">Categoría…</option>
-            {categories.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-            <option value="__new__">➕ Nueva categoría…</option>
-          </select>
 
           <input
-            name="amount"
-            type="number"
-            placeholder="Monto"
-            step="0.01"
-            value={form.amount}
-            onChange={handleChange}
-            className="col-span-1 border rounded p-2"
+            placeholder="Categoría"
+            className="border rounded px-3 py-2"
+            value={form.category}
+            onChange={(e) => handleChange('category', e.target.value)}
           />
 
-          {/* Métodos persistentes */}
-          <select
-            name="method"
+          <input
+            placeholder="Monto"
+            className="border rounded px-3 py-2"
+            value={form.amount}
+            onChange={(e) => handleChange('amount', e.target.value)}
+            inputMode="decimal"
+          />
+
+          <input
+            placeholder="Método de pago"
+            className="border rounded px-3 py-2"
             value={form.method}
-            onChange={handleChange}
-            className="col-span-1 border rounded p-2"
-          >
-            <option value="">Método…</option>
-            {methods.map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-            <option value="__new__">➕ Nuevo método…</option>
-          </select>
+            onChange={(e) => handleChange('method', e.target.value)}
+          />
 
           <button
-            type="submit"
-            className="col-span-1 bg-blue-600 text-white rounded p-2 hover:bg-blue-700"
+            className="bg-blue-600 text-white rounded px-4 py-2"
+            onClick={onAdd}
           >
-            {editId ? 'Guardar cambios' : 'Agregar'}
+            Agregar
           </button>
+        </div>
 
-          <textarea
-            name="notes"
-            placeholder="Notas (opcional)"
-            value={form.notes}
-            onChange={handleChange}
-            className="col-span-6 border rounded p-2 mt-1"
-          />
-        </form>
-
-        {/* Mensajes */}
-        {loading && <p className="text-gray-500 mb-2">Cargando movimientos…</p>}
-        {err && <p className="text-red-600 mb-2">{err}</p>}
+        <textarea
+          placeholder="Notas (opcional)"
+          className="border rounded w-full px-3 py-2 mb-4"
+          value={form.notes}
+          onChange={(e) => handleChange('notes', e.target.value)}
+        />
 
         {/* Tabla */}
-        <table className="w-full border-collapse">
-          <thead>
-            <tr className="bg-gray-200">
-              <th className="p-2 border">Fecha</th>
-              <th className="p-2 border">Tipo</th>
-              <th className="p-2 border">Categoría</th>
-              <th className="p-2 border">Monto</th>
-              <th className="p-2 border">Método</th>
-              <th className="p-2 border">Notas</th>
-              <th className="p-2 border w-[160px]">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {transactions.map(t => (
-              <tr key={t.id} className="text-center border-b hover:bg-gray-50">
-                <td className="p-2">{t.date}</td>
-                <td className="p-2 capitalize">{t.type}</td>
-                <td className="p-2">{t.category}</td>
-                <td className="p-2">${t.amount.toFixed(2)}</td>
-                <td className="p-2">{t.method}</td>
-                <td className="p-2">{t.notes}</td>
-                <td className="p-2 space-x-2">
-                  <button
-                    onClick={() => startEdit(t)}
-                    className="px-3 py-1 text-sm rounded border hover:bg-gray-100"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    onClick={() => handleDelete(t.id)}
-                    disabled={deletingId === t.id}
-                    className={`px-3 py-1 text-sm rounded border ${
-                      deletingId === t.id ? 'opacity-60 cursor-not-allowed' : 'hover:bg-gray-100'
-                    }`}
-                  >
-                    {deletingId === t.id ? 'Eliminando…' : 'Eliminar'}
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {!loading && transactions.length === 0 && (
+        <div className="overflow-auto border rounded">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50">
               <tr>
-                <td colSpan={7} className="p-4 text-center text-gray-500">
-                  Sin movimientos en este mes.
-                </td>
+                <Th>Fecha</Th>
+                <Th>Tipo</Th>
+                <Th>Categoría</Th>
+                <Th align="right">Monto</Th>
+                <Th>Método</Th>
+                <Th>Notas</Th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td className="p-3 text-center" colSpan={6}>
+                    Cargando...
+                  </td>
+                </tr>
+              ) : transactions.length === 0 ? (
+                <tr>
+                  <td className="p-3 text-center text-gray-500" colSpan={6}>
+                    Sin movimientos en este mes.
+                  </td>
+                </tr>
+              ) : (
+                transactions.map((t) => (
+                  <tr key={t.id} className="border-t">
+                    <Td>{t.date}</Td>
+                    <Td className={t.type === 'ingreso' ? 'text-green-700' : 'text-red-700'}>
+                      {t.type}
+                    </Td>
+                    <Td>{t.category}</Td>
+                    <Td align="right">${t.amount.toFixed(2)}</Td>
+                    <Td>{t.method}</Td>
+                    <Td>{t.notes ?? ''}</Td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
 
-        <DashboardCharts transactions={transactions} />
-
+        {/* Si tienes DashboardCharts, descomenta: */}
+        {/* <div className="mt-8">
+          <DashboardCharts transactions={transactions} />
+        </div> */}
       </div>
     </div>
   );
 }
 
+// ---------- UI helpers ----------
+function Kpi({ title, value, color }: { title: string; value: number; color: string }) {
+  return (
+    <div className="rounded border p-4">
+      <div className="text-gray-600 text-sm">{title}</div>
+      <div className={`text-2xl font-semibold ${color}`}>${value.toFixed(2)}</div>
+    </div>
+  );
+}
+
+function Th({ children, align }: { children: React.ReactNode; align?: 'right' | 'left' }) {
+  return (
+    <th className={`p-3 text-left font-medium ${align === 'right' ? 'text-right' : ''}`}>
+      {children}
+    </th>
+  );
+}
+
+function Td({
+  children,
+  align,
+  className,
+}: {
+  children: React.ReactNode;
+  align?: 'right' | 'left';
+  className?: string;
+}) {
+  return (
+    <td className={`p-3 ${align === 'right' ? 'text-right' : ''} ${className ?? ''}`}>
+      {children}
+    </td>
+  );
+}
