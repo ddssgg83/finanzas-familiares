@@ -1,25 +1,34 @@
-'use client';
-import { useEffect, useState } from 'react';
+"use client";
+
+import { useEffect, useState } from "react";
 
 export default function OfflineBanner() {
-  const [offline, setOffline] = useState(!navigator.onLine);
+  const [isOnline, setIsOnline] = useState(true);
 
   useEffect(() => {
-    const on = () => setOffline(false);
-    const off = () => setOffline(true);
-    window.addEventListener('online', on);
-    window.addEventListener('offline', off);
+    const updateStatus = () => {
+      if (typeof navigator !== "undefined") {
+        setIsOnline(navigator.onLine);
+      }
+    };
+
+    updateStatus(); // estado inicial
+
+    window.addEventListener("online", updateStatus);
+    window.addEventListener("offline", updateStatus);
+
     return () => {
-      window.removeEventListener('online', on);
-      window.removeEventListener('offline', off);
+      window.removeEventListener("online", updateStatus);
+      window.removeEventListener("offline", updateStatus);
     };
   }, []);
 
-  if (!offline) return null;
+  if (isOnline) return null;
 
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-yellow-100 text-yellow-800 border border-yellow-300 rounded-lg px-4 py-2 shadow">
-      Estás sin conexión. Algunos datos pueden no mostrarse.
+    <div className="w-full bg-yellow-100 text-yellow-900 text-center text-sm py-2 border-b border-yellow-300">
+      Estás sin conexión. Los movimientos nuevos se guardarán en este dispositivo
+      y se enviarán cuando vuelvas a tener internet.
     </div>
   );
 }
