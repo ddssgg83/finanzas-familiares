@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { saveOfflineTx, getOfflineTxs } from "@/lib/offline";
+import { saveOfflineTx, syncOfflineTxs } from "@/lib/offline";
 
 export const dynamic = 'force-dynamic';
 
@@ -165,6 +165,33 @@ export default function Home() {
             notes: t.notes,
           }))
         );
+useEffect(() => {
+  // En build de Next (servidor) no existe window
+  if (typeof window === "undefined") return;
+
+  const handleOnline = async () => {
+    try {
+      const synced = await syncOfflineTxs();
+
+      if (synced > 0) {
+        alert(
+          `Se sincronizaron ${synced} movimientos que estaban guardados sin conexión.`
+        );
+        // Recargamos la página para volver a leer todo de Supabase
+        window.location.reload();
+      }
+    } catch (err) {
+      console.error("Error al sincronizar movimientos offline", err);
+    }
+  };
+
+  window.addEventListener("online", handleOnline);
+
+  return () => {
+    window.removeEventListener("online", handleOnline);
+  };
+}, []);
+
 
         // Cache local simple por si quieres usar después
         localStorage.setItem(

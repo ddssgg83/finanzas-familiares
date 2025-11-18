@@ -1,4 +1,5 @@
 // src/lib/offline.ts
+import { supabase } from "./supabase";
 
 export type OfflineTx = {
   id: string;
@@ -81,7 +82,7 @@ export async function getOfflineTxs(): Promise<OfflineTx[]> {
   });
 }
 
-// (Opcional) Limpiar todos los movimientos offline
+// Limpiar todos los movimientos offline
 export async function clearOfflineTxs(): Promise<void> {
   const db = await openDB();
   if (!db) return;
@@ -94,7 +95,38 @@ export async function clearOfflineTxs(): Promise<void> {
     request.onsuccess = () => resolve();
     request.onerror = () => {
       console.error("Error limpiando movimientos offline", request.error);
-      reject(request.error);
+      reject(transaction.error);
     };
   });
+}
+
+/**
+ * Sincroniza todos los movimientos guardados en IndexedDB hacia Supabase.
+ * Devuelve cuántos movimientos se sincronizaron.
+ */
+export async function syncOfflineTxs(): Promise<number> {
+  const pending = await getOfflineTxs();
+  if (!pending.length) return 0;
+
+  const { error } = await supabase
+    .from("transactions")
+    .insert(
+      pending.map((tx) => ({
+        date: tx.date,
+        type: tx.type,
+        category: tx.category,
+        amount: tx.amount,
+        method: tx.method,
+        notes: tx.notes ?? null,
+      }))
+    );
+
+  if (error) {
+    console.error("Error enviando movimientos offline a Supabase", error);
+    throw error;
+  }
+
+  // Si todo salió bien, limpiamos la cola local
+  await clearOfflineTxs();
+  return pending.length;
 }
