@@ -1,20 +1,20 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { useEffect, useMemo, useState } from 'react';
+import { supabase } from '@/lib/supabase';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
-type TxType = "gasto" | "ingreso";
+type TxType = 'ingreso' | 'gasto';
 
 type Tx = {
   id: string;
-  date: string; // YYYY-MM-DD
+  date: string; // yyyy-mm-dd
   type: TxType;
   category: string;
   amount: number;
   method: string;
-  notes?: string;
+  notes?: string | null;
 };
 
 type FormState = {
@@ -26,478 +26,716 @@ type FormState = {
   notes: string;
 };
 
-const OFFLINE_QUEUE_KEY = "ff-offline-queue";
-
-// Opciones por defecto (puedes irlas puliendo después)
-const DEFAULT_CATEGORIES = [
-  "Super/Despensa",
-  "Escuela",
-  "Renta",
-  "Servicios",
-  "Salud",
-  "Transporte",
-  "Otros",
+const CATEGORIES: { label: string; value: string }[] = [
+  { label: 'Sueldo', value: 'SUELDO' },
+  { label: 'Comisión', value: 'COMISION' },
+  { label: 'Super / Despensa', value: 'SUPER' },
+  { label: 'Escuela', value: 'ESCUELA' },
+  { label: 'Renta', value: 'RENTA' },
+  { label: 'Servicios', value: 'SERVICIOS' },
+  { label: 'Gasolina', value: 'GASOLINA' },
+  { label: 'Entretenimiento', value: 'ENTRETENIMIENTO' },
+  { label: 'Otros', value: 'OTROS' },
 ];
 
-const DEFAULT_METHODS = [
-  "Efectivo",
-  "BBVA crédito",
-  "BBVA débito",
-  "Transferencia",
-  "Sin método",
+const METHODS: { label: string; value: string }[] = [
+  { label: 'Efectivo', value: 'EFECTIVO' },
+  { label: 'Transferencia', value: 'TRANSFERENCIA' },
+  { label: 'BBVA crédito', value: 'BBVA_CREDITO' },
+  { label: 'BBVA débito', value: 'BBVA_DEBITO' },
+  { label: 'Tarjeta crédito otra', value: 'CREDITO_OTRA' },
+  { label: 'Tarjeta débito otra', value: 'DEBITO_OTRA' },
 ];
+
+function getCurrentMonthKey(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`; // 2025-11
+}
+
+function formatMoney(num: number) {
+  return num.toLocaleString('es-MX', {
+    style: 'currency',
+    currency: 'MXN',
+    minimumFractionDigits: 2,
+  });
+}
 
 export default function Home() {
   const [transactions, setTransactions] = useState<Tx[]>([]);
-  const [form, setForm] = useState<FormState>({
-    date: "",
-    type: "gasto",
-    category: DEFAULT_CATEGORIES[0],
-    amount: "",
-    method: DEFAULT_METHODS[0],
-    notes: "",
-  });
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [month, setMonth] = useState<string>(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
-      2,
-      "0"
-    )}`;
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [month, setMonth] = useState<string>(() => getCurrentMonthKey());
+  const [form, setForm] = useState<FormState>({
+    date: '',
+    type: 'gasto',
+    category: CATEGORIES[0]?.value ?? '',
+    amount: '',
+    method: METHODS[0]?.value ?? '',
+    notes: '',
   });
 
-  // ---------- Utilidades cola offline con localStorage ----------
+  // 🔹 Estado para editar
+  const [editingId, setEditingId] = useState<string | null>(null);
 
-  const loadOfflineQueue = (): Tx[] => {
-    if (typeof window === "undefined") return [];
+  // 🔹 Presupuesto del mes
+  const [budgetInput, setBudgetInput] = useState('');
+  const [budget, setBudget] = useState<number | null>(null);
+
+  // 🔹 Saber si hay conexión
+  const [isOnline, setIsOnline] = useState<boolean>(
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+
+  // --------------------------------------------------
+  //   Cargar transacciones del mes
+  // --------------------------------------------------
+  useEffect(() => {
+    const handlerOnline = () => setIsOnline(true);
+    const handlerOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handlerOnline);
+    window.addEventListener('offline', handlerOffline);
+
+    return () => {
+      window.removeEventListener('online', handlerOnline);
+      window.removeEventListener('offline', handlerOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const [year, monthNumber] = month.split('-');
+        const from = `${month}-01`;
+        const to = `${month}-${new Date(
+          Number(year),
+          Number(monthNumber),
+          0
+        )
+          .getDate()
+          .toString()
+          .padStart(2, '0')}`;
+
+        const { data, error } = await supabase
+          .from('transactions')
+          .select('*')
+          .gte('date', from)
+          .lte('date', to)
+          .order('date', { ascending: false });
+
+        if (error) throw error;
+
+        setTransactions(
+          (data ?? []).map((t: any) => ({
+            id: t.id,
+            date: t.date,
+            type: t.type,
+            category: t.category,
+            amount: Number(t.amount),
+            method: t.method,
+            notes: t.notes,
+          }))
+        );
+
+        // Cache local simple por si quieres usar después
+        localStorage.setItem(
+          `ff-cache-${month}`,
+          JSON.stringify(data ?? [])
+        );
+      } catch (err: any) {
+  console.error(err);
+  setError('No se pudieron cargar los movimientos.');
+  // Intentar leer cache local
+  const cache = localStorage.getItem(`ff-cache-${month}`);
+  if (cache) {
     try {
-      const raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
-      if (!raw) return [];
-      return JSON.parse(raw) as Tx[];
-    } catch {
-      return [];
-    }
-  };
-
-  const saveOfflineQueue = (queue: Tx[]) => {
-    if (typeof window === "undefined") return;
-    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
-  };
-
-  const addToOfflineQueue = (tx: Tx) => {
-    const queue = loadOfflineQueue();
-    queue.push(tx);
-    saveOfflineQueue(queue);
-  };
-
-  const syncOfflineQueue = async () => {
-    if (typeof navigator !== "undefined" && !navigator.onLine) return;
-
-    const queue = loadOfflineQueue();
-    if (!queue.length) return;
-
-    try {
-      const { error } = await supabase.from("transactions").insert(queue);
-      if (!error) {
-        saveOfflineQueue([]);
-        // Refrescamos desde Supabase para tener IDs correctos
-        await fetchTransactions(currentMonthStartDate(), currentMonthEndDate());
-      } else {
-        console.error("Error al sincronizar cola offline:", error.message);
-      }
-    } catch (e) {
-      console.error("Error al sincronizar cola offline:", e);
-    }
-  };
-
-  // ---------- Fechas del mes seleccionado ----------
-
-  const currentMonthStartDate = () => {
-    const [y, m] = month.split("-");
-    return `${y}-${m}-01`;
-  };
-
-  const currentMonthEndDate = () => {
-    const [y, m] = month.split("-");
-    const last = new Date(Number(y), Number(m), 0).getDate();
-    return `${y}-${m}-${String(last).padStart(2, "0")}`;
-  };
-
-  // ---------- Cargar transacciones de Supabase ----------
-
-  const fetchTransactions = async (from: string, to: string) => {
-    setLoading(true);
-    setErr(null);
-    try {
-      const { data, error } = await supabase
-        .from("transactions")
-        .select("*")
-        .gte("date", from)
-        .lte("date", to)
-        .order("date", { ascending: false });
-
-      if (error) {
-        setErr(error.message);
-        return;
-      }
-
+      const parsed = JSON.parse(cache);
       setTransactions(
-        (data || []).map((t: any) => ({
+        parsed.map((t: any) => ({
           id: t.id,
           date: t.date,
           type: t.type,
           category: t.category,
           amount: Number(t.amount),
           method: t.method,
-          notes: t.notes ?? "",
+          notes: t.notes,
         }))
       );
-    } catch (e: any) {
-      setErr(e.message ?? "Error al cargar movimientos");
-    } finally {
-      setLoading(false);
+    } catch (_) {}
+  }
+} finally {
+  setLoading(false);
+}
+
     }
-  };
 
-  // ---------- Efectos de inicio ----------
-
-  useEffect(() => {
-    // Carga inicial
-    fetchTransactions(currentMonthStartDate(), currentMonthEndDate());
-    // Intenta sincronizar la cola si ya hay internet
-    syncOfflineQueue();
-
-    const onOnline = () => {
-      syncOfflineQueue();
-    };
-
-    window.addEventListener("online", onOnline);
-    return () => window.removeEventListener("online", onOnline);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Re-cargar al cambiar el mes
-  useEffect(() => {
-    fetchTransactions(currentMonthStartDate(), currentMonthEndDate());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    load();
   }, [month]);
 
-  // ---------- Totales del mes ----------
-
-  const { income, expense, flow } = useMemo(() => {
-    let income = 0;
-    let expense = 0;
-    for (const t of transactions) {
-      if (t.type === "ingreso") income += t.amount;
-      else expense += t.amount;
+  // --------------------------------------------------
+  //   Presupuesto mensual (localStorage)
+  // --------------------------------------------------
+  useEffect(() => {
+    const key = `ff-budget-${month}`;
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const val = Number(raw);
+      setBudget(Number.isFinite(val) ? val : null);
+      setBudgetInput(Number.isFinite(val) ? String(val) : '');
+    } else {
+      setBudget(null);
+      setBudgetInput('');
     }
-    return { income, expense, flow: income - expense };
-  }, [transactions]);
+  }, [month]);
 
-  // ---------- Manejo de formulario ----------
-
-  const handleChange = (
-    e: React.ChangeEvent<
-      HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
-    >
-  ) => {
-    const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
+  const handleSaveBudget = () => {
+    const val = Number(budgetInput);
+    if (!Number.isFinite(val) || val <= 0) {
+      alert('Ingresa un presupuesto válido mayor a 0.');
+      return;
+    }
+    setBudget(val);
+    localStorage.setItem(`ff-budget-${month}`, String(val));
   };
 
-  const handleAdd = async () => {
-    if (!form.date || !form.category || !form.amount || !form.method) {
-      alert("Por favor completa fecha, categoría, monto y método.");
-      return;
+  // --------------------------------------------------
+  //   Totales
+  // --------------------------------------------------
+  const { totalIngresos, totalGastos } = useMemo(() => {
+    let ingresos = 0;
+    let gastos = 0;
+    for (const t of transactions) {
+      if (t.type === 'ingreso') ingresos += t.amount;
+      else gastos += t.amount;
     }
+    return { totalIngresos: ingresos, totalGastos: gastos };
+  }, [transactions]);
+
+  const flujo = totalIngresos - totalGastos;
+  const disponible =
+    budget != null ? budget - totalGastos : null;
+
+  // --------------------------------------------------
+  //   Cambio de mes
+  // --------------------------------------------------
+  const handleChangeMonth = (value: string) => {
+    setMonth(value);
+  };
+
+  // --------------------------------------------------
+  //   Manejo formulario
+  // --------------------------------------------------
+  const handleChangeForm = (
+    field: keyof FormState,
+    value: string
+  ) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const resetForm = () => {
+    setForm({
+      date: '',
+      type: 'gasto',
+      category: CATEGORIES[0]?.value ?? '',
+      amount: '',
+      method: METHODS[0]?.value ?? '',
+      notes: '',
+    });
+    setEditingId(null);
+  };
+
+  // --------------------------------------------------
+  //   Guardar (crear o editar)
+  // --------------------------------------------------
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
 
     const amountNumber = Number(form.amount);
-    if (isNaN(amountNumber) || amountNumber <= 0) {
-      alert("El monto debe ser un número mayor a 0.");
+    if (!form.date) {
+      alert('Selecciona una fecha.');
+      return;
+    }
+    if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
+      alert('Ingresa un monto válido mayor a 0.');
       return;
     }
 
-    const newTx: Tx = {
-      id:
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `${Date.now()}`,
+    const payload = {
       date: form.date,
       type: form.type,
       category: form.category,
       amount: amountNumber,
       method: form.method,
-      notes: form.notes || "",
+      notes: form.notes || null,
     };
 
-    // Actualizamos UI de inmediato
-    setTransactions((prev) => [newTx, ...prev]);
-
-    // Limpiamos formulario
-    setForm((prev) => ({
-      ...prev,
-      amount: "",
-      notes: "",
-    }));
-
-    // Si NO hay conexión → guardamos en cola offline y listo
-    if (typeof navigator !== "undefined" && !navigator.onLine) {
-      addToOfflineQueue(newTx);
-      alert(
-        "Sin conexión: el movimiento se guardó en este dispositivo y se enviará cuando vuelvas a tener internet."
-      );
-      return;
-    }
-
-    // Si hay conexión → intentamos guardar en Supabase
+    setSaving(true);
     try {
-      const { error } = await supabase.from("transactions").insert([
-        {
-          ...newTx,
-          amount: newTx.amount,
-        },
-      ]);
+      if (!isOnline) {
+        // Solo guardamos localmente cuando no hay conexión
+        const tempId = `offline-${Date.now()}`;
+        const newTx: Tx = { id: tempId, ...payload };
+        setTransactions((prev) => [newTx, ...prev]);
 
-      if (error) {
-        setErr(error.message);
-        alert("Ocurrió un error al guardar en el servidor.");
-      } else {
-        // Refrescamos desde el servidor por si se generaron IDs/valores nuevos
-        await fetchTransactions(currentMonthStartDate(), currentMonthEndDate());
+        // Opcional: cola offline muy simple
+        const queueRaw = localStorage.getItem('ff-offline-queue') ?? '[]';
+        const queue = JSON.parse(queueRaw) as any[];
+        queue.push({ op: 'insert', payload });
+        localStorage.setItem('ff-offline-queue', JSON.stringify(queue));
+
+        alert(
+          'Estás sin conexión. El movimiento se guardó sólo en este dispositivo.'
+        );
+        resetForm();
+        return;
       }
-    } catch (e: any) {
-      setErr(e.message ?? "Error desconocido al guardar");
-      alert("Ocurrió un error al guardar en el servidor.");
+
+      if (editingId) {
+        // 🔵 EDITAR
+        const { error } = await supabase
+          .from('transactions')
+          .update(payload)
+          .eq('id', editingId);
+
+        if (error) throw error;
+
+        setTransactions((prev) =>
+          prev.map((t) =>
+            t.id === editingId ? { ...t, ...payload } : t
+          )
+        );
+      } else {
+        // 🟢 NUEVO
+        const { data, error } = await supabase
+          .from('transactions')
+          .insert(payload)
+          .select('*')
+          .single();
+
+        if (error) throw error;
+
+        const newTx: Tx = {
+          id: data.id,
+          date: data.date,
+          type: data.type,
+          category: data.category,
+          amount: Number(data.amount),
+          method: data.method,
+          notes: data.notes,
+        };
+
+        setTransactions((prev) => [newTx, ...prev]);
+      }
+
+      resetForm();
+    } catch (err: any) {
+      console.error(err);
+      setError('No se pudo guardar el movimiento.');
+      alert('No se pudo guardar el movimiento.');
+    } finally {
+      setSaving(false);
     }
   };
 
-  // ---------- Render ----------
+  // --------------------------------------------------
+  //   Editar / Eliminar
+  // --------------------------------------------------
+  const handleEdit = (tx: Tx) => {
+    setForm({
+      date: tx.date,
+      type: tx.type,
+      category: tx.category,
+      amount: String(tx.amount),
+      method: tx.method,
+      notes: tx.notes ?? '',
+    });
+    setEditingId(tx.id);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDelete = async (tx: Tx) => {
+    if (!confirm('¿Seguro que quieres eliminar este movimiento?')) return;
+
+    if (!isOnline) {
+      alert('Por ahora eliminar sólo está disponible con conexión.');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('transactions')
+        .delete()
+        .eq('id', tx.id);
+
+      if (error) throw error;
+
+      setTransactions((prev) => prev.filter((t) => t.id !== tx.id));
+    } catch (err: any) {
+      console.error(err);
+      alert('No se pudo eliminar el movimiento.');
+    }
+  };
+
+  // --------------------------------------------------
+  //   UI
+  // --------------------------------------------------
+  const monthLabel = useMemo(() => {
+    const [y, m] = month.split('-');
+    const date = new Date(Number(y), Number(m) - 1, 1);
+    return date.toLocaleDateString('es-MX', {
+      year: 'numeric',
+      month: 'long',
+    });
+  }, [month]);
 
   return (
-    <div className="min-h-screen bg-slate-100">
-      <div className="max-w-5xl mx-auto bg-white shadow rounded-lg p-6 mt-4">
-        <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
-            <span className="text-amber-500 text-3xl">💰</span>
-            Finanzas Familiares
-          </h1>
+    <div className="min-h-screen bg-gray-100">
+      <header className="bg-sky-500 text-white py-2 text-center text-sm">
+        Finanzas Familiares
+      </header>
 
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600">Mes</label>
+      <main className="max-w-5xl mx-auto bg-white shadow rounded-lg p-6 mt-4 mb-8">
+        {/* Mes + estado conexión */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
+          <div>
+            <div className="text-sm text-gray-500">Mes</div>
             <input
               type="month"
-              className="border rounded px-2 py-1 text-sm"
               value={month}
-              onChange={(e) => setMonth(e.target.value)}
+              onChange={(e) => handleChangeMonth(e.target.value)}
+              className="border rounded px-3 py-1 text-sm"
             />
+            <div className="text-xs text-gray-400 mt-1">
+              {monthLabel}
+            </div>
           </div>
-        </header>
 
-        {/* Resumen */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="border rounded-lg p-3 text-center">
-            <p className="text-sm text-gray-500">Ingresos del mes</p>
-            <p className="text-xl font-semibold text-emerald-600">
-              ${income.toFixed(2)}
-            </p>
+          <div
+            className={`text-xs px-3 py-1 rounded-full inline-flex items-center gap-2 ${
+              isOnline
+                ? 'bg-green-100 text-green-700'
+                : 'bg-yellow-100 text-yellow-700'
+            }`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isOnline ? 'bg-green-500' : 'bg-yellow-500'
+              }`}
+            />
+            {isOnline ? 'Conectado' : 'Sin conexión (modo sólo local)'}
           </div>
-          <div className="border rounded-lg p-3 text-center">
-            <p className="text-sm text-gray-500">Gastos del mes</p>
-            <p className="text-xl font-semibold text-red-600">
-              ${expense.toFixed(2)}
-            </p>
+        </div>
+
+        {/* Tarjetas resumen + presupuesto */}
+        <div className="grid md:grid-cols-4 gap-4 mb-6">
+          <div className="border rounded-lg p-4 bg-gray-50">
+            <div className="text-xs text-gray-500">Ingresos del mes</div>
+            <div className="text-2xl font-semibold text-green-600">
+              {formatMoney(totalIngresos)}
+            </div>
           </div>
-          <div className="border rounded-lg p-3 text-center">
-            <p className="text-sm text-gray-500">Flujo (Ingresos - Gastos)</p>
-            <p
-              className={`text-xl font-semibold ${
-                flow >= 0 ? "text-emerald-600" : "text-red-600"
+
+          <div className="border rounded-lg p-4 bg-gray-50">
+            <div className="text-xs text-gray-500">Gastos del mes</div>
+            <div className="text-2xl font-semibold text-red-600">
+              {formatMoney(totalGastos)}
+            </div>
+          </div>
+
+          <div className="border rounded-lg p-4 bg-gray-50">
+            <div className="text-xs text-gray-500">
+              Flujo (Ingresos - Gastos)
+            </div>
+            <div
+              className={`text-2xl font-semibold ${
+                flujo >= 0 ? 'text-green-600' : 'text-red-600'
               }`}
             >
-              ${flow.toFixed(2)}
-            </p>
+              {formatMoney(flujo)}
+            </div>
+          </div>
+
+          <div className="border rounded-lg p-4 bg-gray-50">
+            <div className="text-xs text-gray-500">
+              Presupuesto de gastos
+            </div>
+            <div className="flex items-baseline gap-2 mb-2">
+              <input
+                type="number"
+                value={budgetInput}
+                onChange={(e) => setBudgetInput(e.target.value)}
+                className="border rounded px-2 py-1 text-sm w-full"
+                placeholder="Ej. 20000"
+              />
+              <button
+                onClick={handleSaveBudget}
+                className="bg-sky-500 text-white text-xs px-3 py-1 rounded hover:bg-sky-600"
+              >
+                Guardar
+              </button>
+            </div>
+            {budget != null && (
+              <div
+                className={`text-xs ${
+                  disponible != null && disponible < 0
+                    ? 'text-red-600'
+                    : 'text-green-700'
+                }`}
+              >
+                Disponible:{' '}
+                {disponible != null ? formatMoney(disponible) : '-'}
+              </div>
+            )}
           </div>
         </div>
 
         {/* Formulario */}
-        <section className="mb-6">
-          <h2 className="text-lg font-medium mb-3">Agregar movimiento</h2>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-3">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Tipo</label>
-              <div className="flex rounded border overflow-hidden">
-                <button
-                  type="button"
-                  className={`flex-1 py-1 text-sm ${
-                    form.type === "ingreso"
-                      ? "bg-emerald-500 text-white"
-                      : "bg-white"
-                  }`}
-                  onClick={() =>
-                    setForm((prev) => ({ ...prev, type: "ingreso" }))
+        <section className="mb-8">
+          <h2 className="font-semibold mb-3">
+            {editingId ? 'Editar movimiento' : 'Agregar movimiento'}
+          </h2>
+
+          <form
+            onSubmit={handleSubmit}
+            className="space-y-3 text-sm"
+          >
+            <div className="grid md:grid-cols-5 gap-3">
+              {/* Tipo */}
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Tipo</div>
+                <div className="inline-flex border rounded overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleChangeForm('type', 'ingreso')
+                    }
+                    className={`px-3 py-1 text-xs ${
+                      form.type === 'ingreso'
+                        ? 'bg-green-500 text-white'
+                        : 'bg-white text-gray-700'
+                    }`}
+                  >
+                    Ingreso
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleChangeForm('type', 'gasto')}
+                    className={`px-3 py-1 text-xs ${
+                      form.type === 'gasto'
+                        ? 'bg-red-500 text-white'
+                        : 'bg-white text-gray-700'
+                    }`}
+                  >
+                    Gasto
+                  </button>
+                </div>
+              </div>
+
+              {/* Fecha */}
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Fecha</div>
+                <input
+                  type="date"
+                  value={form.date}
+                  onChange={(e) =>
+                    handleChangeForm('date', e.target.value)
                   }
-                >
-                  Ingreso
-                </button>
-                <button
-                  type="button"
-                  className={`flex-1 py-1 text-sm ${
-                    form.type === "gasto" ? "bg-red-500 text-white" : "bg-white"
-                  }`}
-                  onClick={() =>
-                    setForm((prev) => ({ ...prev, type: "gasto" }))
+                  className="border rounded px-2 py-1 w-full"
+                />
+              </div>
+
+              {/* Categoría */}
+              <div>
+                <div className="text-xs text-gray-500 mb-1">
+                  Categoría
+                </div>
+                <select
+                  value={form.category}
+                  onChange={(e) =>
+                    handleChangeForm('category', e.target.value)
                   }
+                  className="border rounded px-2 py-1 w-full"
                 >
-                  Gasto
-                </button>
+                  {CATEGORIES.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Monto */}
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Monto</div>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={form.amount}
+                  onChange={(e) =>
+                    handleChangeForm('amount', e.target.value)
+                  }
+                  className="border rounded px-2 py-1 w-full"
+                />
+              </div>
+
+              {/* Método */}
+              <div>
+                <div className="text-xs text-gray-500 mb-1">
+                  Método de pago
+                </div>
+                <select
+                  value={form.method}
+                  onChange={(e) =>
+                    handleChangeForm('method', e.target.value)
+                  }
+                  className="border rounded px-2 py-1 w-full"
+                >
+                  {METHODS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
+            {/* Notas */}
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Fecha</label>
-              <input
-                type="date"
-                name="date"
-                className="w-full border rounded px-2 py-1 text-sm"
-                value={form.date}
-                onChange={handleChange}
+              <div className="text-xs text-gray-500 mb-1">
+                Notas (opcional)
+              </div>
+              <textarea
+                value={form.notes}
+                onChange={(e) =>
+                  handleChangeForm('notes', e.target.value)
+                }
+                className="border rounded px-3 py-2 w-full"
+                placeholder="Descripción, quién pagó, folio, etc."
               />
             </div>
 
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Categoría
-              </label>
-              <select
-                name="category"
-                className="w-full border rounded px-2 py-1 text-sm"
-                value={form.category}
-                onChange={handleChange}
+            {/* Botones */}
+            <div className="flex gap-3">
+              <button
+                type="submit"
+                disabled={saving}
+                className="bg-sky-500 hover:bg-sky-600 text-white px-4 py-2 rounded text-sm disabled:opacity-60"
               >
-                {DEFAULT_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
+                {saving
+                  ? 'Guardando...'
+                  : editingId
+                  ? 'Guardar cambios'
+                  : 'Agregar'}
+              </button>
+              {editingId && (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="text-sm text-gray-500 underline"
+                >
+                  Cancelar edición
+                </button>
+              )}
             </div>
 
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Monto</label>
-              <input
-                type="number"
-                name="amount"
-                className="w-full border rounded px-2 py-1 text-sm"
-                value={form.amount}
-                onChange={handleChange}
-                min={0}
-                step="0.01"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                Método de pago
-              </label>
-              <select
-                name="method"
-                className="w-full border rounded px-2 py-1 text-sm"
-                value={form.method}
-                onChange={handleChange}
-              >
-                {DEFAULT_METHODS.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="mb-3">
-            <label className="block text-xs text-gray-500 mb-1">
-              Notas (opcional)
-            </label>
-            <textarea
-              name="notes"
-              className="w-full border rounded px-2 py-1 text-sm"
-              rows={2}
-              value={form.notes}
-              onChange={handleChange}
-              placeholder="Descripción, quién pagó, folio, etc."
-            />
-          </div>
-
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={handleAdd}
-              className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50"
-              disabled={loading}
-            >
-              {loading ? "Guardando..." : "Agregar"}
-            </button>
-          </div>
+            {error && (
+              <p className="text-xs text-red-600 mt-1">{error}</p>
+            )}
+          </form>
         </section>
 
-        {/* Mensaje de error */}
-        {err && (
-          <p className="text-sm text-red-600 mb-2">
-            Error: {err}. Intenta nuevamente.
-          </p>
-        )}
-
-        {/* Tabla */}
+        {/* Tabla de movimientos */}
         <section>
-          <h2 className="text-lg font-medium mb-3">
+          <h2 className="font-semibold mb-3 text-sm">
             Movimientos de {month}
           </h2>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead>
-                <tr className="bg-slate-50">
-                  <th className="border px-2 py-1 text-left">Fecha</th>
-                  <th className="border px-2 py-1 text-left">Tipo</th>
-                  <th className="border px-2 py-1 text-left">Categoría</th>
-                  <th className="border px-2 py-1 text-right">Monto</th>
-                  <th className="border px-2 py-1 text-left">Método</th>
-                  <th className="border px-2 py-1 text-left">Notas</th>
+          <div className="overflow-x-auto text-sm">
+            <table className="min-w-full border border-gray-200 text-left text-xs md:text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="border-b px-2 py-2">Fecha</th>
+                  <th className="border-b px-2 py-2">Tipo</th>
+                  <th className="border-b px-2 py-2">Categoría</th>
+                  <th className="border-b px-2 py-2 text-right">
+                    Monto
+                  </th>
+                  <th className="border-b px-2 py-2">Método</th>
+                  <th className="border-b px-2 py-2">Notas</th>
+                  <th className="border-b px-2 py-2 text-center">
+                    Acciones
+                  </th>
                 </tr>
               </thead>
               <tbody>
+                {loading && (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="text-center py-4 text-gray-500"
+                    >
+                      Cargando movimientos...
+                    </td>
+                  </tr>
+                )}
                 {!loading && transactions.length === 0 && (
                   <tr>
                     <td
-                      colSpan={6}
-                      className="text-center text-gray-500 py-3"
+                      colSpan={7}
+                      className="text-center py-4 text-gray-500"
                     >
                       Sin movimientos en este mes.
                     </td>
                   </tr>
                 )}
-                {transactions.map((t) => (
-                  <tr key={t.id}>
-                    <td className="border px-2 py-1">
-                      {new Date(t.date).toLocaleDateString("es-MX")}
-                    </td>
-                    <td className="border px-2 py-1">
-                      {t.type === "ingreso" ? "Ingreso" : "Gasto"}
-                    </td>
-                    <td className="border px-2 py-1">{t.category}</td>
-                    <td className="border px-2 py-1 text-right">
-                      ${t.amount.toFixed(2)}
-                    </td>
-                    <td className="border px-2 py-1">{t.method}</td>
-                    <td className="border px-2 py-1">{t.notes}</td>
-                  </tr>
-                ))}
+                {!loading &&
+                  transactions.map((t) => (
+                    <tr key={t.id} className="odd:bg-white even:bg-gray-50">
+                      <td className="border-t px-2 py-1">
+                        {new Date(t.date).toLocaleDateString('es-MX')}
+                      </td>
+                      <td className="border-t px-2 py-1">
+                        {t.type === 'ingreso' ? 'Ingreso' : 'Gasto'}
+                      </td>
+                      <td className="border-t px-2 py-1">
+                        {t.category}
+                      </td>
+                      <td className="border-t px-2 py-1 text-right">
+                        {formatMoney(t.amount)}
+                      </td>
+                      <td className="border-t px-2 py-1">{t.method}</td>
+                      <td className="border-t px-2 py-1 max-w-xs truncate">
+                        {t.notes}
+                      </td>
+                      <td className="border-t px-2 py-1 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleEdit(t)}
+                          className="text-xs text-sky-600 hover:underline mr-2"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(t)}
+                          className="text-xs text-red-600 hover:underline"
+                        >
+                          Eliminar
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>
         </section>
-      </div>
+      </main>
     </div>
   );
 }
