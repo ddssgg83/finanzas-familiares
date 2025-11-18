@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { saveOfflineTx, getOfflineTxs } from "@/lib/offline";
 
 export const dynamic = 'force-dynamic';
 
@@ -15,6 +16,7 @@ type Tx = {
   amount: number;
   method: string;
   notes?: string | null;
+ localOnly?: boolean;
 };
 
 type FormState = {
@@ -104,6 +106,28 @@ export default function Home() {
       window.removeEventListener('offline', handlerOffline);
     };
   }, []);
+
+  useEffect(() => {
+  // Sólo corre en el navegador
+  if (typeof window === "undefined") return;
+
+  async function loadOffline() {
+    try {
+      const offline = await getOfflineTxs();
+      if (offline.length) {
+        // Los marcamos como localOnly para poder distinguirlos si hace falta
+        setTransactions((prev) => [
+          ...offline.map((t) => ({ ...t, localOnly: true })),
+          ...prev,
+        ]);
+      }
+    } catch (err) {
+      console.error("Error cargando movimientos offline", err);
+    }
+  }
+
+  loadOffline();
+}, []);
 
   useEffect(() => {
     async function load() {
@@ -360,12 +384,45 @@ export default function Home() {
   };
 
   const handleDelete = async (tx: Tx) => {
-    if (!confirm('¿Seguro que quieres eliminar este movimiento?')) return;
+   // Antes de hablar con Supabase, chequeamos si hay conexión
+if (typeof navigator !== "undefined" && !navigator.onLine) {
+  const id = crypto.randomUUID();
 
-    if (!isOnline) {
-      alert('Por ahora eliminar sólo está disponible con conexión.');
-      return;
-    }
+  const localTx: Tx = {
+    id,
+    date: form.date,            // usa tus nombres de campos
+    type: form.type,            // "ingreso" | "gasto"
+    category: form.category,
+    amount: Number(form.amount),
+    method: form.method,
+    notes: form.notes,
+    localOnly: true,
+  };
+
+  // 1) Lo pintamos en pantalla
+  setTransactions((prev) => [localTx, ...prev]);
+
+  // 2) Lo guardamos en IndexedDB
+  try {
+    await saveOfflineTx({
+      id: localTx.id,
+      date: localTx.date,
+      type: localTx.type,
+      category: localTx.category,
+      amount: localTx.amount,
+      method: localTx.method,
+      notes: localTx.notes,
+    });
+  } catch (err) {
+    console.error("Error guardando movimiento offline", err);
+  }
+
+  alert("Estás sin conexión. El movimiento se guardó sólo en este dispositivo.");
+
+  setLoading(false);
+  return; // importante: no seguimos a Supabase
+}
+
 
     try {
       const { error } = await supabase

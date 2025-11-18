@@ -1,61 +1,100 @@
-export type PendingTx = {
-  id: string;             // id local
-  date: string;
-  type: 'gasto' | 'ingreso';
+// src/lib/offline.ts
+
+export type OfflineTx = {
+  id: string;
+  date: string; // YYYY-MM-DD
+  type: "gasto" | "ingreso";
   category: string;
   amount: number;
   method: string;
-  notes?: string;
-  createdAt: number;      // timestamp para ordenar
+  notes?: string | null;
 };
 
-const KEY = 'pending-transactions';
+const DB_NAME = "finanzas-familiares-db";
+const STORE_NAME = "offline_transactions";
+const DB_VERSION = 1;
 
-function readAll(): PendingTx[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    return raw ? JSON.parse(raw) as PendingTx[] : [];
-  } catch {
-    return [];
+// Abre (o crea) la base de datos de IndexedDB
+function openDB(): Promise<IDBDatabase | null> {
+  // En el servidor (build de Next) no existe indexedDB
+  if (typeof indexedDB === "undefined") {
+    return Promise.resolve(null);
   }
+
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: "id" });
+      }
+    };
+
+    request.onsuccess = () => {
+      resolve(request.result);
+    };
+
+    request.onerror = () => {
+      console.error("Error abriendo IndexedDB", request.error);
+      reject(request.error);
+    };
+  });
 }
 
-function writeAll(list: PendingTx[]) {
-  localStorage.setItem(KEY, JSON.stringify(list));
+// Guarda / actualiza un movimiento offline
+export async function saveOfflineTx(tx: OfflineTx): Promise<void> {
+  const db = await openDB();
+  if (!db) return;
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+    store.put(tx);
+
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => {
+      console.error("Error guardando movimiento offline", transaction.error);
+      reject(transaction.error);
+    };
+  });
 }
 
-export function savePending(tx: Omit<PendingTx, 'id'|'createdAt'>) {
-  const list = readAll();
-  const item: PendingTx = {
-    ...tx,
-    id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
-    createdAt: Date.now(),
-  };
-  list.push(item);
-  writeAll(list);
-  return item.id;
+// Obtiene todos los movimientos offline guardados
+export async function getOfflineTxs(): Promise<OfflineTx[]> {
+  const db = await openDB();
+  if (!db) return [];
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, "readonly");
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.getAll();
+
+    request.onsuccess = () => {
+      resolve((request.result || []) as OfflineTx[]);
+    };
+
+    request.onerror = () => {
+      console.error("Error leyendo movimientos offline", request.error);
+      reject(request.error);
+    };
+  });
 }
 
-export function getPending(): PendingTx[] {
-  return readAll().sort((a, b) => a.createdAt - b.createdAt);
-}
+// (Opcional) Limpiar todos los movimientos offline
+export async function clearOfflineTxs(): Promise<void> {
+  const db = await openDB();
+  if (!db) return;
 
-export function clearPending() {
-  writeAll([]);
-}
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.clear();
 
-export async function flushPending(insertFn: (tx: PendingTx) => Promise<void>) {
-  const list = getPending();
-  if (!list.length) return;
-  const remaining: PendingTx[] = [];
-  for (const tx of list) {
-    try {
-      await insertFn(tx);
-      // ok, no lo volvemos a guardar
-    } catch {
-      // si falla seguimos dejando el item en la cola
-      remaining.push(tx);
-    }
-  }
-  writeAll(remaining);
+    request.onsuccess = () => resolve();
+    request.onerror = () => {
+      console.error("Error limpiando movimientos offline", request.error);
+      reject(request.error);
+    };
+  });
 }
