@@ -1,13 +1,12 @@
-// TEMP DEBUG - quítalo después
-console.log('ENV present on client', {
-  url: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-  key: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-});
-
-
 import { createClient } from '@supabase/supabase-js';
 
-export const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  // Esto te ayuda a detectar si faltan variables de entorno
+  // en desarrollo.
+  console.warn('⚠️ Falta configurar NEXT_PUBLIC_SUPABASE_URL o NEXT_PUBLIC_SUPABASE_ANON_KEY');
+}
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);

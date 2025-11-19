@@ -1,132 +1,94 @@
-// src/lib/offline.ts
 import { supabase } from "./supabase";
+
+export type TxType = "ingreso" | "gasto";
 
 export type OfflineTx = {
   id: string;
-  date: string; // YYYY-MM-DD
-  type: "gasto" | "ingreso";
+  date: string; // yyyy-mm-dd
+  type: TxType;
   category: string;
   amount: number;
   method: string;
-  notes?: string | null;
+  notes: string | null;
 };
 
-const DB_NAME = "finanzas-familiares-db";
-const STORE_NAME = "offline_transactions";
-const DB_VERSION = 1;
+const STORAGE_KEY = "ff-offline-txs-v1";
 
-// Abre (o crea) la base de datos de IndexedDB
-function openDB(): Promise<IDBDatabase | null> {
-  // En el servidor (build de Next) no existe indexedDB
-  if (typeof indexedDB === "undefined") {
-    return Promise.resolve(null);
+function isBrowser() {
+  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
+async function readAll(): Promise<OfflineTx[]> {
+  if (!isBrowser()) return [];
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.map((t: any) => ({
+      id: t.id ?? (typeof crypto !== "undefined" ? crypto.randomUUID() : String(Date.now())),
+      date: String(t.date),
+      type: t.type === "ingreso" ? "ingreso" : "gasto",
+      category: String(t.category ?? "OTROS"),
+      amount: Number(t.amount) || 0,
+      method: String(t.method ?? "EFECTIVO"),
+      notes: t.notes ?? null,
+    }));
+  } catch (err) {
+    console.error("Error leyendo transacciones offline:", err);
+    return [];
   }
-
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: "id" });
-      }
-    };
-
-    request.onsuccess = () => {
-      resolve(request.result);
-    };
-
-    request.onerror = () => {
-      console.error("Error abriendo IndexedDB", request.error);
-      reject(request.error);
-    };
-  });
 }
 
-// Guarda / actualiza un movimiento offline
+// 🔹 Guarda una transacción offline (se usa en tu handleSubmit cuando no hay internet)
 export async function saveOfflineTx(tx: OfflineTx): Promise<void> {
-  const db = await openDB();
-  if (!db) return;
+  if (!isBrowser()) return;
 
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, "readwrite");
-    const store = transaction.objectStore(STORE_NAME);
-    store.put(tx);
-
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => {
-      console.error("Error guardando movimiento offline", transaction.error);
-      reject(transaction.error);
-    };
-  });
+  try {
+    const list = await readAll();
+    list.push(tx);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+  } catch (err) {
+    console.error("Error guardando transacción offline:", err);
+  }
 }
 
-// Obtiene todos los movimientos offline guardados
+// 🔹 Devuelve TODAS las transacciones offline (se usa en el useEffect de loadOffline)
 export async function getOfflineTxs(): Promise<OfflineTx[]> {
-  const db = await openDB();
-  if (!db) return [];
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, "readonly");
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.getAll();
-
-    request.onsuccess = () => {
-      resolve((request.result || []) as OfflineTx[]);
-    };
-
-    request.onerror = () => {
-      console.error("Error leyendo movimientos offline", request.error);
-      reject(request.error);
-    };
-  });
+  return readAll();
 }
 
-// Limpiar todos los movimientos offline
-export async function clearOfflineTxs(): Promise<void> {
-  const db = await openDB();
-  if (!db) return;
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, "readwrite");
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.clear();
-
-    request.onsuccess = () => resolve();
-    request.onerror = () => {
-      console.error("Error limpiando movimientos offline", request.error);
-      reject(transaction.error);
-    };
-  });
-}
-
-/**
- * Sincroniza todos los movimientos guardados en IndexedDB hacia Supabase.
- * Devuelve cuántos movimientos se sincronizaron.
- */
+// 🔹 Manda todo a Supabase y limpia el storage. Regresa CUÁNTOS se sincronizaron.
 export async function syncOfflineTxs(): Promise<number> {
-  const pending = await getOfflineTxs();
-  if (!pending.length) return 0;
+  const list = await readAll();
+  if (!list.length) return 0;
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("transactions")
     .insert(
-      pending.map((tx) => ({
-        date: tx.date,
-        type: tx.type,
-        category: tx.category,
-        amount: tx.amount,
-        method: tx.method,
-        notes: tx.notes ?? null,
+      list.map((t) => ({
+        id: t.id,
+        date: t.date,
+        type: t.type,
+        category: t.category,
+        amount: t.amount,
+        method: t.method,
+        notes: t.notes,
       }))
-    );
+    )
+    .select("id");
 
   if (error) {
-    console.error("Error enviando movimientos offline a Supabase", error);
+    console.error("Error sincronizando transacciones offline:", error);
     throw error;
   }
 
-  // Si todo salió bien, limpiamos la cola local
-  await clearOfflineTxs();
-  return pending.length;
+  if (isBrowser()) {
+    window.localStorage.removeItem(STORAGE_KEY);
+  }
+
+  return Array.isArray(data) ? data.length : 0;
 }
