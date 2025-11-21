@@ -110,7 +110,7 @@ export default function Home() {
   }, []);
 
   // --------------------------------------------------
-  //   Cargar movimientos guardados en IndexedDB (offline)
+  //   Cargar movimientos guardados offline
   // --------------------------------------------------
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -225,12 +225,30 @@ export default function Home() {
 
     const handleOnline = async () => {
       try {
-        const synced = await syncOfflineTxs();
-        if (synced > 0) {
+        const synced = await syncOfflineTxs(); // ahora regresa OfflineTx[]
+
+        if (synced.length > 0) {
           alert(
-            `Se sincronizaron ${synced} movimientos que estaban guardados sin conexión.`
+            `Se sincronizaron ${synced.length} movimientos que estaban guardados sin conexión.`
           );
-          window.location.reload();
+
+          // Quitamos los localOnly y agregamos los nuevos que regresó Supabase
+          setTransactions((prev) => {
+            const withoutLocal = prev.filter((t) => !t.localOnly);
+
+            const syncedAsTx: Tx[] = synced.map((t: any) => ({
+              id: t.id,
+              date: t.date,
+              type: t.type,
+              category: t.category,
+              amount: t.amount,
+              method: t.method,
+              notes: t.notes,
+              localOnly: false,
+            }));
+
+            return [...syncedAsTx, ...withoutLocal];
+          });
         }
       } catch (err) {
         console.error("Error al sincronizar movimientos offline", err);
@@ -248,9 +266,8 @@ export default function Home() {
   // --------------------------------------------------
   useEffect(() => {
     const key = `ff-budget-${month}`;
-    const raw = typeof window !== "undefined"
-      ? localStorage.getItem(key)
-      : null;
+    const raw =
+      typeof window !== "undefined" ? localStorage.getItem(key) : null;
 
     if (raw) {
       const val = Number(raw);
@@ -346,7 +363,7 @@ export default function Home() {
     setSaving(true);
 
     try {
-      // 🔴 SIN CONEXIÓN → guardamos sólo en IndexedDB
+      // 🔴 SIN CONEXIÓN → guardamos sólo en local
       if (typeof navigator !== "undefined" && !navigator.onLine) {
         const id = crypto.randomUUID();
 
@@ -359,7 +376,7 @@ export default function Home() {
         // 1) Lo pintamos en pantalla
         setTransactions((prev) => [localTx, ...prev]);
 
-        // 2) Lo guardamos en IndexedDB
+        // 2) Lo guardamos en storage offline
         try {
           await saveOfflineTx({
             id: localTx.id,

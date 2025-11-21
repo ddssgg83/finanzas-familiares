@@ -61,10 +61,11 @@ export async function getOfflineTxs(): Promise<OfflineTx[]> {
   return readAll();
 }
 
-// 🔹 Manda todo a Supabase y limpia el storage. Regresa CUÁNTOS se sincronizaron.
-export async function syncOfflineTxs(): Promise<number> {
+// 🔹 Sincroniza con Supabase y regresa las transacciones insertadas.
+//    Limpia el storage SOLO si todo salió bien.
+export async function syncOfflineTxs(): Promise<OfflineTx[]> {
   const list = await readAll();
-  if (!list.length) return 0;
+  if (!list.length) return [];
 
   const { data, error } = await supabase
     .from("transactions")
@@ -79,16 +80,27 @@ export async function syncOfflineTxs(): Promise<number> {
         notes: t.notes,
       }))
     )
-    .select("id");
+    .select("*");
 
   if (error) {
     console.error("Error sincronizando transacciones offline:", error);
-    throw error;
+    return [];
   }
 
+  // Solo borramos si TODO salió bien
   if (isBrowser()) {
     window.localStorage.removeItem(STORAGE_KEY);
   }
 
-  return Array.isArray(data) ? data.length : 0;
+  // Normalizamos lo que regresó Supabase
+  return (data ?? []).map((t: any) => ({
+    id: t.id,
+    date: String(t.date),
+    type: t.type === "ingreso" ? "ingreso" : "gasto",
+    category: String(t.category ?? "OTROS"),
+    amount: Number(t.amount),
+    method: String(t.method ?? "EFECTIVO"),
+    notes: t.notes ?? null,
+  }));
 }
+
