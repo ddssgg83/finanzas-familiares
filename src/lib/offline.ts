@@ -63,14 +63,16 @@ export async function saveOfflineTx(tx: OfflineTx): Promise<void> {
   }
 }
 
-// 🔹 Devuelve todas las transacciones offline
+// 🔹 Devuelve TODAS las transacciones offline
 export async function getOfflineTxs(): Promise<OfflineTx[]> {
   return readAll();
 }
 
-// 🔹 Sincroniza con Supabase y regresa las transacciones insertadas.
-//    Limpia el storage SOLO si todo salió bien.
-export async function syncOfflineTxs(): Promise<OfflineTx[]> {
+// 🔹 Manda todo a Supabase y limpia el storage.
+//     Agregamos el userId aquí para cumplir con las policies de RLS.
+export async function syncOfflineTxs(
+  userId: string
+): Promise<OfflineTx[]> {
   const list = await readAll();
   if (!list.length) return [];
 
@@ -85,28 +87,20 @@ export async function syncOfflineTxs(): Promise<OfflineTx[]> {
         amount: t.amount,
         method: t.method,
         notes: t.notes,
+        user_id: userId, // 🔐 importante
       }))
     )
     .select("*");
 
   if (error) {
     console.error("Error sincronizando transacciones offline:", error);
-    // NO borramos localStorage si falla
-    return [];
+    throw error;
   }
 
   if (isBrowser()) {
     window.localStorage.removeItem(STORAGE_KEY);
   }
 
-  // Normalizamos lo que regresa Supabase
-  return (data ?? []).map((t: any) => ({
-    id: t.id,
-    date: String(t.date),
-    type: t.type === "ingreso" ? "ingreso" : "gasto",
-    category: String(t.category ?? "OTROS"),
-    amount: Number(t.amount) || 0,
-    method: String(t.method ?? "EFECTIVO"),
-    notes: t.notes ?? null,
-  }));
+  // devolvemos lo que regresó Supabase (lo tratamos como OfflineTx para la UI)
+  return (data ?? []) as OfflineTx[];
 }

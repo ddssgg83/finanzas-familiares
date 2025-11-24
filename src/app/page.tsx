@@ -137,9 +137,15 @@ export default function Home() {
       setAuthError(null);
       try {
         const { data, error } = await supabase.auth.getUser();
-        if (error) {
+
+        // Este error "Auth session missing" es normal cuando aún no hay sesión.
+        if (
+          error &&
+          (error as any).name !== "AuthSessionMissingError"
+        ) {
           console.error("Error obteniendo usuario actual", error);
         }
+
         if (!ignore) {
           setUser(data?.user ?? null);
         }
@@ -304,6 +310,8 @@ export default function Home() {
       return;
     }
 
+    const userId = user.id;
+
     async function load() {
       setLoading(true);
       setError(null);
@@ -323,6 +331,7 @@ export default function Home() {
         const { data, error } = await supabase
           .from("transactions")
           .select("*")
+          .eq("user_id", userId) // 🔐 sólo las del usuario logueado
           .gte("date", from)
           .lte("date", to)
           .order("date", { ascending: false });
@@ -392,7 +401,7 @@ export default function Home() {
       if (!user) return;
 
       try {
-        const synced = await syncOfflineTxs(); // OfflineTx[]
+        const synced = await syncOfflineTxs(user.id); // 🔐 pasamos user_id
 
         if (!synced.length) return;
 
@@ -689,18 +698,20 @@ export default function Home() {
       if (editingId) {
         const { error } = await supabase
           .from("transactions")
-          .update(payload)
+          .update({ ...payload, user_id: user.id })
           .eq("id", editingId);
 
         if (error) throw error;
 
         setTransactions((prev) =>
-          prev.map((t) => (t.id === editingId ? { ...t, ...payload } : t))
+          prev.map((t) =>
+            t.id === editingId ? { ...t, ...payload } : t
+          )
         );
       } else {
         const { data, error } = await supabase
           .from("transactions")
-          .insert(payload)
+          .insert({ ...payload, user_id: user.id }) // 🔐 importante para RLS
           .select("*")
           .single();
 
@@ -721,7 +732,7 @@ export default function Home() {
 
       resetForm();
     } catch (err: any) {
-      console.error(err);
+      console.error("Error en handleSubmit:", err);
       setError("No se pudo guardar el movimiento.");
       alert("No se pudo guardar el movimiento.");
     } finally {
@@ -759,7 +770,8 @@ export default function Home() {
       const { error } = await supabase
         .from("transactions")
         .delete()
-        .eq("id", tx.id);
+        .eq("id", tx.id)
+        .eq("user_id", user.id);
 
       if (error) throw error;
 
