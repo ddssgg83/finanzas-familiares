@@ -68,6 +68,16 @@ function formatMoney(num: number) {
   });
 }
 
+// Para exportar a CSV
+function csvEscape(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return "";
+  const str = String(value);
+  if (str.includes('"') || str.includes(",") || str.includes("\n")) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
 export default function Home() {
   const [transactions, setTransactions] = useState<Tx[]>([]);
   const [loading, setLoading] = useState(false);
@@ -280,9 +290,6 @@ export default function Home() {
             syncedMap.set(t.id, t);
           });
 
-          // Dejamos:
-          // - todos los que NO son localOnly
-          // - y los localOnly que aún NO se sincronizan
           const remaining: Tx[] = prev.filter(
             (tx) => !(tx.localOnly && syncedMap.has(tx.id))
           );
@@ -386,6 +393,54 @@ export default function Home() {
   }, [transactions]);
 
   // --------------------------------------------------
+  //   Exportar CSV del mes actual
+  // --------------------------------------------------
+  const handleExportCsv = () => {
+    if (!transactions.length) {
+      alert("No hay movimientos en este mes para exportar.");
+      return;
+    }
+
+    const header = [
+      "Fecha",
+      "Tipo",
+      "Categoría",
+      "Monto",
+      "Método",
+      "Notas",
+      "Offline",
+    ];
+
+    const rows = transactions.map((t) => [
+      new Date(t.date).toISOString().slice(0, 10),
+      t.type,
+      t.category,
+      t.amount,
+      t.method,
+      t.notes ?? "",
+      t.localOnly ? "sí" : "no",
+    ]);
+
+    const csvLines = [
+      header.map(csvEscape).join(","),
+      ...rows.map((r) => r.map(csvEscape).join(",")),
+    ];
+
+    const csvContent = csvLines.join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const fileMonth = month.replace("-", "_");
+    link.href = url;
+    link.download = `finanzas_${fileMonth}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // --------------------------------------------------
   //   Cambio de mes
   // --------------------------------------------------
   const handleChangeMonth = (value: string) => {
@@ -450,10 +505,8 @@ export default function Home() {
           localOnly: true,
         };
 
-        // 1) Lo pintamos en pantalla
         setTransactions((prev) => [localTx, ...prev]);
 
-        // 2) Lo guardamos en storage offline
         try {
           await saveOfflineTx({
             id: localTx.id,
@@ -616,16 +669,25 @@ export default function Home() {
       </header>
 
       <main className="max-w-5xl mx-auto bg-white shadow rounded-lg p-6 mt-4 mb-8">
-        {/* Mes + estado conexión */}
+        {/* Mes + estado conexión + export */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
           <div>
             <div className="text-sm text-gray-500">Mes</div>
-            <input
-              type="month"
-              value={month}
-              onChange={(e) => handleChangeMonth(e.target.value)}
-              className="border rounded px-3 py-1 text-sm"
-            />
+            <div className="flex items-center gap-2">
+              <input
+                type="month"
+                value={month}
+                onChange={(e) => handleChangeMonth(e.target.value)}
+                className="border rounded px-3 py-1 text-sm"
+              />
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                className="text-xs bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1 rounded"
+              >
+                Exportar CSV
+              </button>
+            </div>
             <div className="text-xs text-gray-400 mt-1">{monthLabel}</div>
           </div>
 
@@ -732,7 +794,7 @@ export default function Home() {
                     <div
                       className="h-2 rounded bg-sky-500"
                       style={{
-                        width: `${Math.max(item.percent, 2)}%`, // siempre algo visible
+                        width: `${Math.max(item.percent, 2)}%`,
                       }}
                     />
                   </div>
