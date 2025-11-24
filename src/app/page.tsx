@@ -31,6 +31,8 @@ type FormState = {
 
 type Option = { label: string; value: string };
 
+type ExportType = "todos" | "ingresos" | "gastos";
+
 const DEFAULT_CATEGORIES: Option[] = [
   { label: "Sueldo", value: "SUELDO" },
   { label: "Comisión", value: "COMISION" },
@@ -69,7 +71,6 @@ function formatMoney(num: number) {
   });
 }
 
-// Para exportar a CSV
 function csvEscape(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return "";
   const str = String(value);
@@ -119,8 +120,14 @@ export default function Home() {
   // 🔹 Saber si hay conexión
   const [isOnline, setIsOnline] = useState<boolean>(true);
 
+  // 🔹 Opciones de exportación
+  const [showExportOptions, setShowExportOptions] = useState(false);
+  const [exportType, setExportType] = useState<ExportType>("todos");
+  const [exportIncludeCategorySummary, setExportIncludeCategorySummary] =
+    useState(true);
+
   // --------------------------------------------------
-  //   AUTH: cargar usuario actual y suscribirse a cambios
+  //   AUTH: usuario actual + listener
   // --------------------------------------------------
   useEffect(() => {
     let ignore = false;
@@ -190,7 +197,7 @@ export default function Home() {
         return;
       }
       alert(
-        "Cuenta creada. Si Supabase tiene verificación por correo activa, revisa tu bandeja para confirmar."
+        "Cuenta creada. Si tienes verificación por correo activada en Supabase, revisa tu bandeja para confirmar."
       );
       setAuthMode("login");
       setAuthPassword("");
@@ -293,7 +300,6 @@ export default function Home() {
   // --------------------------------------------------
   useEffect(() => {
     if (!user) {
-      // si no hay usuario, limpiamos transacciones
       setTransactions([]);
       return;
     }
@@ -377,13 +383,13 @@ export default function Home() {
   }, [month, user]);
 
   // --------------------------------------------------
-  //   Cuando vuelva el internet, sincronizar cola offline
+  //   Sincronizar cola offline al volver internet
   // --------------------------------------------------
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const handleOnline = async () => {
-      if (!user) return; // no sincronizamos si no hay usuario
+      if (!user) return;
 
       try {
         const synced = await syncOfflineTxs(); // OfflineTx[]
@@ -503,11 +509,18 @@ export default function Home() {
   }, [transactions]);
 
   // --------------------------------------------------
-  //   Exportar CSV del mes actual
+  //   Exportar CSV del mes (con opciones)
   // --------------------------------------------------
   const handleExportCsv = () => {
-    if (!transactions.length) {
-      alert("No hay movimientos en este mes para exportar.");
+    let data = transactions;
+    if (exportType === "ingresos") {
+      data = transactions.filter((t) => t.type === "ingreso");
+    } else if (exportType === "gastos") {
+      data = transactions.filter((t) => t.type === "gasto");
+    }
+
+    if (!data.length) {
+      alert("No hay movimientos en este mes con ese filtro para exportar.");
       return;
     }
 
@@ -521,7 +534,7 @@ export default function Home() {
       "Offline",
     ];
 
-    const rows = transactions.map((t) => [
+    const rows = data.map((t) => [
       new Date(t.date).toISOString().slice(0, 10),
       t.type,
       t.category,
@@ -536,14 +549,43 @@ export default function Home() {
       ...rows.map((r) => r.map(csvEscape).join(",")),
     ];
 
+    if (
+      exportIncludeCategorySummary &&
+      gastosPorCategoria.length > 0 &&
+      exportType !== "ingresos"
+    ) {
+      csvLines.push("");
+      csvLines.push("Resumen de gastos por categoría");
+      csvLines.push("Categoría,Total,Porcentaje");
+
+      gastosPorCategoria.forEach((item) => {
+        csvLines.push(
+          [
+            csvEscape(item.category),
+            csvEscape(item.total),
+            csvEscape(`${item.percent.toFixed(1)}%`),
+          ].join(",")
+        );
+      });
+    }
+
     const csvContent = csvLines.join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
 
     const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
     const fileMonth = month.replace("-", "_");
+    const exportLabel =
+      exportType === "todos"
+        ? "todos"
+        : exportType === "ingresos"
+        ? "ingresos"
+        : "gastos";
+
+    const fileName = `finanzas_${fileMonth}_${exportLabel}.csv`;
+
+    const link = document.createElement("a");
     link.href = url;
-    link.download = `finanzas_${fileMonth}.csv`;
+    link.download = fileName;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -610,7 +652,7 @@ export default function Home() {
     setSaving(true);
 
     try {
-      // 🔴 SIN CONEXIÓN → guardamos sólo en local
+      // 🔴 SIN CONEXIÓN → sólo local
       if (typeof navigator !== "undefined" && !navigator.onLine) {
         const id = crypto.randomUUID();
 
@@ -643,7 +685,7 @@ export default function Home() {
         return;
       }
 
-      // 🟢 CON CONEXIÓN → flujo normal (editar o crear)
+      // 🟢 CON CONEXIÓN
       if (editingId) {
         const { error } = await supabase
           .from("transactions")
@@ -770,7 +812,7 @@ export default function Home() {
   };
 
   // --------------------------------------------------
-  //   UI
+  //   UI helpers
   // --------------------------------------------------
   const monthLabel = useMemo(() => {
     const [y, m] = month.split("-");
@@ -781,7 +823,9 @@ export default function Home() {
     });
   }, [month]);
 
-  // 🔁 ESTADOS DE RENDER: cargando auth / sin usuario / app normal
+  // --------------------------------------------------
+  //   Render: estados de auth
+  // --------------------------------------------------
   if (authLoading) {
     return (
       <div className="min-h-screen bg-gray-100 flex flex-col">
@@ -890,7 +934,9 @@ export default function Home() {
     );
   }
 
-  // 🔓 Usuario logueado → app completa
+  // --------------------------------------------------
+  //   Render: app logueada
+  // --------------------------------------------------
   return (
     <div className="min-h-screen bg-gray-100">
       <header className="bg-sky-500 text-white py-2 text-center text-sm relative">
@@ -922,13 +968,83 @@ export default function Home() {
               />
               <button
                 type="button"
-                onClick={handleExportCsv}
+                onClick={() => setShowExportOptions((v) => !v)}
                 className="text-xs bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1 rounded"
               >
-                Exportar CSV
+                {showExportOptions ? "Cerrar exportar" : "Exportar"}
               </button>
             </div>
             <div className="text-xs text-gray-400 mt-1">{monthLabel}</div>
+
+            {showExportOptions && (
+              <div className="mt-3 p-3 border rounded-lg bg-gray-50 space-y-2 text-xs max-w-md">
+                <div className="font-semibold text-gray-700 mb-1">
+                  Opciones de exportación
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] text-gray-600">
+                    Tipo de movimientos
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setExportType("todos")}
+                      className={`px-2 py-1 rounded border text-[11px] ${
+                        exportType === "todos"
+                          ? "bg-emerald-500 text-white border-emerald-500"
+                          : "bg-white text-gray-700 border-gray-300"
+                      }`}
+                    >
+                      Todos
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setExportType("ingresos")}
+                      className={`px-2 py-1 rounded border text-[11px] ${
+                        exportType === "ingresos"
+                          ? "bg-emerald-500 text-white border-emerald-500"
+                          : "bg-white text-gray-700 border-gray-300"
+                      }`}
+                    >
+                      Sólo ingresos
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setExportType("gastos")}
+                      className={`px-2 py-1 rounded border text-[11px] ${
+                        exportType === "gastos"
+                          ? "bg-emerald-500 text-white border-emerald-500"
+                          : "bg-white text-gray-700 border-gray-300"
+                      }`}
+                    >
+                      Sólo gastos
+                    </button>
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={exportIncludeCategorySummary}
+                    onChange={(e) =>
+                      setExportIncludeCategorySummary(e.target.checked)
+                    }
+                  />
+                  <span className="text-[11px] text-gray-700">
+                    Incluir resumen de gastos por categoría al final
+                  </span>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={handleExportCsv}
+                  className="mt-1 text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded"
+                >
+                  Descargar CSV
+                </button>
+              </div>
+            )}
           </div>
 
           <div
@@ -1008,7 +1124,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Visor mensual: gastos por categoría (gráfica tipo barras) */}
+        {/* Visor mensual: gastos por categoría */}
         <section className="mb-8">
           <h2 className="font-semibold mb-2 text-sm">
             Visor mensual de gastos por categoría
