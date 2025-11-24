@@ -15,7 +15,10 @@ export type OfflineTx = {
 const STORAGE_KEY = "ff-offline-txs-v1";
 
 function isBrowser() {
-  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+  return (
+    typeof window !== "undefined" &&
+    typeof window.localStorage !== "undefined"
+  );
 }
 
 async function readAll(): Promise<OfflineTx[]> {
@@ -29,7 +32,11 @@ async function readAll(): Promise<OfflineTx[]> {
     if (!Array.isArray(parsed)) return [];
 
     return parsed.map((t: any) => ({
-      id: t.id ?? (typeof crypto !== "undefined" ? crypto.randomUUID() : String(Date.now())),
+      id:
+        t.id ??
+        (typeof crypto !== "undefined"
+          ? crypto.randomUUID()
+          : String(Date.now())),
       date: String(t.date),
       type: t.type === "ingreso" ? "ingreso" : "gasto",
       category: String(t.category ?? "OTROS"),
@@ -43,7 +50,7 @@ async function readAll(): Promise<OfflineTx[]> {
   }
 }
 
-// 🔹 Guarda una transacción offline (se usa en tu handleSubmit cuando no hay internet)
+// 🔹 Guarda una transacción offline
 export async function saveOfflineTx(tx: OfflineTx): Promise<void> {
   if (!isBrowser()) return;
 
@@ -56,7 +63,7 @@ export async function saveOfflineTx(tx: OfflineTx): Promise<void> {
   }
 }
 
-// 🔹 Devuelve TODAS las transacciones offline (se usa en el useEffect de loadOffline)
+// 🔹 Devuelve todas las transacciones offline
 export async function getOfflineTxs(): Promise<OfflineTx[]> {
   return readAll();
 }
@@ -84,23 +91,22 @@ export async function syncOfflineTxs(): Promise<OfflineTx[]> {
 
   if (error) {
     console.error("Error sincronizando transacciones offline:", error);
+    // NO borramos localStorage si falla
     return [];
   }
 
-  // Solo borramos si TODO salió bien
   if (isBrowser()) {
     window.localStorage.removeItem(STORAGE_KEY);
   }
 
-  // Normalizamos lo que regresó Supabase
+  // Normalizamos lo que regresa Supabase
   return (data ?? []).map((t: any) => ({
     id: t.id,
     date: String(t.date),
     type: t.type === "ingreso" ? "ingreso" : "gasto",
     category: String(t.category ?? "OTROS"),
-    amount: Number(t.amount),
+    amount: Number(t.amount) || 0,
     method: String(t.method ?? "EFECTIVO"),
     notes: t.notes ?? null,
   }));
 }
-

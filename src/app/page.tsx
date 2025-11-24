@@ -217,49 +217,61 @@ export default function Home() {
     }
   }, [month]);
 
-  // --------------------------------------------------
-  //   Cuando vuelva el internet, sincronizar cola offline
-  // --------------------------------------------------
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+// --------------------------------------------------
+//   Cuando vuelva el internet, sincronizar cola offline
+// --------------------------------------------------
+useEffect(() => {
+  if (typeof window === "undefined") return;
 
-    const handleOnline = async () => {
-      try {
-        const synced = await syncOfflineTxs(); // ahora regresa OfflineTx[]
+  const handleOnline = async () => {
+    try {
+      const synced = await syncOfflineTxs(); // OfflineTx[]
 
-        if (synced.length > 0) {
-          alert(
-            `Se sincronizaron ${synced.length} movimientos que estaban guardados sin conexión.`
-          );
+      if (!synced.length) return;
 
-          // Quitamos los localOnly y agregamos los nuevos que regresó Supabase
-          setTransactions((prev) => {
-            const withoutLocal = prev.filter((t) => !t.localOnly);
+      alert(
+        `Se sincronizaron ${synced.length} movimientos que estaban guardados sin conexión.`
+      );
 
-            const syncedAsTx: Tx[] = synced.map((t: any) => ({
-              id: t.id,
-              date: t.date,
-              type: t.type,
-              category: t.category,
-              amount: t.amount,
-              method: t.method,
-              notes: t.notes,
-              localOnly: false,
-            }));
+      setTransactions((prev) => {
+        // Creamos un mapa con los IDs que sí se sincronizaron
+        const syncedMap = new Map<string, any>();
+        synced.forEach((t: any) => {
+          syncedMap.set(t.id, t);
+        });
 
-            return [...syncedAsTx, ...withoutLocal];
-          });
-        }
-      } catch (err) {
-        console.error("Error al sincronizar movimientos offline", err);
-      }
-    };
+        // Dejamos en el estado:
+        // - Todos los que NO son localOnly
+        // - Y también los localOnly que aún NO se han sincronizado (no están en syncedMap)
+        const remaining: Tx[] = prev.filter(
+          (tx) => !(tx.localOnly && syncedMap.has(tx.id))
+        );
 
-    window.addEventListener("online", handleOnline);
-    return () => {
-      window.removeEventListener("online", handleOnline);
-    };
-  }, []);
+        // Convertimos lo que regresó Supabase al tipo Tx
+        const syncedAsTx: Tx[] = synced.map((t: any) => ({
+          id: t.id,
+          date: t.date,
+          type: t.type,
+          category: t.category,
+          amount: t.amount,
+          method: t.method,
+          notes: t.notes,
+          localOnly: false,
+        }));
+
+        // Ponemos primero los que ya están en Supabase, luego el resto
+        return [...syncedAsTx, ...remaining];
+      });
+    } catch (err) {
+      console.error("Error al sincronizar movimientos offline", err);
+    }
+  };
+
+  window.addEventListener("online", handleOnline);
+  return () => {
+    window.removeEventListener("online", handleOnline);
+  };
+}, []);
 
   // --------------------------------------------------
   //   Presupuesto mensual (localStorage)
