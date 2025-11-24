@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from "react";
+import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { saveOfflineTx, getOfflineTxs, syncOfflineTxs } from "@/lib/offline";
 
@@ -79,6 +80,15 @@ function csvEscape(value: string | number | null | undefined): string {
 }
 
 export default function Home() {
+  // 🔐 AUTH
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+
+  // 💰 APP
   const [transactions, setTransactions] = useState<Tx[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -108,6 +118,98 @@ export default function Home() {
 
   // 🔹 Saber si hay conexión
   const [isOnline, setIsOnline] = useState<boolean>(true);
+
+  // --------------------------------------------------
+  //   AUTH: cargar usuario actual y suscribirse a cambios
+  // --------------------------------------------------
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadUser() {
+      setAuthLoading(true);
+      setAuthError(null);
+      try {
+        const { data, error } = await supabase.auth.getUser();
+        if (error) {
+          console.error("Error obteniendo usuario actual", error);
+        }
+        if (!ignore) {
+          setUser(data?.user ?? null);
+        }
+      } finally {
+        if (!ignore) setAuthLoading(false);
+      }
+    }
+
+    loadUser();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      ignore = true;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: authEmail.trim(),
+        password: authPassword,
+      });
+      if (error) {
+        console.error("Error en login", error);
+        setAuthError(error.message);
+        return;
+      }
+      setAuthEmail("");
+      setAuthPassword("");
+    } catch (err: any) {
+      console.error(err);
+      setAuthError("No se pudo iniciar sesión.");
+    }
+  };
+
+  const handleSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    try {
+      const { error } = await supabase.auth.signUp({
+        email: authEmail.trim(),
+        password: authPassword,
+      });
+      if (error) {
+        console.error("Error en registro", error);
+        setAuthError(error.message);
+        return;
+      }
+      alert(
+        "Cuenta creada. Si Supabase tiene verificación por correo activa, revisa tu bandeja para confirmar."
+      );
+      setAuthMode("login");
+      setAuthPassword("");
+    } catch (err: any) {
+      console.error(err);
+      setAuthError("No se pudo crear la cuenta.");
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await supabase.auth.signOut();
+      setTransactions([]);
+      setBudget(null);
+      setBudgetInput("");
+    } catch (err) {
+      console.error("Error cerrando sesión", err);
+    }
+  };
 
   // --------------------------------------------------
   //   Cargar listas personalizadas de categorías/métodos
@@ -190,6 +292,12 @@ export default function Home() {
   //   Cargar transacciones del mes desde Supabase
   // --------------------------------------------------
   useEffect(() => {
+    if (!user) {
+      // si no hay usuario, limpiamos transacciones
+      setTransactions([]);
+      return;
+    }
+
     async function load() {
       setLoading(true);
       setError(null);
@@ -266,7 +374,7 @@ export default function Home() {
     if (typeof window !== "undefined") {
       load();
     }
-  }, [month]);
+  }, [month, user]);
 
   // --------------------------------------------------
   //   Cuando vuelva el internet, sincronizar cola offline
@@ -275,6 +383,8 @@ export default function Home() {
     if (typeof window === "undefined") return;
 
     const handleOnline = async () => {
+      if (!user) return; // no sincronizamos si no hay usuario
+
       try {
         const synced = await syncOfflineTxs(); // OfflineTx[]
 
@@ -316,7 +426,7 @@ export default function Home() {
     return () => {
       window.removeEventListener("online", handleOnline);
     };
-  }, []);
+  }, [user]);
 
   // --------------------------------------------------
   //   Presupuesto mensual (localStorage)
@@ -473,6 +583,11 @@ export default function Home() {
     e.preventDefault();
     setError(null);
 
+    if (!user) {
+      alert("Debes iniciar sesión para guardar movimientos.");
+      return;
+    }
+
     const amountNumber = Number(form.amount);
     if (!form.date) {
       alert("Selecciona una fecha.");
@@ -593,6 +708,10 @@ export default function Home() {
       alert("No puedes eliminar movimientos mientras estás sin conexión.");
       return;
     }
+    if (!user) {
+      alert("Debes iniciar sesión para eliminar movimientos.");
+      return;
+    }
 
     try {
       const { error } = await supabase
@@ -662,10 +781,131 @@ export default function Home() {
     });
   }, [month]);
 
+  // 🔁 ESTADOS DE RENDER: cargando auth / sin usuario / app normal
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex flex-col">
+        <header className="bg-sky-500 text-white py-2 text-center text-sm">
+          Finanzas Familiares
+        </header>
+        <main className="flex-1 flex items-center justify-center">
+          <div className="text-gray-600 text-sm">Cargando sesión...</div>
+        </main>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex flex-col">
+        <header className="bg-sky-500 text-white py-2 text-center text-sm">
+          Finanzas Familiares
+        </header>
+        <main className="flex-1 flex items-center justify-center px-4">
+          <div className="bg-white shadow rounded-lg p-6 w-full max-w-md space-y-4">
+            <h1 className="text-lg font-semibold text-center mb-2">
+              {authMode === "login"
+                ? "Inicia sesión"
+                : "Crea tu cuenta"}
+            </h1>
+
+            <form
+              onSubmit={authMode === "login" ? handleSignIn : handleSignUp}
+              className="space-y-3 text-sm"
+            >
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">
+                  Correo electrónico
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  className="border rounded px-3 py-2 w-full text-sm"
+                  placeholder="tucorreo@ejemplo.com"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">
+                  Contraseña
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  className="border rounded px-3 py-2 w-full text-sm"
+                  placeholder="Mínimo 6 caracteres"
+                />
+              </div>
+
+              {authError && (
+                <p className="text-xs text-red-600">{authError}</p>
+              )}
+
+              <button
+                type="submit"
+                className="w-full bg-sky-500 hover:bg-sky-600 text-white py-2 rounded text-sm font-medium"
+              >
+                {authMode === "login"
+                  ? "Entrar"
+                  : "Crear cuenta"}
+              </button>
+            </form>
+
+            <div className="text-center text-xs text-gray-600">
+              {authMode === "login" ? (
+                <>
+                  ¿No tienes cuenta?{" "}
+                  <button
+                    className="text-sky-600 underline"
+                    onClick={() => {
+                      setAuthMode("signup");
+                      setAuthError(null);
+                    }}
+                  >
+                    Crear una nueva
+                  </button>
+                </>
+              ) : (
+                <>
+                  ¿Ya tienes cuenta?{" "}
+                  <button
+                    className="text-sky-600 underline"
+                    onClick={() => {
+                      setAuthMode("login");
+                      setAuthError(null);
+                    }}
+                  >
+                    Inicia sesión
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // 🔓 Usuario logueado → app completa
   return (
     <div className="min-h-screen bg-gray-100">
-      <header className="bg-sky-500 text-white py-2 text-center text-sm">
+      <header className="bg-sky-500 text-white py-2 text-center text-sm relative">
         Finanzas Familiares
+        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 text-[11px]">
+          <span className="hidden sm:inline">
+            {user.email}
+          </span>
+          <button
+            onClick={handleSignOut}
+            className="border border-white/70 px-2 py-0.5 rounded hover:bg-white hover:text-sky-600 transition text-[11px]"
+          >
+            Cerrar sesión
+          </button>
+        </div>
       </header>
 
       <main className="max-w-5xl mx-auto bg-white shadow rounded-lg p-6 mt-4 mb-8">
