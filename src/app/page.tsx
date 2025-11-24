@@ -28,7 +28,9 @@ type FormState = {
   notes: string;
 };
 
-const CATEGORIES: { label: string; value: string }[] = [
+type Option = { label: string; value: string };
+
+const DEFAULT_CATEGORIES: Option[] = [
   { label: "Sueldo", value: "SUELDO" },
   { label: "Comisión", value: "COMISION" },
   { label: "Super / Despensa", value: "SUPER" },
@@ -40,7 +42,7 @@ const CATEGORIES: { label: string; value: string }[] = [
   { label: "Otros", value: "OTROS" },
 ];
 
-const METHODS: { label: string; value: string }[] = [
+const DEFAULT_METHODS: Option[] = [
   { label: "Efectivo", value: "EFECTIVO" },
   { label: "Transferencia", value: "TRANSFERENCIA" },
   { label: "BBVA crédito", value: "BBVA_CREDITO" },
@@ -48,6 +50,9 @@ const METHODS: { label: string; value: string }[] = [
   { label: "Tarjeta crédito otra", value: "CREDITO_OTRA" },
   { label: "Tarjeta débito otra", value: "DEBITO_OTRA" },
 ];
+
+const CUSTOM_CATEGORIES_KEY = "ff-custom-categories";
+const CUSTOM_METHODS_KEY = "ff-custom-methods";
 
 function getCurrentMonthKey(date = new Date()) {
   const y = date.getFullYear();
@@ -69,13 +74,18 @@ export default function Home() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [categories, setCategories] = useState<Option[]>(DEFAULT_CATEGORIES);
+  const [methods, setMethods] = useState<Option[]>(DEFAULT_METHODS);
+  const [newCategory, setNewCategory] = useState("");
+  const [newMethod, setNewMethod] = useState("");
+
   const [month, setMonth] = useState<string>(() => getCurrentMonthKey());
   const [form, setForm] = useState<FormState>({
     date: "",
     type: "gasto",
-    category: CATEGORIES[0]?.value ?? "",
+    category: DEFAULT_CATEGORIES[0]?.value ?? "",
     amount: "",
-    method: METHODS[0]?.value ?? "",
+    method: DEFAULT_METHODS[0]?.value ?? "",
     notes: "",
   });
 
@@ -88,6 +98,37 @@ export default function Home() {
 
   // 🔹 Saber si hay conexión
   const [isOnline, setIsOnline] = useState<boolean>(true);
+
+  // --------------------------------------------------
+  //   Cargar listas personalizadas de categorías/métodos
+  // --------------------------------------------------
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const catsRaw = localStorage.getItem(CUSTOM_CATEGORIES_KEY);
+      if (catsRaw) {
+        const parsed = JSON.parse(catsRaw);
+        if (Array.isArray(parsed) && parsed.length) {
+          setCategories(parsed);
+        }
+      }
+    } catch (err) {
+      console.error("Error cargando categorías personalizadas", err);
+    }
+
+    try {
+      const methodsRaw = localStorage.getItem(CUSTOM_METHODS_KEY);
+      if (methodsRaw) {
+        const parsed = JSON.parse(methodsRaw);
+        if (Array.isArray(parsed) && parsed.length) {
+          setMethods(parsed);
+        }
+      }
+    } catch (err) {
+      console.error("Error cargando métodos de pago personalizados", err);
+    }
+  }, []);
 
   // --------------------------------------------------
   //   Estado de conexión (online / offline)
@@ -217,61 +258,58 @@ export default function Home() {
     }
   }, [month]);
 
-// --------------------------------------------------
-//   Cuando vuelva el internet, sincronizar cola offline
-// --------------------------------------------------
-useEffect(() => {
-  if (typeof window === "undefined") return;
+  // --------------------------------------------------
+  //   Cuando vuelva el internet, sincronizar cola offline
+  // --------------------------------------------------
+  useEffect(() => {
+    if (typeof window === "undefined") return;
 
-  const handleOnline = async () => {
-    try {
-      const synced = await syncOfflineTxs(); // OfflineTx[]
+    const handleOnline = async () => {
+      try {
+        const synced = await syncOfflineTxs(); // OfflineTx[]
 
-      if (!synced.length) return;
+        if (!synced.length) return;
 
-      alert(
-        `Se sincronizaron ${synced.length} movimientos que estaban guardados sin conexión.`
-      );
-
-      setTransactions((prev) => {
-        // Creamos un mapa con los IDs que sí se sincronizaron
-        const syncedMap = new Map<string, any>();
-        synced.forEach((t: any) => {
-          syncedMap.set(t.id, t);
-        });
-
-        // Dejamos en el estado:
-        // - Todos los que NO son localOnly
-        // - Y también los localOnly que aún NO se han sincronizado (no están en syncedMap)
-        const remaining: Tx[] = prev.filter(
-          (tx) => !(tx.localOnly && syncedMap.has(tx.id))
+        alert(
+          `Se sincronizaron ${synced.length} movimientos que estaban guardados sin conexión.`
         );
 
-        // Convertimos lo que regresó Supabase al tipo Tx
-        const syncedAsTx: Tx[] = synced.map((t: any) => ({
-          id: t.id,
-          date: t.date,
-          type: t.type,
-          category: t.category,
-          amount: t.amount,
-          method: t.method,
-          notes: t.notes,
-          localOnly: false,
-        }));
+        setTransactions((prev) => {
+          const syncedMap = new Map<string, any>();
+          synced.forEach((t: any) => {
+            syncedMap.set(t.id, t);
+          });
 
-        // Ponemos primero los que ya están en Supabase, luego el resto
-        return [...syncedAsTx, ...remaining];
-      });
-    } catch (err) {
-      console.error("Error al sincronizar movimientos offline", err);
-    }
-  };
+          // Dejamos:
+          // - todos los que NO son localOnly
+          // - y los localOnly que aún NO se sincronizan
+          const remaining: Tx[] = prev.filter(
+            (tx) => !(tx.localOnly && syncedMap.has(tx.id))
+          );
 
-  window.addEventListener("online", handleOnline);
-  return () => {
-    window.removeEventListener("online", handleOnline);
-  };
-}, []);
+          const syncedAsTx: Tx[] = synced.map((t: any) => ({
+            id: t.id,
+            date: t.date,
+            type: t.type,
+            category: t.category,
+            amount: t.amount,
+            method: t.method,
+            notes: t.notes,
+            localOnly: false,
+          }));
+
+          return [...syncedAsTx, ...remaining];
+        });
+      } catch (err) {
+        console.error("Error al sincronizar movimientos offline", err);
+      }
+    };
+
+    window.addEventListener("online", handleOnline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+    };
+  }, []);
 
   // --------------------------------------------------
   //   Presupuesto mensual (localStorage)
@@ -321,6 +359,33 @@ useEffect(() => {
   const disponible = budget != null ? budget - totalGastos : null;
 
   // --------------------------------------------------
+  //   Agregado mensual por categoría (solo gastos)
+  // --------------------------------------------------
+  const gastosPorCategoria = useMemo(() => {
+    const map = new Map<string, number>();
+
+    for (const t of transactions) {
+      if (t.type !== "gasto") continue;
+      const key = t.category || "SIN_CATEGORIA";
+      map.set(key, (map.get(key) ?? 0) + t.amount);
+    }
+
+    const entries = Array.from(map.entries()).map(([category, total]) => ({
+      category,
+      total,
+    }));
+
+    entries.sort((a, b) => b.total - a.total);
+
+    const totalGastosMes = entries.reduce((sum, e) => sum + e.total, 0);
+
+    return entries.map((e) => ({
+      ...e,
+      percent: totalGastosMes ? (e.total * 100) / totalGastosMes : 0,
+    }));
+  }, [transactions]);
+
+  // --------------------------------------------------
   //   Cambio de mes
   // --------------------------------------------------
   const handleChangeMonth = (value: string) => {
@@ -338,9 +403,9 @@ useEffect(() => {
     setForm({
       date: "",
       type: "gasto",
-      category: CATEGORIES[0]?.value ?? "",
+      category: categories[0]?.value ?? "",
       amount: "",
-      method: METHODS[0]?.value ?? "",
+      method: methods[0]?.value ?? "",
       notes: "",
     });
     setEditingId(null);
@@ -492,6 +557,47 @@ useEffect(() => {
   };
 
   // --------------------------------------------------
+  //   Editor de categorías y métodos
+  // --------------------------------------------------
+  const handleAddCategory = () => {
+    const trimmed = newCategory.trim();
+    if (!trimmed) return;
+
+    const value = trimmed.toUpperCase().replace(/\s+/g, "_");
+    if (categories.some((c) => c.value === value)) {
+      alert("Esa categoría ya existe.");
+      return;
+    }
+
+    const updated = [...categories, { label: trimmed, value }];
+    setCategories(updated);
+    setNewCategory("");
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem(CUSTOM_CATEGORIES_KEY, JSON.stringify(updated));
+    }
+  };
+
+  const handleAddMethod = () => {
+    const trimmed = newMethod.trim();
+    if (!trimmed) return;
+
+    const value = trimmed.toUpperCase().replace(/\s+/g, "_");
+    if (methods.some((m) => m.value === value)) {
+      alert("Ese método de pago ya existe.");
+      return;
+    }
+
+    const updated = [...methods, { label: trimmed, value }];
+    setMethods(updated);
+    setNewMethod("");
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem(CUSTOM_METHODS_KEY, JSON.stringify(updated));
+    }
+  };
+
+  // --------------------------------------------------
   //   UI
   // --------------------------------------------------
   const monthLabel = useMemo(() => {
@@ -600,6 +706,42 @@ useEffect(() => {
           </div>
         </div>
 
+        {/* Visor mensual: gastos por categoría (gráfica tipo barras) */}
+        <section className="mb-8">
+          <h2 className="font-semibold mb-2 text-sm">
+            Visor mensual de gastos por categoría
+          </h2>
+          {gastosPorCategoria.length === 0 ? (
+            <p className="text-xs text-gray-500">
+              Aún no hay gastos registrados en este mes.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {gastosPorCategoria.map((item) => (
+                <div key={item.category} className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span>{item.category}</span>
+                    <span>
+                      {formatMoney(item.total)}{" "}
+                      <span className="text-gray-400">
+                        ({item.percent.toFixed(1)}%)
+                      </span>
+                    </span>
+                  </div>
+                  <div className="h-2 rounded bg-gray-200 overflow-hidden">
+                    <div
+                      className="h-2 rounded bg-sky-500"
+                      style={{
+                        width: `${Math.max(item.percent, 2)}%`, // siempre algo visible
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
         {/* Formulario */}
         <section className="mb-8">
           <h2 className="font-semibold mb-3">
@@ -658,7 +800,7 @@ useEffect(() => {
                   }
                   className="border rounded px-2 py-1 w-full"
                 >
-                  {CATEGORIES.map((c) => (
+                  {categories.map((c) => (
                     <option key={c.value} value={c.value}>
                       {c.label}
                     </option>
@@ -690,12 +832,59 @@ useEffect(() => {
                   }
                   className="border rounded px-2 py-1 w-full"
                 >
-                  {METHODS.map((m) => (
+                  {methods.map((m) => (
                     <option key={m.value} value={m.value}>
                       {m.label}
                     </option>
                   ))}
                 </select>
+              </div>
+            </div>
+
+            {/* Editor rápido de categorías y métodos */}
+            <div className="grid md:grid-cols-2 gap-3">
+              <div>
+                <div className="text-xs text-gray-500 mb-1">
+                  Agregar nueva categoría
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newCategory}
+                    onChange={(e) => setNewCategory(e.target.value)}
+                    className="border rounded px-2 py-1 text-xs w-full"
+                    placeholder="Ej. Vacaciones, Mascotas, etc."
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddCategory}
+                    className="bg-gray-800 text-white text-xs px-3 py-1 rounded"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs text-gray-500 mb-1">
+                  Agregar nuevo método de pago
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newMethod}
+                    onChange={(e) => setNewMethod(e.target.value)}
+                    className="border rounded px-2 py-1 text-xs w-full"
+                    placeholder="Ej. Tarjeta Amazon, Mercado Pago, etc."
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddMethod}
+                    className="bg-gray-800 text-white text-xs px-3 py-1 rounded"
+                  >
+                    +
+                  </button>
+                </div>
               </div>
             </div>
 
