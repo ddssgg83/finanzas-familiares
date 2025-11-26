@@ -1,26 +1,19 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import OfflineBanner from "@/components/OfflineBanner"; // 👈 Import correcto
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "Finanzas Familiares",
-  description: "Control familiar de ingresos y gastos.",
-  manifest: "/manifest.json",
+  description:
+    "Aplicación para controlar las finanzas familiares con soporte offline.",
+  manifest: "/manifest.webmanifest",
   icons: {
-    icon: "/icons/icon-192.png",
-    apple: "/icons/icon-192.png",
+    icon: "/icons/icon-192x192.png",
+    apple: "/icons/icon-192x192.png",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0ea5e9",
 };
 
 export default function RootLayout({
@@ -30,17 +23,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es">
-      <head>
-        {/* Manifest y configuración PWA */}
-        <link rel="manifest" href="/manifest.json?v=2" />
-        <meta name="theme-color" content="#0ea5e9" />
-        <link rel="icon" href="/icons/icon-192.png" sizes="192x192" />
-        <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-      </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        {children}
-        <OfflineBanner /> {/* 👈 Banner de aviso sin conexión */}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
