@@ -1,3 +1,4 @@
+// src/lib/offline.ts
 import { supabase } from "./supabase";
 
 export type TxType = "ingreso" | "gasto";
@@ -69,27 +70,27 @@ export async function getOfflineTxs(): Promise<OfflineTx[]> {
 }
 
 // 🔹 Manda todo a Supabase y limpia el storage.
-//     Agregamos el userId aquí para cumplir con las policies de RLS.
+//    IMPORTANTE: ahora regresa un ARREGLO con los movimientos insertados.
 export async function syncOfflineTxs(
   userId: string
 ): Promise<OfflineTx[]> {
   const list = await readAll();
   if (!list.length) return [];
 
+  const payload = list.map((t) => ({
+    id: t.id,
+    user_id: userId, // 👈 muy importante para las RLS
+    date: t.date,
+    type: t.type,
+    category: t.category,
+    amount: t.amount,
+    method: t.method,
+    notes: t.notes,
+  }));
+
   const { data, error } = await supabase
     .from("transactions")
-    .insert(
-      list.map((t) => ({
-        id: t.id,
-        date: t.date,
-        type: t.type,
-        category: t.category,
-        amount: t.amount,
-        method: t.method,
-        notes: t.notes,
-        user_id: userId, // 🔐 importante
-      }))
-    )
+    .insert(payload)
     .select("*");
 
   if (error) {
@@ -101,6 +102,14 @@ export async function syncOfflineTxs(
     window.localStorage.removeItem(STORAGE_KEY);
   }
 
-  // devolvemos lo que regresó Supabase (lo tratamos como OfflineTx para la UI)
-  return (data ?? []) as OfflineTx[];
+  // devolvemos los registros realmente insertados
+  return (data ?? []).map((t: any) => ({
+    id: t.id,
+    date: t.date,
+    type: t.type,
+    category: t.category,
+    amount: Number(t.amount),
+    method: t.method,
+    notes: t.notes ?? null,
+  }));
 }

@@ -392,56 +392,58 @@ export default function Home() {
   }, [month, user]);
 
   // --------------------------------------------------
-  //   Sincronizar cola offline al volver internet
-  // --------------------------------------------------
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+//   Sincronizar cola offline al volver internet
+// --------------------------------------------------
+useEffect(() => {
+  if (typeof window === "undefined") return;
 
-    const handleOnline = async () => {
-      if (!user) return;
+  const handleOnline = async () => {
+    if (!user) return;
 
-      try {
-        const synced = await syncOfflineTxs(user.id); // 🔐 pasamos user_id
+    try {
+      const synced = await syncOfflineTxs(user.id); // 👈 ahora le pasamos user.id
 
-        if (!synced.length) return;
+      if (!synced.length) return;
 
-        alert(
-          `Se sincronizaron ${synced.length} movimientos que estaban guardados sin conexión.`
+      alert(
+        `Se sincronizaron ${synced.length} movimientos que estaban guardados sin conexión.`
+      );
+
+      setTransactions((prev) => {
+        const syncedMap = new Map<string, boolean>();
+        synced.forEach((t) => {
+          syncedMap.set(t.id, true);
+        });
+
+        // Quitamos de la lista los que eran localOnly y ya se sincronizaron
+        const remaining: Tx[] = prev.filter(
+          (tx) => !(tx.localOnly && syncedMap.has(tx.id))
         );
 
-        setTransactions((prev) => {
-          const syncedMap = new Map<string, any>();
-          synced.forEach((t: any) => {
-            syncedMap.set(t.id, t);
-          });
+        // Y agregamos los mismos movimientos pero ya como definitivos
+        const syncedAsTx: Tx[] = synced.map((t) => ({
+          id: t.id,
+          date: t.date,
+          type: t.type,
+          category: t.category,
+          amount: t.amount,
+          method: t.method,
+          notes: t.notes,
+          localOnly: false,
+        }));
 
-          const remaining: Tx[] = prev.filter(
-            (tx) => !(tx.localOnly && syncedMap.has(tx.id))
-          );
+        return [...syncedAsTx, ...remaining];
+      });
+    } catch (err) {
+      console.error("Error al sincronizar movimientos offline", err);
+    }
+  };
 
-          const syncedAsTx: Tx[] = synced.map((t: any) => ({
-            id: t.id,
-            date: t.date,
-            type: t.type,
-            category: t.category,
-            amount: t.amount,
-            method: t.method,
-            notes: t.notes,
-            localOnly: false,
-          }));
-
-          return [...syncedAsTx, ...remaining];
-        });
-      } catch (err) {
-        console.error("Error al sincronizar movimientos offline", err);
-      }
-    };
-
-    window.addEventListener("online", handleOnline);
-    return () => {
-      window.removeEventListener("online", handleOnline);
-    };
-  }, [user]);
+  window.addEventListener("online", handleOnline);
+  return () => {
+    window.removeEventListener("online", handleOnline);
+  };
+}, [user]);
 
   // --------------------------------------------------
   //   Presupuesto mensual (localStorage)
