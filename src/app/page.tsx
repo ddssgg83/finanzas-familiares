@@ -60,7 +60,7 @@ const CUSTOM_METHODS_KEY = "ff-custom-methods";
 function getCurrentMonthKey(date = new Date()) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`; // 2025-11
+  return `${y}-${m}`;
 }
 
 function formatMoney(num: number) {
@@ -81,7 +81,6 @@ function csvEscape(value: string | number | null | undefined): string {
 }
 
 export default function Home() {
-  // 🔐 AUTH
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -89,7 +88,6 @@ export default function Home() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
 
-  // 💰 APP
   const [transactions, setTransactions] = useState<Tx[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -110,25 +108,18 @@ export default function Home() {
     notes: "",
   });
 
-  // 🔹 Estado para editar
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // 🔹 Presupuesto del mes
   const [budgetInput, setBudgetInput] = useState("");
   const [budget, setBudget] = useState<number | null>(null);
 
-  // 🔹 Saber si hay conexión
   const [isOnline, setIsOnline] = useState<boolean>(true);
 
-  // 🔹 Opciones de exportación
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [exportType, setExportType] = useState<ExportType>("todos");
   const [exportIncludeCategorySummary, setExportIncludeCategorySummary] =
     useState(true);
 
-  // --------------------------------------------------
-  //   AUTH: usuario actual + listener
-  // --------------------------------------------------
   useEffect(() => {
     let ignore = false;
 
@@ -137,15 +128,12 @@ export default function Home() {
       setAuthError(null);
       try {
         const { data, error } = await supabase.auth.getUser();
-
-        // Este error "Auth session missing" es normal cuando aún no hay sesión.
         if (
           error &&
           (error as any).name !== "AuthSessionMissingError"
         ) {
           console.error("Error obteniendo usuario actual", error);
         }
-
         if (!ignore) {
           setUser(data?.user ?? null);
         }
@@ -183,8 +171,7 @@ export default function Home() {
       }
       setAuthEmail("");
       setAuthPassword("");
-    } catch (err: any) {
-      console.error(err);
+    } catch {
       setAuthError("No se pudo iniciar sesión.");
     }
   };
@@ -198,17 +185,13 @@ export default function Home() {
         password: authPassword,
       });
       if (error) {
-        console.error("Error en registro", error);
         setAuthError(error.message);
         return;
       }
-      alert(
-        "Cuenta creada. Si tienes verificación por correo activada en Supabase, revisa tu bandeja para confirmar."
-      );
+      alert("Cuenta creada.");
       setAuthMode("login");
       setAuthPassword("");
-    } catch (err: any) {
-      console.error(err);
+    } catch {
       setAuthError("No se pudo crear la cuenta.");
     }
   };
@@ -220,13 +203,10 @@ export default function Home() {
       setBudget(null);
       setBudgetInput("");
     } catch (err) {
-      console.error("Error cerrando sesión", err);
+      console.error(err);
     }
   };
 
-  // --------------------------------------------------
-  //   Cargar listas personalizadas de categorías/métodos
-  // --------------------------------------------------
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -238,9 +218,7 @@ export default function Home() {
           setCategories(parsed);
         }
       }
-    } catch (err) {
-      console.error("Error cargando categorías personalizadas", err);
-    }
+    } catch {}
 
     try {
       const methodsRaw = localStorage.getItem(CUSTOM_METHODS_KEY);
@@ -250,14 +228,9 @@ export default function Home() {
           setMethods(parsed);
         }
       }
-    } catch (err) {
-      console.error("Error cargando métodos de pago personalizados", err);
-    }
+    } catch {}
   }, []);
 
-  // --------------------------------------------------
-  //   Estado de conexión (online / offline)
-  // --------------------------------------------------
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -275,9 +248,6 @@ export default function Home() {
     };
   }, []);
 
-  // --------------------------------------------------
-  //   Cargar movimientos guardados offline
-  // --------------------------------------------------
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -286,24 +256,16 @@ export default function Home() {
         const offline = await getOfflineTxs();
         if (offline.length) {
           setTransactions((prev) => [
-            ...offline.map((t: any) => ({
-              ...t,
-              localOnly: true,
-            })),
+            ...offline.map((t) => ({ ...t, localOnly: true })),
             ...prev,
           ]);
         }
-      } catch (err) {
-        console.error("Error cargando movimientos offline", err);
-      }
+      } catch {}
     }
 
     loadOffline();
   }, []);
 
-  // --------------------------------------------------
-  //   Cargar transacciones del mes desde Supabase
-  // --------------------------------------------------
   useEffect(() => {
     if (!user) {
       setTransactions([]);
@@ -331,7 +293,7 @@ export default function Home() {
         const { data, error } = await supabase
           .from("transactions")
           .select("*")
-          .eq("user_id", userId) // 🔐 sólo las del usuario logueado
+          .eq("user_id", userId)
           .gte("date", from)
           .lte("date", to)
           .order("date", { ascending: false });
@@ -356,7 +318,7 @@ export default function Home() {
             JSON.stringify(data ?? [])
           );
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error(err);
         setError("No se pudieron cargar los movimientos.");
 
@@ -376,9 +338,7 @@ export default function Home() {
                   notes: t.notes,
                 }))
               );
-            } catch {
-              // ignoramos error de parseo
-            }
+            } catch {}
           }
         }
       } finally {
@@ -392,61 +352,60 @@ export default function Home() {
   }, [month, user]);
 
   // --------------------------------------------------
-//   Sincronizar cola offline al volver internet
-// --------------------------------------------------
-useEffect(() => {
-  if (typeof window === "undefined") return;
-
-  const handleOnline = async () => {
+  //   NUEVO SISTEMA DE SINCRONIZACIÓN (NO BORRA NADA)
+  // --------------------------------------------------
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     if (!user) return;
 
-    try {
-      const synced = await syncOfflineTxs(user.id); // 👈 ahora le pasamos user.id
+    let cancelled = false;
 
-      if (!synced.length) return;
+    const syncAndMark = async () => {
+      if (cancelled) return;
 
-      alert(
-        `Se sincronizaron ${synced.length} movimientos que estaban guardados sin conexión.`
-      );
+      try {
+        const synced = await syncOfflineTxs(user.id);
 
-      setTransactions((prev) => {
-        const syncedMap = new Map<string, boolean>();
-        synced.forEach((t) => {
-          syncedMap.set(t.id, true);
-        });
+        if (!synced.length) return;
 
-        // Quitamos de la lista los que eran localOnly y ya se sincronizaron
-        const remaining: Tx[] = prev.filter(
-          (tx) => !(tx.localOnly && syncedMap.has(tx.id))
+        alert(
+          `Se sincronizaron ${synced.length} movimientos que estaban guardados sin conexión.`
         );
 
-        // Y agregamos los mismos movimientos pero ya como definitivos
-        const syncedAsTx: Tx[] = synced.map((t) => ({
-          id: t.id,
-          date: t.date,
-          type: t.type,
-          category: t.category,
-          amount: t.amount,
-          method: t.method,
-          notes: t.notes,
-          localOnly: false,
-        }));
+        const syncedIds = new Set(synced.map((t) => t.id));
 
-        return [...syncedAsTx, ...remaining];
-      });
-    } catch (err) {
-      console.error("Error al sincronizar movimientos offline", err);
+        // 🔥 NO BORRAMOS NADA — SOLO ACTUALIZAMOS localOnly → false
+        setTransactions((prev) =>
+          prev.map((tx) =>
+            tx.localOnly && syncedIds.has(tx.id)
+              ? { ...tx, localOnly: false }
+              : tx
+          )
+        );
+      } catch (err) {
+        console.error("Error al sincronizar movimientos offline", err);
+      }
+    };
+
+    // Si ya está online al abrir
+    if (navigator.onLine) {
+      syncAndMark();
     }
-  };
 
-  window.addEventListener("online", handleOnline);
-  return () => {
-    window.removeEventListener("online", handleOnline);
-  };
-}, [user]);
+    const handleOnline = () => {
+      syncAndMark();
+    };
+
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [user]);
 
   // --------------------------------------------------
-  //   Presupuesto mensual (localStorage)
+  //   Presupuesto mensual
   // --------------------------------------------------
   useEffect(() => {
     const key = `ff-budget-${month}`;
@@ -493,7 +452,7 @@ useEffect(() => {
   const disponible = budget != null ? budget - totalGastos : null;
 
   // --------------------------------------------------
-  //   Agregado mensual por categoría (solo gastos)
+  //   Agregado mensual por categoría
   // --------------------------------------------------
   const gastosPorCategoria = useMemo(() => {
     const map = new Map<string, number>();
@@ -520,7 +479,7 @@ useEffect(() => {
   }, [transactions]);
 
   // --------------------------------------------------
-  //   Exportar CSV del mes (con opciones)
+  //   Export CSV
   // --------------------------------------------------
   const handleExportCsv = () => {
     let data = transactions;
@@ -531,7 +490,7 @@ useEffect(() => {
     }
 
     if (!data.length) {
-      alert("No hay movimientos en este mes con ese filtro para exportar.");
+      alert("No hay movimientos para exportar.");
       return;
     }
 
@@ -602,16 +561,15 @@ useEffect(() => {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
-
   // --------------------------------------------------
-  //   Cambio de mes
+  //   Cambiar mes
   // --------------------------------------------------
   const handleChangeMonth = (value: string) => {
     setMonth(value);
   };
 
   // --------------------------------------------------
-  //   Manejo formulario
+  //   Manejo del formulario
   // --------------------------------------------------
   const handleChangeForm = (field: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -663,7 +621,7 @@ useEffect(() => {
     setSaving(true);
 
     try {
-      // 🔴 SIN CONEXIÓN → sólo local
+      // 🔴 SIN CONEXIÓN → offline
       if (typeof navigator !== "undefined" && !navigator.onLine) {
         const id = crypto.randomUUID();
 
@@ -690,7 +648,7 @@ useEffect(() => {
         }
 
         alert(
-          "Estás sin conexión. El movimiento se guardó sólo en este dispositivo y se enviará cuando vuelva el internet."
+          "Estás sin conexión. El movimiento se guardó en este dispositivo y se enviará cuando vuelva internet."
         );
         resetForm();
         return;
@@ -713,7 +671,7 @@ useEffect(() => {
       } else {
         const { data, error } = await supabase
           .from("transactions")
-          .insert({ ...payload, user_id: user.id }) // 🔐 importante para RLS
+          .insert({ ...payload, user_id: user.id })
           .select("*")
           .single();
 
@@ -733,7 +691,7 @@ useEffect(() => {
       }
 
       resetForm();
-    } catch (err: any) {
+    } catch (err) {
       console.error("Error en handleSubmit:", err);
       setError("No se pudo guardar el movimiento.");
       alert("No se pudo guardar el movimiento.");
@@ -778,14 +736,14 @@ useEffect(() => {
       if (error) throw error;
 
       setTransactions((prev) => prev.filter((t) => t.id !== tx.id));
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
       alert("No se pudo eliminar el movimiento.");
     }
   };
 
   // --------------------------------------------------
-  //   Editor de categorías y métodos
+  //   Agregar categorías y métodos
   // --------------------------------------------------
   const handleAddCategory = () => {
     const trimmed = newCategory.trim();
@@ -812,7 +770,7 @@ useEffect(() => {
 
     const value = trimmed.toUpperCase().replace(/\s+/g, "_");
     if (methods.some((m) => m.value === value)) {
-      alert("Ese método de pago ya existe.");
+      alert("Ese método ya existe.");
       return;
     }
 
@@ -826,7 +784,7 @@ useEffect(() => {
   };
 
   // --------------------------------------------------
-  //   UI helpers
+  //   Etiqueta del mes
   // --------------------------------------------------
   const monthLabel = useMemo(() => {
     const [y, m] = month.split("-");
@@ -862,9 +820,7 @@ useEffect(() => {
         <main className="flex-1 flex items-center justify-center px-4">
           <div className="bg-white shadow rounded-lg p-6 w-full max-w-md space-y-4">
             <h1 className="text-lg font-semibold text-center mb-2">
-              {authMode === "login"
-                ? "Inicia sesión"
-                : "Crea tu cuenta"}
+              {authMode === "login" ? "Inicia sesión" : "Crea tu cuenta"}
             </h1>
 
             <form
@@ -907,9 +863,7 @@ useEffect(() => {
                 type="submit"
                 className="w-full bg-sky-500 hover:bg-sky-600 text-white py-2 rounded text-sm font-medium"
               >
-                {authMode === "login"
-                  ? "Entrar"
-                  : "Crear cuenta"}
+                {authMode === "login" ? "Entrar" : "Crear cuenta"}
               </button>
             </form>
 
@@ -956,9 +910,7 @@ useEffect(() => {
       <header className="bg-sky-500 text-white py-2 text-center text-sm relative">
         Finanzas Familiares
         <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 text-[11px]">
-          <span className="hidden sm:inline">
-            {user.email}
-          </span>
+          <span className="hidden sm:inline">{user.email}</span>
           <button
             onClick={handleSignOut}
             className="border border-white/70 px-2 py-0.5 rounded hover:bg-white hover:text-sky-600 transition text-[11px]"
@@ -1073,11 +1025,11 @@ useEffect(() => {
                 isOnline ? "bg-green-500" : "bg-yellow-500"
               }`}
             />
-            {isOnline ? "Conectado" : "Sin conexión (modo sólo local)"}
+            {isOnline ? "Conectado" : "Sin conexión (modo local)"}
           </div>
         </div>
 
-        {/* Tarjetas resumen + presupuesto */}
+        {/* Tarjetas resumen */}
         <div className="grid md:grid-cols-4 gap-4 mb-6">
           <div className="border rounded-lg p-4 bg-gray-50">
             <div className="text-xs text-gray-500">Ingresos del mes</div>
@@ -1107,7 +1059,7 @@ useEffect(() => {
           </div>
 
           <div className="border rounded-lg p-4 bg-gray-50">
-            <div className="text-xs text-gray-500">Presupuesto de gastos</div>
+            <div className="text-xs text-gray-500">Presupuesto del mes</div>
             <div className="flex items-baseline gap-2 mb-2">
               <input
                 type="number"
@@ -1138,21 +1090,20 @@ useEffect(() => {
           </div>
         </div>
 
-        {/* Visor mensual: gastos por categoría */}
+        {/* Visor mensual por categoría */}
         <section className="mb-8">
           <h2 className="font-semibold mb-2 text-sm">
             Visor mensual de gastos por categoría
           </h2>
           {gastosPorCategoria.length === 0 ? (
             <p className="text-xs text-gray-500">
-              Aún no hay gastos registrados en este mes.
+              Aún no hay gastos registrados.
             </p>
           ) : (
             <div className="space-y-2">
               {gastosPorCategoria.map((item) => (
                 <div key={item.category} className="space-y-1">
                   <div className="flex justify-between text-xs">
-                    <span>{item.category}</span>
                     <span>
                       {formatMoney(item.total)}{" "}
                       <span className="text-gray-400">
@@ -1163,9 +1114,7 @@ useEffect(() => {
                   <div className="h-2 rounded bg-gray-200 overflow-hidden">
                     <div
                       className="h-2 rounded bg-sky-500"
-                      style={{
-                        width: `${Math.max(item.percent, 2)}%`,
-                      }}
+                      style={{ width: `${Math.max(item.percent, 2)}%` }}
                     />
                   </div>
                 </div>
@@ -1174,7 +1123,7 @@ useEffect(() => {
           )}
         </section>
 
-        {/* Formulario */}
+        {/* Formulario de agregar movimiento */}
         <section className="mb-8">
           <h2 className="font-semibold mb-3">
             {editingId ? "Editar movimiento" : "Agregar movimiento"}
@@ -1254,9 +1203,7 @@ useEffect(() => {
 
               {/* Método */}
               <div>
-                <div className="text-xs text-gray-500 mb-1">
-                  Método de pago
-                </div>
+                <div className="text-xs text-gray-500 mb-1">Método</div>
                 <select
                   value={form.method}
                   onChange={(e) =>
@@ -1273,7 +1220,7 @@ useEffect(() => {
               </div>
             </div>
 
-            {/* Editor rápido de categorías y métodos */}
+            {/* Nueva categoría y método */}
             <div className="grid md:grid-cols-2 gap-3">
               <div>
                 <div className="text-xs text-gray-500 mb-1">
@@ -1285,7 +1232,7 @@ useEffect(() => {
                     value={newCategory}
                     onChange={(e) => setNewCategory(e.target.value)}
                     className="border rounded px-2 py-1 text-xs w-full"
-                    placeholder="Ej. Vacaciones, Mascotas, etc."
+                    placeholder="Ej. Vacaciones"
                   />
                   <button
                     type="button"
@@ -1299,7 +1246,7 @@ useEffect(() => {
 
               <div>
                 <div className="text-xs text-gray-500 mb-1">
-                  Agregar nuevo método de pago
+                  Agregar nuevo método
                 </div>
                 <div className="flex gap-2">
                   <input
@@ -1307,7 +1254,7 @@ useEffect(() => {
                     value={newMethod}
                     onChange={(e) => setNewMethod(e.target.value)}
                     className="border rounded px-2 py-1 text-xs w-full"
-                    placeholder="Ej. Tarjeta Amazon, Mercado Pago, etc."
+                    placeholder="Ej. Tarjeta Amazon"
                   />
                   <button
                     type="button"
@@ -1322,16 +1269,12 @@ useEffect(() => {
 
             {/* Notas */}
             <div>
-              <div className="text-xs text-gray-500 mb-1">
-                Notas (opcional)
-              </div>
+              <div className="text-xs text-gray-500 mb-1">Notas</div>
               <textarea
                 value={form.notes}
-                onChange={(e) =>
-                  handleChangeForm("notes", e.target.value)
-                }
+                onChange={(e) => handleChangeForm("notes", e.target.value)}
                 className="border rounded px-3 py-2 w-full"
-                placeholder="Descripción, quién pagó, folio, etc."
+                placeholder="Descripción, quién pagó, etc."
               />
             </div>
 
@@ -1348,6 +1291,7 @@ useEffect(() => {
                   ? "Guardar cambios"
                   : "Agregar"}
               </button>
+
               {editingId && (
                 <button
                   type="button"
@@ -1359,9 +1303,7 @@ useEffect(() => {
               )}
             </div>
 
-            {error && (
-              <p className="text-xs text-red-600 mt-1">{error}</p>
-            )}
+            {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
           </form>
         </section>
 
@@ -1381,38 +1323,33 @@ useEffect(() => {
                   <th className="border-b px-2 py-2 text-right">Monto</th>
                   <th className="border-b px-2 py-2">Método</th>
                   <th className="border-b px-2 py-2">Notas</th>
-                  <th className="border-b px-2 py-2 text-center">
-                    Acciones
-                  </th>
+                  <th className="border-b px-2 py-2 text-center">Acciones</th>
                 </tr>
               </thead>
+
               <tbody>
                 {loading && (
                   <tr>
-                    <td
-                      colSpan={7}
-                      className="text-center py-4 text-gray-500"
-                    >
+                    <td colSpan={7} className="text-center py-4 text-gray-500">
                       Cargando movimientos...
                     </td>
                   </tr>
                 )}
+
                 {!loading && transactions.length === 0 && (
                   <tr>
-                    <td
-                      colSpan={7}
-                      className="text-center py-4 text-gray-500"
-                    >
-                      Sin movimientos en este mes.
+                    <td colSpan={7} className="text-center py-4 text-gray-500">
+                      Sin movimientos registrados.
                     </td>
                   </tr>
                 )}
+
                 {!loading &&
                   transactions.map((t) => (
                     <tr
                       key={t.id}
                       className={`odd:bg-white even:bg-gray-50 ${
-                        t.localOnly ? "opacity-70" : ""
+                        t.localOnly ? "opacity-60" : ""
                       }`}
                     >
                       <td className="border-t px-2 py-1">
@@ -1421,9 +1358,7 @@ useEffect(() => {
                       <td className="border-t px-2 py-1">
                         {t.type === "ingreso" ? "Ingreso" : "Gasto"}
                       </td>
-                      <td className="border-t px-2 py-1">
-                        {t.category}
-                      </td>
+                      <td className="border-t px-2 py-1">{t.category}</td>
                       <td className="border-t px-2 py-1 text-right">
                         {formatMoney(t.amount)}
                       </td>
