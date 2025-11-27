@@ -73,12 +73,11 @@ function formatMoney(num: number) {
 
 // Evita el problema de zonas horarias al mostrar fechas
 function formatDateDisplay(ymd: string) {
-  const s = (ymd ?? "").slice(0, 10); // 👈 nos quedamos solo con YYYY-MM-DD
+  const s = (ymd ?? "").slice(0, 10); // nos quedamos solo con YYYY-MM-DD
   const [y, m, d] = s.split("-");
   if (!y || !m || !d) return ymd;
   return `${d}/${m}/${y}`; // dd/mm/yyyy
 }
-
 
 function csvEscape(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return "";
@@ -90,6 +89,7 @@ function csvEscape(value: string | number | null | undefined): string {
 }
 
 export default function Home() {
+  // 🔐 AUTH
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -97,6 +97,7 @@ export default function Home() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
 
+  // 💰 DATOS
   const [transactions, setTransactions] = useState<Tx[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -119,16 +120,30 @@ export default function Home() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // 💸 Presupuesto general
   const [budgetInput, setBudgetInput] = useState("");
   const [budget, setBudget] = useState<number | null>(null);
 
+  // 🌐 Estado conexión
   const [isOnline, setIsOnline] = useState<boolean>(true);
 
+  // 📤 Export
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [exportType, setExportType] = useState<ExportType>("todos");
   const [exportIncludeCategorySummary, setExportIncludeCategorySummary] =
     useState(true);
 
+  // 🔎 Filtros para la tabla
+  const [filterType, setFilterType] = useState<"todos" | "ingreso" | "gasto">(
+    "todos"
+  );
+  const [filterCategory, setFilterCategory] = useState<string>("TODAS");
+  const [filterMethod, setFilterMethod] = useState<string>("TODOS");
+  const [searchText, setSearchText] = useState<string>("");
+
+  // --------------------------------------------------
+  //   AUTH: usuario actual + listener
+  // --------------------------------------------------
   useEffect(() => {
     let ignore = false;
 
@@ -216,6 +231,9 @@ export default function Home() {
     }
   };
 
+  // --------------------------------------------------
+  //   Cargar listas personalizadas de categorías/métodos
+  // --------------------------------------------------
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -240,6 +258,9 @@ export default function Home() {
     } catch {}
   }, []);
 
+  // --------------------------------------------------
+  //   Estado de conexión (online / offline)
+  // --------------------------------------------------
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -257,6 +278,9 @@ export default function Home() {
     };
   }, []);
 
+  // --------------------------------------------------
+  //   Cargar movimientos guardados offline
+  // --------------------------------------------------
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -312,10 +336,9 @@ export default function Home() {
 
         if (error) throw error;
 
-        // 👇 normalizamos la fecha a YYYY-MM-DD
         const normalized = (data ?? []).map((t: any) => ({
           id: t.id,
-          date: String(t.date).slice(0, 10),
+          date: String(t.date).slice(0, 10), // YYYY-MM-DD
           type: t.type,
           category: t.category,
           amount: Number(t.amount),
@@ -340,7 +363,6 @@ export default function Home() {
           if (cache) {
             try {
               const parsed = JSON.parse(cache);
-
               const normalized = (parsed ?? []).map((t: any) => ({
                 id: t.id,
                 date: String(t.date).slice(0, 10),
@@ -350,7 +372,6 @@ export default function Home() {
                 method: t.method,
                 notes: t.notes,
               }));
-
               setTransactions(normalized);
             } catch {}
           }
@@ -388,7 +409,6 @@ export default function Home() {
 
         const syncedIds = new Set(synced.map((t) => t.id));
 
-        // 🔥 NO BORRAMOS NADA — SOLO ACTUALIZAMOS localOnly → false
         setTransactions((prev) =>
           prev.map((tx) =>
             tx.localOnly && syncedIds.has(tx.id)
@@ -401,7 +421,6 @@ export default function Home() {
       }
     };
 
-    // Si ya está online al abrir
     if (navigator.onLine) {
       syncAndMark();
     }
@@ -450,7 +469,7 @@ export default function Home() {
   };
 
   // --------------------------------------------------
-  //   Totales
+  //   Totales globales del mes
   // --------------------------------------------------
   const { totalIngresos, totalGastos } = useMemo(() => {
     let ingresos = 0;
@@ -466,7 +485,7 @@ export default function Home() {
   const disponible = budget != null ? budget - totalGastos : null;
 
   // --------------------------------------------------
-  //   Agregado mensual por categoría
+  //   Agregado mensual por categoría (sólo gastos)
   // --------------------------------------------------
   const gastosPorCategoria = useMemo(() => {
     const map = new Map<string, number>();
@@ -492,8 +511,50 @@ export default function Home() {
     }));
   }, [transactions]);
 
+  const top3Categorias = useMemo(() => {
+    return gastosPorCategoria.slice(0, 3);
+  }, [gastosPorCategoria]);
+
   // --------------------------------------------------
-  //   Export CSV
+  //   Filtros de la tabla
+  // --------------------------------------------------
+  const filteredTransactions = useMemo(() => {
+    let list = [...transactions];
+
+    if (filterType !== "todos") {
+      list = list.filter((t) => t.type === filterType);
+    }
+
+    if (filterCategory !== "TODAS") {
+      list = list.filter((t) => t.category === filterCategory);
+    }
+
+    if (filterMethod !== "TODOS") {
+      list = list.filter((t) => t.method === filterMethod);
+    }
+
+    const search = searchText.trim().toLowerCase();
+    if (search) {
+      list = list.filter((t) => {
+        const haystack = [
+          t.category,
+          t.method,
+          t.notes ?? "",
+          t.type,
+          formatDateDisplay(t.date),
+          String(t.amount),
+        ]
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(search);
+      });
+    }
+
+    return list;
+  }, [transactions, filterType, filterCategory, filterMethod, searchText]);
+
+  // --------------------------------------------------
+  //   Export CSV (mensual, con opciones)
   // --------------------------------------------------
   const handleExportCsv = () => {
     let data = transactions;
@@ -519,7 +580,7 @@ export default function Home() {
     ];
 
     const rows = data.map((t) => [
-      t.date, // 👈 sin new Date(), así evitamos que se recorra un día
+      t.date, // usamos la fecha tal cual
       t.type,
       t.category,
       t.amount,
@@ -683,7 +744,7 @@ export default function Home() {
             t.id === editingId ? { ...t, ...payload } : t
           )
         );
-            } else {
+      } else {
         const { data, error } = await supabase
           .from("transactions")
           .insert({ ...payload, user_id: user.id })
@@ -693,8 +754,8 @@ export default function Home() {
         if (error) throw error;
 
         const newTx: Tx = {
-          id: data.id,          // el id sí viene de Supabase
-          date: payload.date,   // 👈 usamos la fecha tal cual del formulario
+          id: data.id,          // id desde Supabase
+          date: payload.date,   // usamos la fecha exacta del formulario
           type: payload.type,
           category: payload.category,
           amount: payload.amount,
@@ -1044,68 +1105,139 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Tarjetas resumen */}
-        <div className="grid md:grid-cols-4 gap-4 mb-6">
-          <div className="border rounded-lg p-4 bg-gray-50">
-            <div className="text-xs text-gray-500">Ingresos del mes</div>
-            <div className="text-2xl font-semibold text-green-600">
-              {formatMoney(totalIngresos)}
+        {/* Dashboard resumen */}
+        <section className="mb-6">
+          <h2 className="font-semibold mb-3 text-sm">Resumen del mes</h2>
+          <div className="grid md:grid-cols-4 gap-4 mb-4">
+            <div className="border rounded-lg p-4 bg-gray-50">
+              <div className="text-xs text-gray-500">Ingresos del mes</div>
+              <div className="text-2xl font-semibold text-green-600">
+                {formatMoney(totalIngresos)}
+              </div>
             </div>
-          </div>
 
-          <div className="border rounded-lg p-4 bg-gray-50">
-            <div className="text-xs text-gray-500">Gastos del mes</div>
-            <div className="text-2xl font-semibold text-red-600">
-              {formatMoney(totalGastos)}
+            <div className="border rounded-lg p-4 bg-gray-50">
+              <div className="text-xs text-gray-500">Gastos del mes</div>
+              <div className="text-2xl font-semibold text-red-600">
+                {formatMoney(totalGastos)}
+              </div>
             </div>
-          </div>
 
-          <div className="border rounded-lg p-4 bg-gray-50">
-            <div className="text-xs text-gray-500">
-              Flujo (Ingresos - Gastos)
-            </div>
-            <div
-              className={`text-2xl font-semibold ${
-                flujo >= 0 ? "text-green-600" : "text-red-600"
-              }`}
-            >
-              {formatMoney(flujo)}
-            </div>
-          </div>
-
-          <div className="border rounded-lg p-4 bg-gray-50">
-            <div className="text-xs text-gray-500">Presupuesto del mes</div>
-            <div className="flex items-baseline gap-2 mb-2">
-              <input
-                type="number"
-                value={budgetInput}
-                onChange={(e) => setBudgetInput(e.target.value)}
-                className="border rounded px-2 py-1 text-sm w-full"
-                placeholder="Ej. 20000"
-              />
-              <button
-                onClick={handleSaveBudget}
-                className="bg-sky-500 text-white text-xs px-3 py-1 rounded hover:bg-sky-600"
-              >
-                Guardar
-              </button>
-            </div>
-            {budget != null && (
+            <div className="border rounded-lg p-4 bg-gray-50">
+              <div className="text-xs text-gray-500">
+                Flujo (Ingresos - Gastos)
+              </div>
               <div
-                className={`text-xs ${
-                  disponible != null && disponible < 0
-                    ? "text-red-600"
-                    : "text-green-700"
+                className={`text-2xl font-semibold ${
+                  flujo >= 0 ? "text-green-600" : "text-red-600"
                 }`}
               >
-                Disponible:{" "}
-                {disponible != null ? formatMoney(disponible) : "-"}
+                {formatMoney(flujo)}
               </div>
-            )}
-          </div>
-        </div>
+            </div>
 
-        {/* Visor mensual por categoría */}
+            <div className="border rounded-lg p-4 bg-gray-50">
+              <div className="text-xs text-gray-500">Presupuesto del mes</div>
+              <div className="flex items-baseline gap-2 mb-2">
+                <input
+                  type="number"
+                  value={budgetInput}
+                  onChange={(e) => setBudgetInput(e.target.value)}
+                  className="border rounded px-2 py-1 text-sm w-full"
+                  placeholder="Ej. 20000"
+                />
+                <button
+                  onClick={handleSaveBudget}
+                  className="bg-sky-500 text-white text-xs px-3 py-1 rounded hover:bg-sky-600"
+                >
+                  Guardar
+                </button>
+              </div>
+              {budget != null && (
+                <div
+                  className={`text-xs ${
+                    disponible != null && disponible < 0
+                      ? "text-red-600"
+                      : "text-green-700"
+                  }`}
+                >
+                  Disponible:{" "}
+                  {disponible != null ? formatMoney(disponible) : "-"}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Top 3 categorías de gasto */}
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="border rounded-lg p-4 bg-gray-50">
+              <div className="text-xs text-gray-500 mb-2">
+                Top 3 categorías de gasto
+              </div>
+              {top3Categorias.length === 0 ? (
+                <p className="text-xs text-gray-500">
+                  Aún no hay gastos registrados.
+                </p>
+              ) : (
+                <ul className="text-xs space-y-1">
+                  {top3Categorias.map((item, idx) => (
+                    <li
+                      key={item.category}
+                      className="flex justify-between items-center"
+                    >
+                      <span>
+                        <span className="font-semibold mr-1">
+                          #{idx + 1}
+                        </span>
+                        {item.category}
+                      </span>
+                      <span>
+                        {formatMoney(item.total)}{" "}
+                        <span className="text-gray-400">
+                          ({item.percent.toFixed(1)}%)
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="border rounded-lg p-4 bg-gray-50">
+              <div className="text-xs text-gray-500 mb-2">
+                Estado general
+              </div>
+              <ul className="text-xs space-y-1">
+                <li>
+                  Movimientos totales en el mes:{" "}
+                  <span className="font-semibold">
+                    {transactions.length}
+                  </span>
+                </li>
+                <li>
+                  Ingresos:{" "}
+                  <span className="font-semibold">
+                    {
+                      transactions.filter((t) => t.type === "ingreso")
+                        .length
+                    }
+                  </span>
+                </li>
+                <li>
+                  Gastos:{" "}
+                  <span className="font-semibold">
+                    {
+                      transactions.filter((t) => t.type === "gasto")
+                        .length
+                    }
+                  </span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        {/* Visor mensual de gastos por categoría */}
         <section className="mb-8">
           <h2 className="font-semibold mb-2 text-sm">
             Visor mensual de gastos por categoría
@@ -1119,6 +1251,7 @@ export default function Home() {
               {gastosPorCategoria.map((item) => (
                 <div key={item.category} className="space-y-1">
                   <div className="flex justify-between text-xs">
+                    <span>{item.category}</span>
                     <span>
                       {formatMoney(item.total)}{" "}
                       <span className="text-gray-400">
@@ -1322,6 +1455,110 @@ export default function Home() {
           </form>
         </section>
 
+        {/* Filtros de la tabla */}
+        <section className="mb-4">
+          <h2 className="font-semibold mb-2 text-sm">
+            Filtros de movimientos
+          </h2>
+          <div className="grid md:grid-cols-4 gap-3 text-xs items-end">
+            {/* Tipo */}
+            <div>
+              <div className="text-gray-500 mb-1">Tipo</div>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => setFilterType("todos")}
+                  className={`flex-1 border rounded px-2 py-1 ${
+                    filterType === "todos"
+                      ? "bg-sky-500 text-white border-sky-500"
+                      : "bg-white text-gray-700 border-gray-300"
+                  }`}
+                >
+                  Todos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterType("ingreso")}
+                  className={`flex-1 border rounded px-2 py-1 ${
+                    filterType === "ingreso"
+                      ? "bg-green-500 text-white border-green-500"
+                      : "bg-white text-gray-700 border-gray-300"
+                  }`}
+                >
+                  Ingresos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterType("gasto")}
+                  className={`flex-1 border rounded px-2 py-1 ${
+                    filterType === "gasto"
+                      ? "bg-red-500 text-white border-red-500"
+                      : "bg-white text-gray-700 border-gray-300"
+                  }`}
+                >
+                  Gastos
+                </button>
+              </div>
+            </div>
+
+            {/* Categoría */}
+            <div>
+              <div className="text-gray-500 mb-1">Categoría</div>
+              <select
+                value={filterCategory}
+                onChange={(e) => setFilterCategory(e.target.value)}
+                className="border rounded px-2 py-1 w-full"
+              >
+                <option value="TODAS">Todas</option>
+                {categories.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Método */}
+            <div>
+              <div className="text-gray-500 mb-1">Método</div>
+              <select
+                value={filterMethod}
+                onChange={(e) => setFilterMethod(e.target.value)}
+                className="border rounded px-2 py-1 w-full"
+              >
+                <option value="TODOS">Todos</option>
+                {methods.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Búsqueda */}
+            <div>
+              <div className="text-gray-500 mb-1">Buscar</div>
+              <input
+                type="text"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                className="border rounded px-2 py-1 w-full"
+                placeholder="Notas, monto, fecha..."
+              />
+            </div>
+          </div>
+
+          <div className="mt-1 text-[11px] text-gray-500">
+            Mostrando{" "}
+            <span className="font-semibold">
+              {filteredTransactions.length}
+            </span>{" "}
+            de{" "}
+            <span className="font-semibold">{transactions.length}</span>{" "}
+            movimientos del mes.
+          </div>
+        </section>
+
         {/* Tabla de movimientos */}
         <section>
           <h2 className="font-semibold mb-3 text-sm">
@@ -1343,77 +1580,82 @@ export default function Home() {
               </thead>
 
               <tbody>
-  {loading && (
-    <tr>
-      <td colSpan={7} className="text-center py-4 text-gray-500">
-        Cargando movimientos...
-      </td>
-    </tr>
-  )}
+                {loading && (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="text-center py-4 text-gray-500"
+                    >
+                      Cargando movimientos...
+                    </td>
+                  </tr>
+                )}
 
-  {!loading && transactions.length === 0 && (
-    <tr>
-      <td colSpan={7} className="text-center py-4 text-gray-500">
-        Sin movimientos registrados.
-      </td>
-    </tr>
-  )}
+                {!loading && filteredTransactions.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={7}
+                      className="text-center py-4 text-gray-500"
+                    >
+                      Sin movimientos que coincidan con los filtros.
+                    </td>
+                  </tr>
+                )}
 
-  {!loading &&
-    transactions.map((t) => (
-      
-      <tr
-        key={t.id}
-        className={`odd:bg-white even:bg-gray-50 ${
-          t.localOnly ? "opacity-60" : ""
-        }`}
-      >
-        {/* FECHA */}
-        <td className="border-t px-2 py-1">
-          {formatDateDisplay(t.date)}
-        </td>
+                {!loading &&
+                  filteredTransactions.map((t) => (
+                    <tr
+                      key={t.id}
+                      className={`odd:bg-white even:bg-gray-50 ${
+                        t.localOnly ? "opacity-60" : ""
+                      }`}
+                    >
+                      {/* FECHA */}
+                      <td className="border-t px-2 py-1">
+                        {formatDateDisplay(t.date)}
+                      </td>
 
-        {/* TIPO */}
-        <td className="border-t px-2 py-1">
-          {t.type === "ingreso" ? "Ingreso" : "Gasto"}
-        </td>
+                      {/* TIPO */}
+                      <td className="border-t px-2 py-1">
+                        {t.type === "ingreso" ? "Ingreso" : "Gasto"}
+                      </td>
 
-        {/* CATEGORÍA */}
-        <td className="border-t px-2 py-1">{t.category}</td>
+                      {/* CATEGORÍA */}
+                      <td className="border-t px-2 py-1">{t.category}</td>
 
-        {/* MONTO */}
-        <td className="border-t px-2 py-1 text-right">
-          {formatMoney(t.amount)}
-        </td>
+                      {/* MONTO */}
+                      <td className="border-t px-2 py-1 text-right">
+                        {formatMoney(t.amount)}
+                      </td>
 
-        {/* MÉTODO */}
-        <td className="border-t px-2 py-1">{t.method}</td>
+                      {/* MÉTODO */}
+                      <td className="border-t px-2 py-1">{t.method}</td>
 
-        {/* NOTAS */}
-        <td className="border-t px-2 py-1 max-w-xs truncate">
-          {t.notes}
-        </td>
+                      {/* NOTAS */}
+                      <td className="border-t px-2 py-1 max-w-xs truncate">
+                        {t.notes}
+                      </td>
 
-        {/* ACCIONES */}
-        <td className="border-t px-2 py-1 text-center">
-          <button
-            type="button"
-            onClick={() => handleEdit(t)}
-            className="text-xs text-sky-600 hover:underline mr-2"
-          >
-            Editar
-          </button>
-          <button
-            type="button"
-            onClick={() => handleDelete(t)}
-            className="text-xs text-red-600 hover:underline"
-          >
-            Eliminar
-          </button>
-        </td>
-      </tr>
-    ))}
-</tbody>
+                      {/* ACCIONES */}
+                      <td className="border-t px-2 py-1 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleEdit(t)}
+                          className="text-xs text-sky-600 hover:underline mr-2"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(t)}
+                          className="text-xs text-red-600 hover:underline"
+                        >
+                          Eliminar
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
             </table>
           </div>
         </section>
