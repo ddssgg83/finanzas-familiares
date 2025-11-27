@@ -516,6 +516,93 @@ export default function Home() {
   }, [gastosPorCategoria]);
 
   // --------------------------------------------------
+  //   "IA ligera": resumen inteligente del mes
+  // --------------------------------------------------
+  const aiInsights = useMemo(() => {
+    const insights: string[] = [];
+
+    if (transactions.length === 0) {
+      insights.push(
+        "Aún no hay suficientes movimientos este mes para generar recomendaciones."
+      );
+      return insights;
+    }
+
+    // Relación ingresos vs gastos
+    if (totalIngresos === 0 && totalGastos > 0) {
+      insights.push(
+        "Tienes gastos registrados pero ningún ingreso en el mes. Vale la pena revisar si falta capturar ingresos o si estás financiando tus gastos con ahorros o deuda."
+      );
+    } else if (totalIngresos > 0) {
+      const ratio = totalGastos / totalIngresos;
+      if (ratio > 1) {
+        insights.push(
+          "Este mes estás gastando más de lo que ingresas. Si esto se repite varios meses, puede ser una señal de alerta para ajustar gastos o buscar más ingresos."
+        );
+      } else if (ratio > 0.8) {
+        insights.push(
+          "Tus gastos representan más del 80% de tus ingresos. Estás en una zona apretada; podrías revisar 1 o 2 categorías para recortar un poco."
+        );
+      } else {
+        insights.push(
+          "Tus gastos están por debajo del 80% de tus ingresos. Vas con buen margen, es un buen momento para pensar en ahorro o inversión."
+        );
+      }
+    }
+
+    // Presupuesto del mes vs gastos
+    if (budget != null && budget > 0) {
+      const pct = totalGastos / budget;
+      if (pct > 1) {
+        insights.push(
+          `Ya te pasaste del presupuesto mensual que definiste. Tal vez valga la pena ajustar el presupuesto o revisar las categorías con más gasto.`
+        );
+      } else if (pct > 0.9) {
+        insights.push(
+          "Estás arriba del 90% de tu presupuesto mensual. Estás a nada de llegar al límite: intenta contener gastos el resto del mes."
+        );
+      } else if (pct > 0.7) {
+        insights.push(
+          "Ya superaste el 70% de tu presupuesto del mes. Vas avanzado; te conviene revisar las categorías con más peso para no pasar el límite."
+        );
+      } else {
+        insights.push(
+          "Tus gastos aún están cómodamente por debajo del presupuesto que definiste. Vas bien, solo mantén el mismo comportamiento."
+        );
+      }
+    }
+
+    // Categoría con más gasto
+    if (gastosPorCategoria.length > 0) {
+      const mayor = gastosPorCategoria[0];
+      insights.push(
+        `La categoría donde más gastaste este mes es "${mayor.category}" con ${formatMoney(
+          mayor.total
+        )}. Si quieres recortar, este rubro es el primer candidato a revisar.`
+      );
+    }
+
+    // Cantidad de movimientos
+    if (transactions.length > 40) {
+      insights.push(
+        "Tienes muchos movimientos este mes, lo cual es bueno porque te da más visibilidad. Si quieres simplificar, podrías agrupar ciertos gastos en menos categorías."
+      );
+    } else if (transactions.length < 10) {
+      insights.push(
+        "Tienes pocos movimientos registrados este mes. Asegúrate de estar capturando todos tus gastos para que el análisis sea más preciso."
+      );
+    }
+
+    return insights;
+  }, [
+    transactions,
+    totalIngresos,
+    totalGastos,
+    budget,
+    gastosPorCategoria,
+  ]);
+
+  // --------------------------------------------------
   //   Filtros de la tabla
   // --------------------------------------------------
   const filteredTransactions = useMemo(() => {
@@ -1268,6 +1355,24 @@ export default function Home() {
                 </div>
               ))}
             </div>
+          )}
+        </section>
+
+        {/* Resumen inteligente (IA ligera) */}
+        <section className="mb-8">
+          <h2 className="font-semibold mb-2 text-sm">
+            Resumen inteligente del mes
+          </h2>
+          {aiInsights.length === 0 ? (
+            <p className="text-xs text-gray-500">
+              Aún no hay suficientes datos para generar recomendaciones.
+            </p>
+          ) : (
+            <ul className="list-disc pl-5 space-y-1 text-xs text-gray-700">
+              {aiInsights.map((msg, idx) => (
+                <li key={idx}>{msg}</li>
+              ))}
+            </ul>
           )}
         </section>
 
