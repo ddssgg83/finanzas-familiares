@@ -42,14 +42,7 @@ type FormState = {
 };
 
 type Option = { label: string; value: string };
-
 type ExportType = "todos" | "ingresos" | "gastos";
-
-type MonthlyPoint = {
-  monthKey: string; // 2025-11
-  ingresos: number;
-  gastos: number;
-};
 
 const DEFAULT_CATEGORIES: Option[] = [
   { label: "Sueldo", value: "SUELDO" },
@@ -78,7 +71,7 @@ const CUSTOM_METHODS_KEY = "ff-custom-methods";
 function getCurrentMonthKey(date = new Date()) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
+  return `${y}-${m}`; // 2025-11
 }
 
 function formatMoney(num: number) {
@@ -89,12 +82,12 @@ function formatMoney(num: number) {
   });
 }
 
-// Evita el problema de zonas horarias al mostrar fechas
+// 📅 Mostrar fecha sin problema de zona horaria
 function formatDateDisplay(ymd: string) {
-  const s = (ymd ?? "").slice(0, 10); // YYYY-MM-DD
+  const s = (ymd ?? "").slice(0, 10);
   const [y, m, d] = s.split("-");
   if (!y || !m || !d) return ymd;
-  return `${d}/${m}/${y}`; // dd/mm/yyyy
+  return `${d}/${m}/${y}`;
 }
 
 function csvEscape(value: string | number | null | undefined): string {
@@ -106,12 +99,6 @@ function csvEscape(value: string | number | null | undefined): string {
   return str;
 }
 
-function formatMonthShort(monthKey: string) {
-  const [y, m] = monthKey.split("-");
-  const date = new Date(Number(y), Number(m) - 1, 1);
-  return date.toLocaleDateString("es-MX", { month: "short" });
-}
-
 export default function Home() {
   // 🔐 AUTH
   const [user, setUser] = useState<User | null>(null);
@@ -121,7 +108,7 @@ export default function Home() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
 
-  // 💰 DATOS
+  // 💰 APP
   const [transactions, setTransactions] = useState<Tx[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -144,20 +131,20 @@ export default function Home() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // 💸 Presupuesto general
+  // Presupuesto
   const [budgetInput, setBudgetInput] = useState("");
   const [budget, setBudget] = useState<number | null>(null);
 
-  // 🌐 Estado conexión
+  // Online / offline
   const [isOnline, setIsOnline] = useState<boolean>(true);
 
-  // 📤 Export
+  // Export
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [exportType, setExportType] = useState<ExportType>("todos");
   const [exportIncludeCategorySummary, setExportIncludeCategorySummary] =
     useState(true);
 
-  // 🔎 Filtros para la tabla
+  // Filtros de movimientos
   const [filterType, setFilterType] = useState<"todos" | "ingreso" | "gasto">(
     "todos"
   );
@@ -165,8 +152,43 @@ export default function Home() {
   const [filterMethod, setFilterMethod] = useState<string>("TODOS");
   const [searchText, setSearchText] = useState<string>("");
 
-  // 📈 Historial mensual (para gráficas e insights avanzados)
-  const [monthlyHistory, setMonthlyHistory] = useState<MonthlyPoint[]>([]);
+  // 🌙 Tema (claro / oscuro)
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const stored = window.localStorage.getItem("ff-theme");
+    const prefersDark =
+      window.matchMedia &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+    const initial =
+      stored === "dark" || (!stored && prefersDark) ? "dark" : "light";
+
+    setTheme(initial);
+
+    if (initial === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+
+    if (next === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("ff-theme", next);
+    }
+  };
 
   // --------------------------------------------------
   //   AUTH: usuario actual + listener
@@ -179,12 +201,14 @@ export default function Home() {
       setAuthError(null);
       try {
         const { data, error } = await supabase.auth.getUser();
+
         if (
           error &&
           (error as any).name !== "AuthSessionMissingError"
         ) {
           console.error("Error obteniendo usuario actual", error);
         }
+
         if (!ignore) {
           setUser(data?.user ?? null);
         }
@@ -239,7 +263,7 @@ export default function Home() {
         setAuthError(error.message);
         return;
       }
-      alert("Cuenta creada.");
+      alert("Cuenta creada. Revisa tu correo si tienes verificación activada.");
       setAuthMode("login");
       setAuthPassword("");
     } catch {
@@ -254,7 +278,7 @@ export default function Home() {
       setBudget(null);
       setBudgetInput("");
     } catch (err) {
-      console.error(err);
+      console.error("Error cerrando sesión", err);
     }
   };
 
@@ -272,7 +296,9 @@ export default function Home() {
           setCategories(parsed);
         }
       }
-    } catch {}
+    } catch (err) {
+      console.error("Error cargando categorías personalizadas", err);
+    }
 
     try {
       const methodsRaw = localStorage.getItem(CUSTOM_METHODS_KEY);
@@ -282,7 +308,9 @@ export default function Home() {
           setMethods(parsed);
         }
       }
-    } catch {}
+    } catch (err) {
+      console.error("Error cargando métodos de pago personalizados", err);
+    }
   }, []);
 
   // --------------------------------------------------
@@ -316,11 +344,16 @@ export default function Home() {
         const offline = await getOfflineTxs();
         if (offline.length) {
           setTransactions((prev) => [
-            ...offline.map((t) => ({ ...t, localOnly: true })),
+            ...offline.map((t: any) => ({
+              ...t,
+              localOnly: true,
+            })),
             ...prev,
           ]);
         }
-      } catch {}
+      } catch (err) {
+        console.error("Error cargando movimientos offline", err);
+      }
     }
 
     loadOffline();
@@ -363,25 +396,25 @@ export default function Home() {
 
         if (error) throw error;
 
-        const normalized = (data ?? []).map((t: any) => ({
-          id: t.id,
-          date: String(t.date).slice(0, 10), // YYYY-MM-DD
-          type: t.type,
-          category: t.category,
-          amount: Number(t.amount),
-          method: t.method,
-          notes: t.notes,
-        }));
-
-        setTransactions(normalized);
+        setTransactions(
+          (data ?? []).map((t: any) => ({
+            id: t.id,
+            date: t.date,
+            type: t.type,
+            category: t.category,
+            amount: Number(t.amount),
+            method: t.method,
+            notes: t.notes,
+          }))
+        );
 
         if (typeof window !== "undefined") {
           localStorage.setItem(
             `ff-cache-${month}`,
-            JSON.stringify(normalized)
+            JSON.stringify(data ?? [])
           );
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error(err);
         setError("No se pudieron cargar los movimientos.");
 
@@ -390,17 +423,20 @@ export default function Home() {
           if (cache) {
             try {
               const parsed = JSON.parse(cache);
-              const normalized = (parsed ?? []).map((t: any) => ({
-                id: t.id,
-                date: String(t.date).slice(0, 10),
-                type: t.type,
-                category: t.category,
-                amount: Number(t.amount),
-                method: t.method,
-                notes: t.notes,
-              }));
-              setTransactions(normalized);
-            } catch {}
+              setTransactions(
+                (parsed ?? []).map((t: any) => ({
+                  id: t.id,
+                  date: t.date,
+                  type: t.type,
+                  category: t.category,
+                  amount: Number(t.amount),
+                  method: t.method,
+                  notes: t.notes,
+                }))
+              );
+            } catch {
+              // ignoramos error de parseo
+            }
           }
         }
       } finally {
@@ -414,87 +450,7 @@ export default function Home() {
   }, [month, user]);
 
   // --------------------------------------------------
-  //   Historial mensual (últimos ~12 meses) para gráficas
-  // --------------------------------------------------
-  useEffect(() => {
-    if (!user) {
-      setMonthlyHistory([]);
-      return;
-    }
-
-    const userId = user.id;
-
-    async function loadHistory() {
-      try {
-        const [y, m] = month.split("-");
-        const current = new Date(Number(y), Number(m) - 1, 1);
-
-        const fromDate = new Date(current);
-        fromDate.setMonth(fromDate.getMonth() - 11); // últimos 12 meses (si hay datos)
-
-        const fromStr = `${fromDate.getFullYear()}-${String(
-          fromDate.getMonth() + 1
-        ).padStart(2, "0")}-01`;
-
-        const toStr = `${current.getFullYear()}-${String(
-          current.getMonth() + 1
-        ).padStart(2, "0")}-${new Date(
-          current.getFullYear(),
-          current.getMonth() + 1,
-          0
-        )
-          .getDate()
-          .toString()
-          .padStart(2, "0")}`;
-
-        const { data, error } = await supabase
-          .from("transactions")
-          .select("*")
-          .eq("user_id", userId)
-          .gte("date", fromStr)
-          .lte("date", toStr)
-          .order("date", { ascending: true });
-
-        if (error) throw error;
-
-        const map = new Map<string, { ingresos: number; gastos: number }>();
-
-        (data ?? []).forEach((t: any) => {
-          const dateStr = String(t.date).slice(0, 10); // YYYY-MM-DD
-          const key = dateStr.slice(0, 7); // YYYY-MM
-          const amount = Number(t.amount) || 0;
-
-          if (!map.has(key)) {
-            map.set(key, { ingresos: 0, gastos: 0 });
-          }
-          const entry = map.get(key)!;
-          if (t.type === "ingreso") {
-            entry.ingresos += amount;
-          } else {
-            entry.gastos += amount;
-          }
-        });
-
-        const history: MonthlyPoint[] = Array.from(map.entries())
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([monthKey, val]) => ({
-            monthKey,
-            ingresos: val.ingresos,
-            gastos: val.gastos,
-          }));
-
-        setMonthlyHistory(history);
-      } catch (err) {
-        console.error("Error cargando historial mensual:", err);
-        setMonthlyHistory([]);
-      }
-    }
-
-    loadHistory();
-  }, [user, month]);
-
-  // --------------------------------------------------
-  //   NUEVO SISTEMA DE SINCRONIZACIÓN (NO BORRA NADA)
+  //   Sincronizar cola offline al volver internet
   // --------------------------------------------------
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -507,7 +463,6 @@ export default function Home() {
 
       try {
         const synced = await syncOfflineTxs(user.id);
-
         if (!synced.length) return;
 
         alert(
@@ -516,6 +471,7 @@ export default function Home() {
 
         const syncedIds = new Set(synced.map((t) => t.id));
 
+        // No borramos nada, sólo marcamos localOnly → false
         setTransactions((prev) =>
           prev.map((tx) =>
             tx.localOnly && syncedIds.has(tx.id)
@@ -545,7 +501,7 @@ export default function Home() {
   }, [user]);
 
   // --------------------------------------------------
-  //   Presupuesto mensual
+  //   Presupuesto mensual (localStorage)
   // --------------------------------------------------
   useEffect(() => {
     const key = `ff-budget-${month}`;
@@ -576,7 +532,7 @@ export default function Home() {
   };
 
   // --------------------------------------------------
-  //   Totales globales del mes
+  //   Totales
   // --------------------------------------------------
   const { totalIngresos, totalGastos } = useMemo(() => {
     let ingresos = 0;
@@ -618,264 +574,160 @@ export default function Home() {
     }));
   }, [transactions]);
 
-  const top3Categorias = useMemo(() => {
-    return gastosPorCategoria.slice(0, 3);
-  }, [gastosPorCategoria]);
+  // --------------------------------------------------
+  //   Filtros: lista filtrada de movimientos
+  // --------------------------------------------------
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter((t) => {
+      if (filterType !== "todos" && t.type !== filterType) return false;
+      if (filterCategory !== "TODAS" && t.category !== filterCategory)
+        return false;
+      if (filterMethod !== "TODOS" && t.method !== filterMethod) return false;
+
+      if (searchText.trim()) {
+        const q = searchText.trim().toLowerCase();
+        const haystack = [
+          t.category,
+          t.method,
+          t.notes ?? "",
+          formatDateDisplay(t.date),
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+
+      return true;
+    });
+  }, [transactions, filterType, filterCategory, filterMethod, searchText]);
 
   // --------------------------------------------------
   //   Datos para gráficas
   // --------------------------------------------------
-  const categoryBarData = useMemo(
-    () =>
-      gastosPorCategoria.map((item) => ({
-        name: item.category,
-        total: item.total,
-      })),
-    [gastosPorCategoria]
-  );
+  const chartDataCategorias = useMemo(() => {
+    return gastosPorCategoria.map((g) => ({
+      category: g.category,
+      total: g.total,
+    }));
+  }, [gastosPorCategoria]);
 
-  const monthlyChartData = useMemo(
-    () =>
-      monthlyHistory.map((p) => ({
-        name: formatMonthShort(p.monthKey),
-        ingresos: p.ingresos,
-        gastos: p.gastos,
-      })),
-    [monthlyHistory]
-  );
+  const chartDataLinea = useMemo(() => {
+    // Agrupamos por fecha
+    const map = new Map<
+      string,
+      { date: string; ingresos: number; gastos: number }
+    >();
 
-  // --------------------------------------------------
-  //   "IA" ligera + avanzada: resumen inteligente del mes
-  // --------------------------------------------------
-  const aiInsights = useMemo(() => {
-    const insights: string[] = [];
-
-    if (transactions.length === 0) {
-      insights.push(
-        "Aún no hay suficientes movimientos este mes para generar recomendaciones."
-      );
-      return insights;
+    for (const t of transactions) {
+      const key = (t.date ?? "").slice(0, 10);
+      if (!map.has(key)) {
+        map.set(key, {
+          date: key,
+          ingresos: 0,
+          gastos: 0,
+        });
+      }
+      const item = map.get(key)!;
+      if (t.type === "ingreso") item.ingresos += t.amount;
+      else item.gastos += t.amount;
     }
 
-    // Relación ingresos vs gastos
+    const arr = Array.from(map.values());
+    arr.sort((a, b) => (a.date < b.date ? -1 : 1));
+
+    return arr.map((d) => ({
+      ...d,
+      dateLabel: formatDateDisplay(d.date),
+    }));
+  }, [transactions]);
+
+  // --------------------------------------------------
+  //   Resumen "inteligente" del mes (sin IA externa)
+  // --------------------------------------------------
+  const smartSummary = useMemo(() => {
+    const lines: string[] = [];
+
+    if (!transactions.length) {
+      lines.push(
+        "Aún no tienes movimientos en este mes. Empieza registrando ingresos y gastos para ver tu resumen."
+      );
+      return lines;
+    }
+
     if (totalIngresos === 0 && totalGastos > 0) {
-      insights.push(
-        "Tienes gastos registrados pero ningún ingreso en el mes. Vale la pena revisar si falta capturar ingresos o si estás financiando tus gastos con ahorros o deuda."
+      lines.push(
+        "Este mes sólo has registrado gastos, pero ningún ingreso. Revisa si falta capturar tu sueldo o ingresos principales."
       );
-    } else if (totalIngresos > 0) {
-      const ratio = totalGastos / totalIngresos;
-      if (ratio > 1) {
-        insights.push(
-          "Este mes estás gastando más de lo que ingresas. Si esto se repite varios meses, puede ser una señal de alerta para ajustar gastos o buscar más ingresos."
+    }
+
+    if (totalIngresos > 0) {
+      const ratio = (totalGastos / totalIngresos) * 100;
+      lines.push(
+        `Has gastado aproximadamente el ${ratio.toFixed(
+          1
+        )}% de tus ingresos del mes.`
+      );
+
+      if (ratio > 90) {
+        lines.push(
+          "Estás muy cerca de gastar todo lo que ingresaste. Sería bueno frenar un poco los gastos en lo que resta del mes."
         );
-      } else if (ratio > 0.8) {
-        insights.push(
-          "Tus gastos representan más del 80% de tus ingresos. Estás en una zona apretada; podrías revisar 1 o 2 categorías para recortar un poco."
+      } else if (ratio > 70) {
+        lines.push(
+          "Tu nivel de gasto es elevado, pero aún tienes margen. Vale la pena revisar en qué se está yendo la mayor parte."
         );
-      } else {
-        insights.push(
-          "Tus gastos están por debajo del 80% de tus ingresos. Vas con buen margen, es un buen momento para pensar en ahorro o inversión."
+      } else if (ratio < 50) {
+        lines.push(
+          "Vas muy bien. Estás gastando menos de la mitad de lo que ingresaste este mes."
         );
       }
     }
 
-    // Presupuesto del mes vs gastos
-    if (budget != null && budget > 0) {
-      const pct = totalGastos / budget;
-      if (pct > 1) {
-        insights.push(
-          "Ya te pasaste del presupuesto mensual que definiste. Tal vez valga la pena ajustar el presupuesto o revisar las categorías con más gasto."
+    if (budget != null) {
+      if (disponible != null && disponible < 0) {
+        lines.push(
+          `Ya sobrepasaste tu presupuesto de ${formatMoney(
+            budget
+          )}. Estás por encima en ${formatMoney(Math.abs(disponible))}.`
         );
-      } else if (pct > 0.9) {
-        insights.push(
-          "Estás arriba del 90% de tu presupuesto mensual. Estás a nada de llegar al límite: intenta contener gastos el resto del mes."
-        );
-      } else if (pct > 0.7) {
-        insights.push(
-          "Ya superaste el 70% de tu presupuesto del mes. Te conviene revisar las categorías con más peso para no pasar el límite."
-        );
-      } else {
-        insights.push(
-          "Tus gastos aún están cómodamente por debajo del presupuesto que definiste. Vas bien, solo mantén el mismo comportamiento."
+      } else if (disponible != null && disponible > 0) {
+        lines.push(
+          `Todavía te quedan ${formatMoney(
+            disponible
+          )} disponibles dentro de tu presupuesto de este mes.`
         );
       }
     }
 
-    // Categoría con más gasto
     if (gastosPorCategoria.length > 0) {
-      const mayor = gastosPorCategoria[0];
-      insights.push(
-        `La categoría donde más gastaste este mes es "${mayor.category}" con ${formatMoney(
-          mayor.total
-        )}. Si quieres recortar, este rubro es el primer candidato a revisar.`
+      const top1 = gastosPorCategoria[0];
+      lines.push(
+        `Tu categoría con más gasto este mes es "${top1.category}" con ${formatMoney(
+          top1.total
+        )} (${top1.percent.toFixed(1)}% del total de gastos).`
       );
-    }
-
-    // Gastos "fijos" aproximados
-    const fixedCategories = ["RENTA", "ESCUELA", "SERVICIOS"];
-    const gastosFijos = transactions
-      .filter(
-        (t) =>
-          t.type === "gasto" && fixedCategories.includes(t.category)
-      )
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    if (gastosFijos > 0) {
-      insights.push(
-        `Tus gastos fijos aproximados (renta, escuela, servicios) este mes suman ${formatMoney(
-          gastosFijos
-        )}. Esto te da una idea de tu piso mínimo mensual.`
-      );
-    }
-
-    // Entretenimiento
-    const entretenimiento = transactions
-      .filter(
-        (t) => t.type === "gasto" && t.category === "ENTRETENIMIENTO"
-      )
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    if (entretenimiento > 0 && totalGastos > 0) {
-      const pctEnt = (entretenimiento * 100) / totalGastos;
-      if (pctEnt > 25) {
-        insights.push(
-          `Una parte importante de tus gastos (${pctEnt.toFixed(
-            1
-          )}%) se va a "Entretenimiento". Podría ser un área a ajustar si quieres liberar flujo.`
-        );
-      } else if (pctEnt < 10) {
-        insights.push(
-          "Tu gasto en entretenimiento es bajo comparado con el total. Si tu flujo es saludable, podrías darte más espacio para ocio sin afectar demasiado."
+      if (gastosPorCategoria.length > 1) {
+        const top2 = gastosPorCategoria[1];
+        lines.push(
+          `La segunda categoría con más peso es "${top2.category}" con ${formatMoney(
+            top2.total
+          )}.`
         );
       }
     }
 
-    // Historial mensual: comparación con el mes anterior
-    if (monthlyHistory.length >= 2) {
-      const last = monthlyHistory[monthlyHistory.length - 1];
-      const prev = monthlyHistory[monthlyHistory.length - 2];
-
-      const diffG = last.gastos - prev.gastos;
-      const diffI = last.ingresos - prev.ingresos;
-
-      if (prev.gastos > 0) {
-        const pctG = (diffG * 100) / prev.gastos;
-        if (pctG > 10) {
-          insights.push(
-            `Tus gastos subieron aproximadamente ${pctG.toFixed(
-              1
-            )}% comparado con el mes anterior. Vale la pena revisar qué cambió.`
-          );
-        } else if (pctG < -10) {
-          insights.push(
-            `Tus gastos bajaron aproximadamente ${Math.abs(
-              pctG
-            ).toFixed(
-              1
-            )}% comparado con el mes anterior. Buen avance, trata de mantener este nivel.`
-          );
-        }
-      }
-
-      if (prev.ingresos > 0) {
-        const pctI = (diffI * 100) / prev.ingresos;
-        if (pctI > 10) {
-          insights.push(
-            `Tus ingresos aumentaron cerca de ${pctI.toFixed(
-              1
-            )}% respecto al mes anterior. Si mantienes este ritmo, tu capacidad de ahorro mejorará.`
-          );
-        } else if (pctI < -10) {
-          insights.push(
-            `Tus ingresos bajaron alrededor de ${Math.abs(
-              pctI
-            ).toFixed(
-              1
-            )}% respecto al mes anterior. Intenta ser más conservador con los gastos hasta que se estabilicen.`
-          );
-        }
-      }
-    }
-
-    // Tendencia de 3 meses en gastos
-    if (monthlyHistory.length >= 3) {
-      const last3 = monthlyHistory.slice(-3);
-      const g0 = last3[0].gastos;
-      const g1 = last3[1].gastos;
-      const g2 = last3[2].gastos;
-
-      if (g0 < g1 && g1 < g2) {
-        insights.push(
-          "Llevas al menos 3 meses seguidos aumentando tus gastos. Si es intencional (viajes, proyectos, etc.), está bien; si no, es una señal para intervenir."
-        );
-      } else if (g0 > g1 && g1 > g2) {
-        insights.push(
-          "Tus gastos llevan al menos 3 meses bajando de forma consecutiva. Es una tendencia muy positiva; podrías aprovechar para aumentar tu ahorro."
-        );
-      }
-    }
-
-    // Cantidad de movimientos
-    if (transactions.length > 40) {
-      insights.push(
-        "Tienes muchos movimientos este mes, lo cual es bueno porque te da más visibilidad. Si quieres simplificar, podrías agrupar ciertos gastos en menos categorías."
-      );
-    } else if (transactions.length < 10) {
-      insights.push(
-        "Tienes pocos movimientos registrados este mes. Asegúrate de estar capturando todos tus gastos para que el análisis sea más preciso."
-      );
-    }
-
-    return insights;
+    return lines;
   }, [
     transactions,
     totalIngresos,
     totalGastos,
     budget,
+    disponible,
     gastosPorCategoria,
-    monthlyHistory,
   ]);
 
   // --------------------------------------------------
-  //   Filtros de la tabla
-  // --------------------------------------------------
-  const filteredTransactions = useMemo(() => {
-    let list = [...transactions];
-
-    if (filterType !== "todos") {
-      list = list.filter((t) => t.type === filterType);
-    }
-
-    if (filterCategory !== "TODAS") {
-      list = list.filter((t) => t.category === filterCategory);
-    }
-
-    if (filterMethod !== "TODOS") {
-      list = list.filter((t) => t.method === filterMethod);
-    }
-
-    const search = searchText.trim().toLowerCase();
-    if (search) {
-      list = list.filter((t) => {
-        const haystack = [
-          t.category,
-          t.method,
-          t.notes ?? "",
-          t.type,
-          formatDateDisplay(t.date),
-          String(t.amount),
-        ]
-          .join(" ")
-          .toLowerCase();
-        return haystack.includes(search);
-      });
-    }
-
-    return list;
-  }, [transactions, filterType, filterCategory, filterMethod, searchText]);
-
-  // --------------------------------------------------
-  //   Export CSV (mensual, con opciones)
+  //   Exportar CSV del mes (con opciones)
   // --------------------------------------------------
   const handleExportCsv = () => {
     let data = transactions;
@@ -886,7 +738,7 @@ export default function Home() {
     }
 
     if (!data.length) {
-      alert("No hay movimientos para exportar.");
+      alert("No hay movimientos en este mes con ese filtro para exportar.");
       return;
     }
 
@@ -901,7 +753,7 @@ export default function Home() {
     ];
 
     const rows = data.map((t) => [
-      t.date,
+      t.date, // ya viene en yyyy-mm-dd
       t.type,
       t.category,
       t.amount,
@@ -959,14 +811,14 @@ export default function Home() {
   };
 
   // --------------------------------------------------
-  //   Cambiar mes
+  //   Cambio de mes
   // --------------------------------------------------
   const handleChangeMonth = (value: string) => {
     setMonth(value);
   };
 
   // --------------------------------------------------
-  //   Manejo del formulario
+  //   Manejo formulario
   // --------------------------------------------------
   const handleChangeForm = (field: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -1018,7 +870,7 @@ export default function Home() {
     setSaving(true);
 
     try {
-      // 🔴 SIN CONEXIÓN → offline
+      // 🔴 SIN CONEXIÓN → sólo local
       if (typeof navigator !== "undefined" && !navigator.onLine) {
         const id = crypto.randomUUID();
 
@@ -1045,7 +897,7 @@ export default function Home() {
         }
 
         alert(
-          "Estás sin conexión. El movimiento se guardó en este dispositivo y se enviará cuando vuelva internet."
+          "Estás sin conexión. El movimiento se guardó sólo en este dispositivo y se enviará cuando vuelva el internet."
         );
         resetForm();
         return;
@@ -1076,12 +928,12 @@ export default function Home() {
 
         const newTx: Tx = {
           id: data.id,
-          date: payload.date,
-          type: payload.type,
-          category: payload.category,
-          amount: payload.amount,
-          method: payload.method,
-          notes: payload.notes,
+          date: data.date,
+          type: data.type,
+          category: data.category,
+          amount: Number(data.amount),
+          method: data.method,
+          notes: data.notes,
         };
 
         setTransactions((prev) => [newTx, ...prev]);
@@ -1133,14 +985,14 @@ export default function Home() {
       if (error) throw error;
 
       setTransactions((prev) => prev.filter((t) => t.id !== tx.id));
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
       alert("No se pudo eliminar el movimiento.");
     }
   };
 
   // --------------------------------------------------
-  //   Agregar categorías y métodos
+  //   Editor de categorías y métodos
   // --------------------------------------------------
   const handleAddCategory = () => {
     const trimmed = newCategory.trim();
@@ -1197,12 +1049,14 @@ export default function Home() {
   // --------------------------------------------------
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex flex-col">
-        <header className="bg-sky-500 text-white py-2 text-center text-sm">
+      <div className="min-h-screen bg-gray-100 dark:bg-slate-900 flex flex-col">
+        <header className="bg-sky-500 dark:bg-sky-700 text-white py-2 text-center text-sm">
           Finanzas Familiares
         </header>
         <main className="flex-1 flex items-center justify-center">
-          <div className="text-gray-600 text-sm">Cargando sesión...</div>
+          <div className="text-gray-600 dark:text-gray-200 text-sm">
+            Cargando sesión...
+          </div>
         </main>
       </div>
     );
@@ -1210,12 +1064,12 @@ export default function Home() {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-gray-100 flex flex-col">
-        <header className="bg-sky-500 text-white py-2 text-center text-sm">
+      <div className="min-h-screen bg-gray-100 dark:bg-slate-900 flex flex-col">
+        <header className="bg-sky-500 dark:bg-sky-700 text-white py-2 text-center text-sm">
           Finanzas Familiares
         </header>
         <main className="flex-1 flex items-center justify-center px-4">
-          <div className="bg-white shadow rounded-lg p-6 w-full max-w-md space-y-4">
+          <div className="bg-white dark:bg-slate-800 shadow rounded-lg p-6 w-full max-w-md space-y-4">
             <h1 className="text-lg font-semibold text-center mb-2">
               {authMode === "login" ? "Inicia sesión" : "Crea tu cuenta"}
             </h1>
@@ -1225,7 +1079,7 @@ export default function Home() {
               className="space-y-3 text-sm"
             >
               <div>
-                <label className="block text-xs text-gray-600 mb-1">
+                <label className="block text-xs text-gray-600 dark:text-gray-300 mb-1">
                   Correo electrónico
                 </label>
                 <input
@@ -1233,13 +1087,13 @@ export default function Home() {
                   required
                   value={authEmail}
                   onChange={(e) => setAuthEmail(e.target.value)}
-                  className="border rounded px-3 py-2 w-full text-sm"
+                  className="border rounded px-3 py-2 w-full text-sm bg-white dark:bg-slate-900 dark:border-slate-700"
                   placeholder="tucorreo@ejemplo.com"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-gray-600 mb-1">
+                <label className="block text-xs text-gray-600 dark:text-gray-300 mb-1">
                   Contraseña
                 </label>
                 <input
@@ -1247,7 +1101,7 @@ export default function Home() {
                   required
                   value={authPassword}
                   onChange={(e) => setAuthPassword(e.target.value)}
-                  className="border rounded px-3 py-2 w-full text-sm"
+                  className="border rounded px-3 py-2 w-full text-sm bg-white dark:bg-slate-900 dark:border-slate-700"
                   placeholder="Mínimo 6 caracteres"
                 />
               </div>
@@ -1264,7 +1118,7 @@ export default function Home() {
               </button>
             </form>
 
-            <div className="text-center text-xs text-gray-600">
+            <div className="text-center text-xs text-gray-600 dark:text-gray-300">
               {authMode === "login" ? (
                 <>
                   ¿No tienes cuenta?{" "}
@@ -1303,10 +1157,17 @@ export default function Home() {
   //   Render: app logueada
   // --------------------------------------------------
   return (
-    <div className="min-h-screen bg-gray-100">
-      <header className="bg-sky-500 text-white py-2 text-center text-sm relative">
+    <div className="min-h-screen bg-gray-100 text-gray-900 dark:bg-slate-900 dark:text-gray-100">
+      <header className="bg-sky-500 dark:bg-sky-700 text-white py-2 text-center text-sm relative">
         Finanzas Familiares
         <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 text-[11px]">
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="border border-white/70 px-2 py-0.5 rounded hover:bg-white/10 transition"
+          >
+            {theme === "dark" ? "☀️ Claro" : "🌙 Oscuro"}
+          </button>
           <span className="hidden sm:inline">{user.email}</span>
           <button
             onClick={handleSignOut}
@@ -1317,17 +1178,19 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto bg-white shadow rounded-lg p-6 mt-4 mb-8">
+      <main className="max-w-5xl mx-auto bg-white dark:bg-slate-800 shadow rounded-lg p-6 mt-4 mb-8">
         {/* Mes + estado conexión + export */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
           <div>
-            <div className="text-sm text-gray-500">Mes</div>
+            <div className="text-sm text-gray-500 dark:text-gray-300">
+              Mes
+            </div>
             <div className="flex items-center gap-2">
               <input
                 type="month"
                 value={month}
                 onChange={(e) => handleChangeMonth(e.target.value)}
-                className="border rounded px-3 py-1 text-sm"
+                className="border rounded px-3 py-1 text-sm bg-white dark:bg-slate-900 dark:border-slate-700"
               />
               <button
                 type="button"
@@ -1340,13 +1203,13 @@ export default function Home() {
             <div className="text-xs text-gray-400 mt-1">{monthLabel}</div>
 
             {showExportOptions && (
-              <div className="mt-3 p-3 border rounded-lg bg-gray-50 space-y-2 text-xs max-w-md">
-                <div className="font-semibold text-gray-700 mb-1">
+              <div className="mt-3 p-3 border rounded-lg bg-gray-50 dark:bg-slate-900 dark:border-slate-700 space-y-2 text-xs max-w-md">
+                <div className="font-semibold text-gray-700 dark:text-gray-200 mb-1">
                   Opciones de exportación
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <span className="text-[11px] text-gray-600">
+                  <span className="text-[11px] text-gray-600 dark:text-gray-300">
                     Tipo de movimientos
                   </span>
                   <div className="flex flex-wrap gap-2">
@@ -1356,7 +1219,7 @@ export default function Home() {
                       className={`px-2 py-1 rounded border text-[11px] ${
                         exportType === "todos"
                           ? "bg-emerald-500 text-white border-emerald-500"
-                          : "bg-white text-gray-700 border-gray-300"
+                          : "bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-slate-600"
                       }`}
                     >
                       Todos
@@ -1367,7 +1230,7 @@ export default function Home() {
                       className={`px-2 py-1 rounded border text-[11px] ${
                         exportType === "ingresos"
                           ? "bg-emerald-500 text-white border-emerald-500"
-                          : "bg-white text-gray-700 border-gray-300"
+                          : "bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-slate-600"
                       }`}
                     >
                       Sólo ingresos
@@ -1378,7 +1241,7 @@ export default function Home() {
                       className={`px-2 py-1 rounded border text-[11px] ${
                         exportType === "gastos"
                           ? "bg-emerald-500 text-white border-emerald-500"
-                          : "bg-white text-gray-700 border-gray-300"
+                          : "bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-slate-600"
                       }`}
                     >
                       Sólo gastos
@@ -1394,7 +1257,7 @@ export default function Home() {
                       setExportIncludeCategorySummary(e.target.checked)
                     }
                   />
-                  <span className="text-[11px] text-gray-700">
+                  <span className="text-[11px] text-gray-700 dark:text-gray-200">
                     Incluir resumen de gastos por categoría al final
                   </span>
                 </label>
@@ -1426,146 +1289,193 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Dashboard resumen */}
-        <section className="mb-6">
-          <h2 className="font-semibold mb-3 text-sm">Resumen del mes</h2>
-          <div className="grid md:grid-cols-4 gap-4 mb-4">
-            <div className="border rounded-lg p-4 bg-gray-50">
-              <div className="text-xs text-gray-500">Ingresos del mes</div>
-              <div className="text-2xl font-semibold text-green-600">
-                {formatMoney(totalIngresos)}
-              </div>
+        {/* Tarjetas resumen */}
+        <div className="grid md:grid-cols-4 gap-4 mb-6">
+          <div className="border rounded-lg p-4 bg-gray-50 dark:bg-slate-900 dark:border-slate-700">
+            <div className="text-xs text-gray-500 dark:text-gray-300">
+              Ingresos del mes
             </div>
-
-            <div className="border rounded-lg p-4 bg-gray-50">
-              <div className="text-xs text-gray-500">Gastos del mes</div>
-              <div className="text-2xl font-semibold text-red-600">
-                {formatMoney(totalGastos)}
-              </div>
-            </div>
-
-            <div className="border rounded-lg p-4 bg-gray-50">
-              <div className="text-xs text-gray-500">
-                Flujo (Ingresos - Gastos)
-              </div>
-              <div
-                className={`text-2xl font-semibold ${
-                  flujo >= 0 ? "text-green-600" : "text-red-600"
-                }`}
-              >
-                {formatMoney(flujo)}
-              </div>
-            </div>
-
-            <div className="border rounded-lg p-4 bg-gray-50">
-              <div className="text-xs text-gray-500">Presupuesto del mes</div>
-              <div className="flex items-baseline gap-2 mb-2">
-                <input
-                  type="number"
-                  value={budgetInput}
-                  onChange={(e) => setBudgetInput(e.target.value)}
-                  className="border rounded px-2 py-1 text-sm w-full"
-                  placeholder="Ej. 20000"
-                />
-                <button
-                  onClick={handleSaveBudget}
-                  className="bg-sky-500 text-white text-xs px-3 py-1 rounded hover:bg-sky-600"
-                >
-                  Guardar
-                </button>
-              </div>
-              {budget != null && (
-                <div
-                  className={`text-xs ${
-                    disponible != null && disponible < 0
-                      ? "text-red-600"
-                      : "text-green-700"
-                  }`}
-                >
-                  Disponible:{" "}
-                  {disponible != null ? formatMoney(disponible) : "-"}
-                </div>
-              )}
+            <div className="text-2xl font-semibold text-green-600">
+              {formatMoney(totalIngresos)}
             </div>
           </div>
 
-          {/* Top 3 categorías + estado general */}
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="border rounded-lg p-4 bg-gray-50">
-              <div className="text-xs text-gray-500 mb-2">
-                Top 3 categorías de gasto
-              </div>
-              {top3Categorias.length === 0 ? (
-                <p className="text-xs text-gray-500">
-                  Aún no hay gastos registrados.
-                </p>
-              ) : (
-                <ul className="text-xs space-y-1">
-                  {top3Categorias.map((item, idx) => (
-                    <li
-                      key={item.category}
-                      className="flex justify-between items-center"
-                    >
-                      <span>
-                        <span className="font-semibold mr-1">
-                          #{idx + 1}
-                        </span>
-                        {item.category}
-                      </span>
-                      <span>
-                        {formatMoney(item.total)}{" "}
-                        <span className="text-gray-400">
-                          ({item.percent.toFixed(1)}%)
-                        </span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+          <div className="border rounded-lg p-4 bg-gray-50 dark:bg-slate-900 dark:border-slate-700">
+            <div className="text-xs text-gray-500 dark:text-gray-300">
+              Gastos del mes
             </div>
+            <div className="text-2xl font-semibold text-red-600">
+              {formatMoney(totalGastos)}
+            </div>
+          </div>
 
-            <div className="border rounded-lg p-4 bg-gray-50">
-              <div className="text-xs text-gray-500 mb-2">
-                Estado general
-              </div>
-              <ul className="text-xs space-y-1">
-                <li>
-                  Movimientos totales en el mes:{" "}
-                  <span className="font-semibold">
-                    {transactions.length}
-                  </span>
-                </li>
-                <li>
-                  Ingresos:{" "}
-                  <span className="font-semibold">
-                    {
-                      transactions.filter((t) => t.type === "ingreso")
-                        .length
-                    }
-                  </span>
-                </li>
-                <li>
-                  Gastos:{" "}
-                  <span className="font-semibold">
-                    {
-                      transactions.filter((t) => t.type === "gasto")
-                        .length
-                    }
-                  </span>
-                </li>
-              </ul>
+          <div className="border rounded-lg p-4 bg-gray-50 dark:bg-slate-900 dark:border-slate-700">
+            <div className="text-xs text-gray-500 dark:text-gray-300">
+              Flujo (Ingresos - Gastos)
             </div>
+            <div
+              className={`text-2xl font-semibold ${
+                flujo >= 0 ? "text-green-600" : "text-red-600"
+              }`}
+            >
+              {formatMoney(flujo)}
+            </div>
+          </div>
+
+          <div className="border rounded-lg p-4 bg-gray-50 dark:bg-slate-900 dark:border-slate-700">
+            <div className="text-xs text-gray-500 dark:text-gray-300">
+              Presupuesto del mes
+            </div>
+            <div className="flex items-baseline gap-2 mb-2">
+              <input
+                type="number"
+                value={budgetInput}
+                onChange={(e) => setBudgetInput(e.target.value)}
+                className="border rounded px-2 py-1 text-sm w-full bg-white dark:bg-slate-900 dark:border-slate-700"
+                placeholder="Ej. 20000"
+              />
+              <button
+                onClick={handleSaveBudget}
+                className="bg-sky-500 text-white text-xs px-3 py-1 rounded hover:bg-sky-600"
+              >
+                Guardar
+              </button>
+            </div>
+            {budget != null && (
+              <div
+                className={`text-xs ${
+                  disponible != null && disponible < 0
+                    ? "text-red-400"
+                    : "text-green-300"
+                }`}
+              >
+                Disponible:{" "}
+                {disponible != null ? formatMoney(disponible) : "-"}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Resumen inteligente */}
+        <section className="mb-6">
+          <h2 className="font-semibold mb-2 text-sm">
+            Resumen inteligente del mes
+          </h2>
+          {smartSummary.length === 0 ? (
+            <p className="text-xs text-gray-500">
+              Aún no hay suficiente información para generar un resumen.
+            </p>
+          ) : (
+            <ul className="text-xs list-disc pl-5 space-y-1">
+              {smartSummary.map((line, idx) => (
+                <li key={idx}>{line}</li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* Gráficas */}
+        <section className="mb-8 grid md:grid-cols-2 gap-4">
+          <div className="border rounded-lg p-4 bg-gray-50 dark:bg-slate-900 dark:border-slate-700 h-72">
+            <h3 className="text-xs font-semibold mb-2">
+              Gastos por categoría
+            </h3>
+            {chartDataCategorias.length === 0 ? (
+              <p className="text-xs text-gray-500">
+                Aún no hay gastos registrados.
+              </p>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={chartDataCategorias}
+                  margin={{ top: 10, right: 10, left: 0, bottom: 40 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="category"
+                    tick={{
+                      fontSize: 10,
+                      fill: theme === "dark" ? "#e5e7eb" : "#374151",
+                    }}
+                    angle={-30}
+                    textAnchor="end"
+                  />
+                  <YAxis
+                    tick={{
+                      fontSize: 10,
+                      fill: theme === "dark" ? "#e5e7eb" : "#374151",
+                    }}
+                  />
+                  <Tooltip />
+                  <Legend />
+                  <Bar
+                    dataKey="total"
+                    name="Gasto"
+                    radius={4}
+                    fill={theme === "dark" ? "#38bdf8" : "#0ea5e9"}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+          <div className="border rounded-lg p-4 bg-gray-50 dark:bg-slate-900 dark:border-slate-700 h-72">
+            <h3 className="text-xs font-semibold mb-2">
+              Ingresos vs Gastos por día
+            </h3>
+            {chartDataLinea.length === 0 ? (
+              <p className="text-xs text-gray-500">
+                Aún no hay movimientos suficientes para la gráfica.
+              </p>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartDataLinea}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="dateLabel"
+                    tick={{
+                      fontSize: 10,
+                      fill: theme === "dark" ? "#e5e7eb" : "#374151",
+                    }}
+                  />
+                  <YAxis
+                    tick={{
+                      fontSize: 10,
+                      fill: theme === "dark" ? "#e5e7eb" : "#374151",
+                    }}
+                  />
+                  <Tooltip />
+                  <Legend />
+                  <Line
+                    type="monotone"
+                    dataKey="ingresos"
+                    name="Ingresos"
+                    dot={false}
+                    stroke={theme === "dark" ? "#22c55e" : "#16a34a"}
+                    strokeWidth={2}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="gastos"
+                    name="Gastos"
+                    dot={false}
+                    stroke={theme === "dark" ? "#f97373" : "#ef4444"}
+                    strokeWidth={2}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </section>
 
-        {/* Visor mensual de gastos por categoría */}
+        {/* Visor mensual: gastos por categoría */}
         <section className="mb-8">
           <h2 className="font-semibold mb-2 text-sm">
             Visor mensual de gastos por categoría
           </h2>
           {gastosPorCategoria.length === 0 ? (
             <p className="text-xs text-gray-500">
-              Aún no hay gastos registrados.
+              Aún no hay gastos registrados en este mes.
             </p>
           ) : (
             <div className="space-y-2">
@@ -1580,10 +1490,12 @@ export default function Home() {
                       </span>
                     </span>
                   </div>
-                  <div className="h-2 rounded bg-gray-200 overflow-hidden">
+                  <div className="h-2 rounded bg-gray-200 dark:bg-slate-700 overflow-hidden">
                     <div
                       className="h-2 rounded bg-sky-500"
-                      style={{ width: `${Math.max(item.percent, 2)}%` }}
+                      style={{
+                        width: `${Math.max(item.percent, 2)}%`,
+                      }}
                     />
                   </div>
                 </div>
@@ -1592,102 +1504,7 @@ export default function Home() {
           )}
         </section>
 
-        {/* GRÁFICAS */}
-        <section className="mb-8">
-          <h2 className="font-semibold mb-3 text-sm">
-            Gráficas del comportamiento
-          </h2>
-
-          <div className="grid md:grid-cols-2 gap-6">
-            {/* Gráfica 1: barras por categoría (mes actual) */}
-            <div className="border rounded-lg p-4 bg-gray-50 h-[280px]">
-              <div className="text-xs text-gray-500 mb-2">
-                Gastos por categoría (mes actual)
-              </div>
-              {categoryBarData.length === 0 ? (
-                <p className="text-xs text-gray-500">
-                  Registra algunos gastos para ver esta gráfica.
-                </p>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={categoryBarData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                    <YAxis tick={{ fontSize: 10 }} />
-                    <Tooltip
-                      formatter={(value: any) =>
-                        typeof value === "number"
-                          ? formatMoney(value)
-                          : value
-                      }
-                    />
-                    <Bar dataKey="total" />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-
-            {/* Gráfica 2: línea ingresos vs gastos (histórico mensual) */}
-            <div className="border rounded-lg p-4 bg-gray-50 h-[280px]">
-              <div className="text-xs text-gray-500 mb-2">
-                Evolución mensual de ingresos vs gastos
-              </div>
-              {monthlyChartData.length === 0 ? (
-                <p className="text-xs text-gray-500">
-                  Aún no hay suficiente historial para graficar.
-                </p>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={monthlyChartData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                    <YAxis tick={{ fontSize: 10 }} />
-                    <Tooltip
-                      formatter={(value: any, name: any) =>
-                        typeof value === "number"
-                          ? [formatMoney(value), name === "ingresos" ? "Ingresos" : "Gastos"]
-                          : [value, name]
-                      }
-                    />
-                    <Legend />
-                    <Line
-                      type="monotone"
-                      dataKey="ingresos"
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="gastos"
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-          </div>
-        </section>
-
-        {/* Resumen inteligente (IA) */}
-        <section className="mb-8">
-          <h2 className="font-semibold mb-2 text-sm">
-            Resumen inteligente del mes
-          </h2>
-          {aiInsights.length === 0 ? (
-            <p className="text-xs text-gray-500">
-              Aún no hay suficientes datos para generar recomendaciones.
-            </p>
-          ) : (
-            <ul className="list-disc pl-5 space-y-1 text-xs text-gray-700">
-              {aiInsights.map((msg, idx) => (
-                <li key={idx}>{msg}</li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {/* Formulario de agregar movimiento */}
+        {/* Formulario */}
         <section className="mb-8">
           <h2 className="font-semibold mb-3">
             {editingId ? "Editar movimiento" : "Agregar movimiento"}
@@ -1697,15 +1514,17 @@ export default function Home() {
             <div className="grid md:grid-cols-5 gap-3">
               {/* Tipo */}
               <div>
-                <div className="text-xs text-gray-500 mb-1">Tipo</div>
-                <div className="inline-flex border rounded overflow-hidden">
+                <div className="text-xs text-gray-500 dark:text-gray-300 mb-1">
+                  Tipo
+                </div>
+                <div className="inline-flex border rounded overflow-hidden dark:border-slate-700">
                   <button
                     type="button"
                     onClick={() => handleChangeForm("type", "ingreso")}
                     className={`px-3 py-1 text-xs ${
                       form.type === "ingreso"
                         ? "bg-green-500 text-white"
-                        : "bg-white text-gray-700"
+                        : "bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-200"
                     }`}
                   >
                     Ingreso
@@ -1716,7 +1535,7 @@ export default function Home() {
                     className={`px-3 py-1 text-xs ${
                       form.type === "gasto"
                         ? "bg-red-500 text-white"
-                        : "bg-white text-gray-700"
+                        : "bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-200"
                     }`}
                   >
                     Gasto
@@ -1726,24 +1545,28 @@ export default function Home() {
 
               {/* Fecha */}
               <div>
-                <div className="text-xs text-gray-500 mb-1">Fecha</div>
+                <div className="text-xs text-gray-500 dark:text-gray-300 mb-1">
+                  Fecha
+                </div>
                 <input
                   type="date"
                   value={form.date}
                   onChange={(e) => handleChangeForm("date", e.target.value)}
-                  className="border rounded px-2 py-1 w-full"
+                  className="border rounded px-2 py-1 w-full bg-white dark:bg-slate-900 dark:border-slate-700"
                 />
               </div>
 
               {/* Categoría */}
               <div>
-                <div className="text-xs text-gray-500 mb-1">Categoría</div>
+                <div className="text-xs text-gray-500 dark:text-gray-300 mb-1">
+                  Categoría
+                </div>
                 <select
                   value={form.category}
                   onChange={(e) =>
                     handleChangeForm("category", e.target.value)
                   }
-                  className="border rounded px-2 py-1 w-full"
+                  className="border rounded px-2 py-1 w-full bg-white dark:bg-slate-900 dark:border-slate-700"
                 >
                   {categories.map((c) => (
                     <option key={c.value} value={c.value}>
@@ -1755,25 +1578,29 @@ export default function Home() {
 
               {/* Monto */}
               <div>
-                <div className="text-xs text-gray-500 mb-1">Monto</div>
+                <div className="text-xs text-gray-500 dark:text-gray-300 mb-1">
+                  Monto
+                </div>
                 <input
                   type="number"
                   step="0.01"
                   value={form.amount}
                   onChange={(e) => handleChangeForm("amount", e.target.value)}
-                  className="border rounded px-2 py-1 w-full"
+                  className="border rounded px-2 py-1 w-full bg-white dark:bg-slate-900 dark:border-slate-700"
                 />
               </div>
 
               {/* Método */}
               <div>
-                <div className="text-xs text-gray-500 mb-1">Método</div>
+                <div className="text-xs text-gray-500 dark:text-gray-300 mb-1">
+                  Método de pago
+                </div>
                 <select
                   value={form.method}
                   onChange={(e) =>
                     handleChangeForm("method", e.target.value)
                   }
-                  className="border rounded px-2 py-1 w-full"
+                  className="border rounded px-2 py-1 w-full bg-white dark:bg-slate-900 dark:border-slate-700"
                 >
                   {methods.map((m) => (
                     <option key={m.value} value={m.value}>
@@ -1784,10 +1611,10 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Nueva categoría y método */}
+            {/* Editor rápido de categorías y métodos */}
             <div className="grid md:grid-cols-2 gap-3">
               <div>
-                <div className="text-xs text-gray-500 mb-1">
+                <div className="text-xs text-gray-500 dark:text-gray-300 mb-1">
                   Agregar nueva categoría
                 </div>
                 <div className="flex gap-2">
@@ -1795,8 +1622,8 @@ export default function Home() {
                     type="text"
                     value={newCategory}
                     onChange={(e) => setNewCategory(e.target.value)}
-                    className="border rounded px-2 py-1 text-xs w-full"
-                    placeholder="Ej. Vacaciones"
+                    className="border rounded px-2 py-1 text-xs w-full bg-white dark:bg-slate-900 dark:border-slate-700"
+                    placeholder="Ej. Vacaciones, Mascotas, etc."
                   />
                   <button
                     type="button"
@@ -1809,16 +1636,16 @@ export default function Home() {
               </div>
 
               <div>
-                <div className="text-xs text-gray-500 mb-1">
-                  Agregar nuevo método
+                <div className="text-xs text-gray-500 dark:text-gray-300 mb-1">
+                  Agregar nuevo método de pago
                 </div>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={newMethod}
                     onChange={(e) => setNewMethod(e.target.value)}
-                    className="border rounded px-2 py-1 text-xs w-full"
-                    placeholder="Ej. Tarjeta Amazon"
+                    className="border rounded px-2 py-1 text-xs w-full bg-white dark:bg-slate-900 dark:border-slate-700"
+                    placeholder="Ej. Tarjeta Amazon, Mercado Pago, etc."
                   />
                   <button
                     type="button"
@@ -1833,12 +1660,14 @@ export default function Home() {
 
             {/* Notas */}
             <div>
-              <div className="text-xs text-gray-500 mb-1">Notas</div>
+              <div className="text-xs text-gray-500 dark:text-gray-300 mb-1">
+                Notas (opcional)
+              </div>
               <textarea
                 value={form.notes}
                 onChange={(e) => handleChangeForm("notes", e.target.value)}
-                className="border rounded px-3 py-2 w-full"
-                placeholder="Descripción, quién pagó, etc."
+                className="border rounded px-3 py-2 w-full bg-white dark:bg-slate-900 dark:border-slate-700"
+                placeholder="Descripción, quién pagó, folio, etc."
               />
             </div>
 
@@ -1855,7 +1684,6 @@ export default function Home() {
                   ? "Guardar cambios"
                   : "Agregar"}
               </button>
-
               {editingId && (
                 <button
                   type="button"
@@ -1867,27 +1695,31 @@ export default function Home() {
               )}
             </div>
 
-            {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+            {error && (
+              <p className="text-xs text-red-600 mt-1">{error}</p>
+            )}
           </form>
         </section>
 
-        {/* Filtros de la tabla */}
-        <section className="mb-4">
+        {/* Filtros de movimientos (ahora justo antes de la tabla) */}
+        <section className="mb-6">
           <h2 className="font-semibold mb-2 text-sm">
             Filtros de movimientos
           </h2>
-          <div className="grid md:grid-cols-4 gap-3 text-xs items-end">
+          <div className="grid md:grid-cols-4 gap-3 text-xs">
             {/* Tipo */}
             <div>
-              <div className="text-gray-500 mb-1">Tipo</div>
-              <div className="flex gap-1">
+              <div className="mb-1 text-gray-500 dark:text-gray-300">
+                Tipo
+              </div>
+              <div className="inline-flex border rounded overflow-hidden dark:border-slate-700">
                 <button
                   type="button"
                   onClick={() => setFilterType("todos")}
-                  className={`flex-1 border rounded px-2 py-1 ${
+                  className={`px-3 py-1 ${
                     filterType === "todos"
-                      ? "bg-sky-500 text-white border-sky-500"
-                      : "bg-white text-gray-700 border-gray-300"
+                      ? "bg-sky-500 text-white"
+                      : "bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-200"
                   }`}
                 >
                   Todos
@@ -1895,10 +1727,10 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setFilterType("ingreso")}
-                  className={`flex-1 border rounded px-2 py-1 ${
+                  className={`px-3 py-1 ${
                     filterType === "ingreso"
-                      ? "bg-green-500 text-white border-green-500"
-                      : "bg-white text-gray-700 border-gray-300"
+                      ? "bg-green-500 text-white"
+                      : "bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-200"
                   }`}
                 >
                   Ingresos
@@ -1906,10 +1738,10 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setFilterType("gasto")}
-                  className={`flex-1 border rounded px-2 py-1 ${
+                  className={`px-3 py-1 ${
                     filterType === "gasto"
-                      ? "bg-red-500 text-white border-red-500"
-                      : "bg-white text-gray-700 border-gray-300"
+                      ? "bg-red-500 text-white"
+                      : "bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-200"
                   }`}
                 >
                   Gastos
@@ -1919,11 +1751,13 @@ export default function Home() {
 
             {/* Categoría */}
             <div>
-              <div className="text-gray-500 mb-1">Categoría</div>
+              <div className="mb-1 text-gray-500 dark:text-gray-300">
+                Categoría
+              </div>
               <select
                 value={filterCategory}
                 onChange={(e) => setFilterCategory(e.target.value)}
-                className="border rounded px-2 py-1 w-full"
+                className="border rounded px-2 py-1 w-full bg-white dark:bg-slate-900 dark:border-slate-700"
               >
                 <option value="TODAS">Todas</option>
                 {categories.map((c) => (
@@ -1936,11 +1770,13 @@ export default function Home() {
 
             {/* Método */}
             <div>
-              <div className="text-gray-500 mb-1">Método</div>
+              <div className="mb-1 text-gray-500 dark:text-gray-300">
+                Método de pago
+              </div>
               <select
                 value={filterMethod}
                 onChange={(e) => setFilterMethod(e.target.value)}
-                className="border rounded px-2 py-1 w-full"
+                className="border rounded px-2 py-1 w-full bg-white dark:bg-slate-900 dark:border-slate-700"
               >
                 <option value="TODOS">Todos</option>
                 {methods.map((m) => (
@@ -1951,27 +1787,19 @@ export default function Home() {
               </select>
             </div>
 
-            {/* Búsqueda */}
+            {/* Buscar */}
             <div>
-              <div className="text-gray-500 mb-1">Buscar</div>
+              <div className="mb-1 text-gray-500 dark:text-gray-300">
+                Buscar
+              </div>
               <input
                 type="text"
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
-                className="border rounded px-2 py-1 w-full"
-                placeholder="Notas, monto, fecha..."
+                className="border rounded px-2 py-1 w-full bg-white dark:bg-slate-900 dark:border-slate-700"
+                placeholder="Notas, categoría, fecha..."
               />
             </div>
-          </div>
-
-          <div className="mt-1 text-[11px] text-gray-500">
-            Mostrando{" "}
-            <span className="font-semibold">
-              {filteredTransactions.length}
-            </span>{" "}
-            de{" "}
-            <span className="font-semibold">{transactions.length}</span>{" "}
-            movimientos del mes.
           </div>
         </section>
 
@@ -1982,8 +1810,8 @@ export default function Home() {
           </h2>
 
           <div className="overflow-x-auto text-sm">
-            <table className="min-w-full border border-gray-200 text-left text-xs md:text-sm">
-              <thead className="bg-gray-50">
+            <table className="min-w-full border border-gray-200 dark:border-slate-700 text-left text-xs md:text-sm">
+              <thead className="bg-gray-50 dark:bg-slate-900">
                 <tr>
                   <th className="border-b px-2 py-2">Fecha</th>
                   <th className="border-b px-2 py-2">Tipo</th>
@@ -1991,10 +1819,11 @@ export default function Home() {
                   <th className="border-b px-2 py-2 text-right">Monto</th>
                   <th className="border-b px-2 py-2">Método</th>
                   <th className="border-b px-2 py-2">Notas</th>
-                  <th className="border-b px-2 py-2 text-center">Acciones</th>
+                  <th className="border-b px-2 py-2 text-center">
+                    Acciones
+                  </th>
                 </tr>
               </thead>
-
               <tbody>
                 {loading && (
                   <tr>
@@ -2006,52 +1835,44 @@ export default function Home() {
                     </td>
                   </tr>
                 )}
-
                 {!loading && filteredTransactions.length === 0 && (
                   <tr>
                     <td
                       colSpan={7}
                       className="text-center py-4 text-gray-500"
                     >
-                      Sin movimientos que coincidan con los filtros.
+                      Sin movimientos registrados con esos filtros.
                     </td>
                   </tr>
                 )}
-
                 {!loading &&
                   filteredTransactions.map((t) => (
                     <tr
                       key={t.id}
-                      className={`odd:bg-white even:bg-gray-50 ${
-                        t.localOnly ? "opacity-60" : ""
+                      className={`odd:bg-white even:bg-gray-50 dark:odd:bg-slate-800 dark:even:bg-slate-900 ${
+                        t.localOnly ? "opacity-70" : ""
                       }`}
                     >
                       {/* FECHA */}
                       <td className="border-t px-2 py-1">
                         {formatDateDisplay(t.date)}
                       </td>
-
                       {/* TIPO */}
                       <td className="border-t px-2 py-1">
                         {t.type === "ingreso" ? "Ingreso" : "Gasto"}
                       </td>
-
                       {/* CATEGORÍA */}
                       <td className="border-t px-2 py-1">{t.category}</td>
-
                       {/* MONTO */}
                       <td className="border-t px-2 py-1 text-right">
                         {formatMoney(t.amount)}
                       </td>
-
                       {/* MÉTODO */}
                       <td className="border-t px-2 py-1">{t.method}</td>
-
                       {/* NOTAS */}
                       <td className="border-t px-2 py-1 max-w-xs truncate">
                         {t.notes}
                       </td>
-
                       {/* ACCIONES */}
                       <td className="border-t px-2 py-1 text-center">
                         <button
