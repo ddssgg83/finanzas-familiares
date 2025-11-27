@@ -4,6 +4,18 @@ import { useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { saveOfflineTx, getOfflineTxs, syncOfflineTxs } from "@/lib/offline";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+  Legend,
+  LineChart,
+  Line,
+} from "recharts";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +44,12 @@ type FormState = {
 type Option = { label: string; value: string };
 
 type ExportType = "todos" | "ingresos" | "gastos";
+
+type MonthlyPoint = {
+  monthKey: string; // 2025-11
+  ingresos: number;
+  gastos: number;
+};
 
 const DEFAULT_CATEGORIES: Option[] = [
   { label: "Sueldo", value: "SUELDO" },
@@ -73,7 +91,7 @@ function formatMoney(num: number) {
 
 // Evita el problema de zonas horarias al mostrar fechas
 function formatDateDisplay(ymd: string) {
-  const s = (ymd ?? "").slice(0, 10); // nos quedamos solo con YYYY-MM-DD
+  const s = (ymd ?? "").slice(0, 10); // YYYY-MM-DD
   const [y, m, d] = s.split("-");
   if (!y || !m || !d) return ymd;
   return `${d}/${m}/${y}`; // dd/mm/yyyy
@@ -86,6 +104,12 @@ function csvEscape(value: string | number | null | undefined): string {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;
+}
+
+function formatMonthShort(monthKey: string) {
+  const [y, m] = monthKey.split("-");
+  const date = new Date(Number(y), Number(m) - 1, 1);
+  return date.toLocaleDateString("es-MX", { month: "short" });
 }
 
 export default function Home() {
@@ -140,6 +164,9 @@ export default function Home() {
   const [filterCategory, setFilterCategory] = useState<string>("TODAS");
   const [filterMethod, setFilterMethod] = useState<string>("TODOS");
   const [searchText, setSearchText] = useState<string>("");
+
+  // 📈 Historial mensual (para gráficas e insights avanzados)
+  const [monthlyHistory, setMonthlyHistory] = useState<MonthlyPoint[]>([]);
 
   // --------------------------------------------------
   //   AUTH: usuario actual + listener
@@ -387,6 +414,86 @@ export default function Home() {
   }, [month, user]);
 
   // --------------------------------------------------
+  //   Historial mensual (últimos ~12 meses) para gráficas
+  // --------------------------------------------------
+  useEffect(() => {
+    if (!user) {
+      setMonthlyHistory([]);
+      return;
+    }
+
+    const userId = user.id;
+
+    async function loadHistory() {
+      try {
+        const [y, m] = month.split("-");
+        const current = new Date(Number(y), Number(m) - 1, 1);
+
+        const fromDate = new Date(current);
+        fromDate.setMonth(fromDate.getMonth() - 11); // últimos 12 meses (si hay datos)
+
+        const fromStr = `${fromDate.getFullYear()}-${String(
+          fromDate.getMonth() + 1
+        ).padStart(2, "0")}-01`;
+
+        const toStr = `${current.getFullYear()}-${String(
+          current.getMonth() + 1
+        ).padStart(2, "0")}-${new Date(
+          current.getFullYear(),
+          current.getMonth() + 1,
+          0
+        )
+          .getDate()
+          .toString()
+          .padStart(2, "0")}`;
+
+        const { data, error } = await supabase
+          .from("transactions")
+          .select("*")
+          .eq("user_id", userId)
+          .gte("date", fromStr)
+          .lte("date", toStr)
+          .order("date", { ascending: true });
+
+        if (error) throw error;
+
+        const map = new Map<string, { ingresos: number; gastos: number }>();
+
+        (data ?? []).forEach((t: any) => {
+          const dateStr = String(t.date).slice(0, 10); // YYYY-MM-DD
+          const key = dateStr.slice(0, 7); // YYYY-MM
+          const amount = Number(t.amount) || 0;
+
+          if (!map.has(key)) {
+            map.set(key, { ingresos: 0, gastos: 0 });
+          }
+          const entry = map.get(key)!;
+          if (t.type === "ingreso") {
+            entry.ingresos += amount;
+          } else {
+            entry.gastos += amount;
+          }
+        });
+
+        const history: MonthlyPoint[] = Array.from(map.entries())
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([monthKey, val]) => ({
+            monthKey,
+            ingresos: val.ingresos,
+            gastos: val.gastos,
+          }));
+
+        setMonthlyHistory(history);
+      } catch (err) {
+        console.error("Error cargando historial mensual:", err);
+        setMonthlyHistory([]);
+      }
+    }
+
+    loadHistory();
+  }, [user, month]);
+
+  // --------------------------------------------------
   //   NUEVO SISTEMA DE SINCRONIZACIÓN (NO BORRA NADA)
   // --------------------------------------------------
   useEffect(() => {
@@ -516,7 +623,29 @@ export default function Home() {
   }, [gastosPorCategoria]);
 
   // --------------------------------------------------
-  //   "IA ligera": resumen inteligente del mes
+  //   Datos para gráficas
+  // --------------------------------------------------
+  const categoryBarData = useMemo(
+    () =>
+      gastosPorCategoria.map((item) => ({
+        name: item.category,
+        total: item.total,
+      })),
+    [gastosPorCategoria]
+  );
+
+  const monthlyChartData = useMemo(
+    () =>
+      monthlyHistory.map((p) => ({
+        name: formatMonthShort(p.monthKey),
+        ingresos: p.ingresos,
+        gastos: p.gastos,
+      })),
+    [monthlyHistory]
+  );
+
+  // --------------------------------------------------
+  //   "IA" ligera + avanzada: resumen inteligente del mes
   // --------------------------------------------------
   const aiInsights = useMemo(() => {
     const insights: string[] = [];
@@ -555,7 +684,7 @@ export default function Home() {
       const pct = totalGastos / budget;
       if (pct > 1) {
         insights.push(
-          `Ya te pasaste del presupuesto mensual que definiste. Tal vez valga la pena ajustar el presupuesto o revisar las categorías con más gasto.`
+          "Ya te pasaste del presupuesto mensual que definiste. Tal vez valga la pena ajustar el presupuesto o revisar las categorías con más gasto."
         );
       } else if (pct > 0.9) {
         insights.push(
@@ -563,7 +692,7 @@ export default function Home() {
         );
       } else if (pct > 0.7) {
         insights.push(
-          "Ya superaste el 70% de tu presupuesto del mes. Vas avanzado; te conviene revisar las categorías con más peso para no pasar el límite."
+          "Ya superaste el 70% de tu presupuesto del mes. Te conviene revisar las categorías con más peso para no pasar el límite."
         );
       } else {
         insights.push(
@@ -580,6 +709,110 @@ export default function Home() {
           mayor.total
         )}. Si quieres recortar, este rubro es el primer candidato a revisar.`
       );
+    }
+
+    // Gastos "fijos" aproximados
+    const fixedCategories = ["RENTA", "ESCUELA", "SERVICIOS"];
+    const gastosFijos = transactions
+      .filter(
+        (t) =>
+          t.type === "gasto" && fixedCategories.includes(t.category)
+      )
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    if (gastosFijos > 0) {
+      insights.push(
+        `Tus gastos fijos aproximados (renta, escuela, servicios) este mes suman ${formatMoney(
+          gastosFijos
+        )}. Esto te da una idea de tu piso mínimo mensual.`
+      );
+    }
+
+    // Entretenimiento
+    const entretenimiento = transactions
+      .filter(
+        (t) => t.type === "gasto" && t.category === "ENTRETENIMIENTO"
+      )
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    if (entretenimiento > 0 && totalGastos > 0) {
+      const pctEnt = (entretenimiento * 100) / totalGastos;
+      if (pctEnt > 25) {
+        insights.push(
+          `Una parte importante de tus gastos (${pctEnt.toFixed(
+            1
+          )}%) se va a "Entretenimiento". Podría ser un área a ajustar si quieres liberar flujo.`
+        );
+      } else if (pctEnt < 10) {
+        insights.push(
+          "Tu gasto en entretenimiento es bajo comparado con el total. Si tu flujo es saludable, podrías darte más espacio para ocio sin afectar demasiado."
+        );
+      }
+    }
+
+    // Historial mensual: comparación con el mes anterior
+    if (monthlyHistory.length >= 2) {
+      const last = monthlyHistory[monthlyHistory.length - 1];
+      const prev = monthlyHistory[monthlyHistory.length - 2];
+
+      const diffG = last.gastos - prev.gastos;
+      const diffI = last.ingresos - prev.ingresos;
+
+      if (prev.gastos > 0) {
+        const pctG = (diffG * 100) / prev.gastos;
+        if (pctG > 10) {
+          insights.push(
+            `Tus gastos subieron aproximadamente ${pctG.toFixed(
+              1
+            )}% comparado con el mes anterior. Vale la pena revisar qué cambió.`
+          );
+        } else if (pctG < -10) {
+          insights.push(
+            `Tus gastos bajaron aproximadamente ${Math.abs(
+              pctG
+            ).toFixed(
+              1
+            )}% comparado con el mes anterior. Buen avance, trata de mantener este nivel.`
+          );
+        }
+      }
+
+      if (prev.ingresos > 0) {
+        const pctI = (diffI * 100) / prev.ingresos;
+        if (pctI > 10) {
+          insights.push(
+            `Tus ingresos aumentaron cerca de ${pctI.toFixed(
+              1
+            )}% respecto al mes anterior. Si mantienes este ritmo, tu capacidad de ahorro mejorará.`
+          );
+        } else if (pctI < -10) {
+          insights.push(
+            `Tus ingresos bajaron alrededor de ${Math.abs(
+              pctI
+            ).toFixed(
+              1
+            )}% respecto al mes anterior. Intenta ser más conservador con los gastos hasta que se estabilicen.`
+          );
+        }
+      }
+    }
+
+    // Tendencia de 3 meses en gastos
+    if (monthlyHistory.length >= 3) {
+      const last3 = monthlyHistory.slice(-3);
+      const g0 = last3[0].gastos;
+      const g1 = last3[1].gastos;
+      const g2 = last3[2].gastos;
+
+      if (g0 < g1 && g1 < g2) {
+        insights.push(
+          "Llevas al menos 3 meses seguidos aumentando tus gastos. Si es intencional (viajes, proyectos, etc.), está bien; si no, es una señal para intervenir."
+        );
+      } else if (g0 > g1 && g1 > g2) {
+        insights.push(
+          "Tus gastos llevan al menos 3 meses bajando de forma consecutiva. Es una tendencia muy positiva; podrías aprovechar para aumentar tu ahorro."
+        );
+      }
     }
 
     // Cantidad de movimientos
@@ -600,6 +833,7 @@ export default function Home() {
     totalGastos,
     budget,
     gastosPorCategoria,
+    monthlyHistory,
   ]);
 
   // --------------------------------------------------
@@ -667,7 +901,7 @@ export default function Home() {
     ];
 
     const rows = data.map((t) => [
-      t.date, // usamos la fecha tal cual
+      t.date,
       t.type,
       t.category,
       t.amount,
@@ -841,8 +1075,8 @@ export default function Home() {
         if (error) throw error;
 
         const newTx: Tx = {
-          id: data.id,          // id desde Supabase
-          date: payload.date,   // usamos la fecha exacta del formulario
+          id: data.id,
+          date: payload.date,
           type: payload.type,
           category: payload.category,
           amount: payload.amount,
@@ -1255,7 +1489,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Top 3 categorías de gasto */}
+          {/* Top 3 categorías + estado general */}
           <div className="grid md:grid-cols-2 gap-4">
             <div className="border rounded-lg p-4 bg-gray-50">
               <div className="text-xs text-gray-500 mb-2">
@@ -1358,7 +1592,84 @@ export default function Home() {
           )}
         </section>
 
-        {/* Resumen inteligente (IA ligera) */}
+        {/* GRÁFICAS */}
+        <section className="mb-8">
+          <h2 className="font-semibold mb-3 text-sm">
+            Gráficas del comportamiento
+          </h2>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* Gráfica 1: barras por categoría (mes actual) */}
+            <div className="border rounded-lg p-4 bg-gray-50 h-[280px]">
+              <div className="text-xs text-gray-500 mb-2">
+                Gastos por categoría (mes actual)
+              </div>
+              {categoryBarData.length === 0 ? (
+                <p className="text-xs text-gray-500">
+                  Registra algunos gastos para ver esta gráfica.
+                </p>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={categoryBarData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 10 }} />
+                    <Tooltip
+                      formatter={(value: any) =>
+                        typeof value === "number"
+                          ? formatMoney(value)
+                          : value
+                      }
+                    />
+                    <Bar dataKey="total" />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+
+            {/* Gráfica 2: línea ingresos vs gastos (histórico mensual) */}
+            <div className="border rounded-lg p-4 bg-gray-50 h-[280px]">
+              <div className="text-xs text-gray-500 mb-2">
+                Evolución mensual de ingresos vs gastos
+              </div>
+              {monthlyChartData.length === 0 ? (
+                <p className="text-xs text-gray-500">
+                  Aún no hay suficiente historial para graficar.
+                </p>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={monthlyChartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 10 }} />
+                    <Tooltip
+                      formatter={(value: any, name: any) =>
+                        typeof value === "number"
+                          ? [formatMoney(value), name === "ingresos" ? "Ingresos" : "Gastos"]
+                          : [value, name]
+                      }
+                    />
+                    <Legend />
+                    <Line
+                      type="monotone"
+                      dataKey="ingresos"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="gastos"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* Resumen inteligente (IA) */}
         <section className="mb-8">
           <h2 className="font-semibold mb-2 text-sm">
             Resumen inteligente del mes
