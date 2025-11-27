@@ -71,6 +71,15 @@ function formatMoney(num: number) {
   });
 }
 
+// Evita el problema de zonas horarias al mostrar fechas
+function formatDateDisplay(ymd: string) {
+  const s = (ymd ?? "").slice(0, 10); // 👈 nos quedamos solo con YYYY-MM-DD
+  const [y, m, d] = s.split("-");
+  if (!y || !m || !d) return ymd;
+  return `${d}/${m}/${y}`; // dd/mm/yyyy
+}
+
+
 function csvEscape(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return "";
   const str = String(value);
@@ -266,6 +275,9 @@ export default function Home() {
     loadOffline();
   }, []);
 
+  // --------------------------------------------------
+  //   Cargar transacciones del mes desde Supabase
+  // --------------------------------------------------
   useEffect(() => {
     if (!user) {
       setTransactions([]);
@@ -300,22 +312,23 @@ export default function Home() {
 
         if (error) throw error;
 
-        setTransactions(
-          (data ?? []).map((t: any) => ({
-            id: t.id,
-            date: t.date,
-            type: t.type,
-            category: t.category,
-            amount: Number(t.amount),
-            method: t.method,
-            notes: t.notes,
-          }))
-        );
+        // 👇 normalizamos la fecha a YYYY-MM-DD
+        const normalized = (data ?? []).map((t: any) => ({
+          id: t.id,
+          date: String(t.date).slice(0, 10),
+          type: t.type,
+          category: t.category,
+          amount: Number(t.amount),
+          method: t.method,
+          notes: t.notes,
+        }));
+
+        setTransactions(normalized);
 
         if (typeof window !== "undefined") {
           localStorage.setItem(
             `ff-cache-${month}`,
-            JSON.stringify(data ?? [])
+            JSON.stringify(normalized)
           );
         }
       } catch (err) {
@@ -327,17 +340,18 @@ export default function Home() {
           if (cache) {
             try {
               const parsed = JSON.parse(cache);
-              setTransactions(
-                (parsed ?? []).map((t: any) => ({
-                  id: t.id,
-                  date: t.date,
-                  type: t.type,
-                  category: t.category,
-                  amount: Number(t.amount),
-                  method: t.method,
-                  notes: t.notes,
-                }))
-              );
+
+              const normalized = (parsed ?? []).map((t: any) => ({
+                id: t.id,
+                date: String(t.date).slice(0, 10),
+                type: t.type,
+                category: t.category,
+                amount: Number(t.amount),
+                method: t.method,
+                notes: t.notes,
+              }));
+
+              setTransactions(normalized);
             } catch {}
           }
         }
@@ -505,7 +519,7 @@ export default function Home() {
     ];
 
     const rows = data.map((t) => [
-      new Date(t.date).toISOString().slice(0, 10),
+      t.date, // 👈 sin new Date(), así evitamos que se recorra un día
       t.type,
       t.category,
       t.amount,
@@ -561,6 +575,7 @@ export default function Home() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
+
   // --------------------------------------------------
   //   Cambiar mes
   // --------------------------------------------------
@@ -668,7 +683,7 @@ export default function Home() {
             t.id === editingId ? { ...t, ...payload } : t
           )
         );
-      } else {
+            } else {
         const { data, error } = await supabase
           .from("transactions")
           .insert({ ...payload, user_id: user.id })
@@ -678,13 +693,13 @@ export default function Home() {
         if (error) throw error;
 
         const newTx: Tx = {
-          id: data.id,
-          date: data.date,
-          type: data.type,
-          category: data.category,
-          amount: Number(data.amount),
-          method: data.method,
-          notes: data.notes,
+          id: data.id,          // el id sí viene de Supabase
+          date: payload.date,   // 👈 usamos la fecha tal cual del formulario
+          type: payload.type,
+          category: payload.category,
+          amount: payload.amount,
+          method: payload.method,
+          notes: payload.notes,
         };
 
         setTransactions((prev) => [newTx, ...prev]);
@@ -1328,63 +1343,77 @@ export default function Home() {
               </thead>
 
               <tbody>
-                {loading && (
-                  <tr>
-                    <td colSpan={7} className="text-center py-4 text-gray-500">
-                      Cargando movimientos...
-                    </td>
-                  </tr>
-                )}
+  {loading && (
+    <tr>
+      <td colSpan={7} className="text-center py-4 text-gray-500">
+        Cargando movimientos...
+      </td>
+    </tr>
+  )}
 
-                {!loading && transactions.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="text-center py-4 text-gray-500">
-                      Sin movimientos registrados.
-                    </td>
-                  </tr>
-                )}
+  {!loading && transactions.length === 0 && (
+    <tr>
+      <td colSpan={7} className="text-center py-4 text-gray-500">
+        Sin movimientos registrados.
+      </td>
+    </tr>
+  )}
 
-                {!loading &&
-                  transactions.map((t) => (
-                    <tr
-                      key={t.id}
-                      className={`odd:bg-white even:bg-gray-50 ${
-                        t.localOnly ? "opacity-60" : ""
-                      }`}
-                    >
-                      <td className="border-t px-2 py-1">
-                        {new Date(t.date).toLocaleDateString("es-MX")}
-                      </td>
-                      <td className="border-t px-2 py-1">
-                        {t.type === "ingreso" ? "Ingreso" : "Gasto"}
-                      </td>
-                      <td className="border-t px-2 py-1">{t.category}</td>
-                      <td className="border-t px-2 py-1 text-right">
-                        {formatMoney(t.amount)}
-                      </td>
-                      <td className="border-t px-2 py-1">{t.method}</td>
-                      <td className="border-t px-2 py-1 max-w-xs truncate">
-                        {t.notes}
-                      </td>
-                      <td className="border-t px-2 py-1 text-center">
-                        <button
-                          type="button"
-                          onClick={() => handleEdit(t)}
-                          className="text-xs text-sky-600 hover:underline mr-2"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(t)}
-                          className="text-xs text-red-600 hover:underline"
-                        >
-                          Eliminar
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
+  {!loading &&
+    transactions.map((t) => (
+      
+      <tr
+        key={t.id}
+        className={`odd:bg-white even:bg-gray-50 ${
+          t.localOnly ? "opacity-60" : ""
+        }`}
+      >
+        {/* FECHA */}
+        <td className="border-t px-2 py-1">
+          {formatDateDisplay(t.date)}
+        </td>
+
+        {/* TIPO */}
+        <td className="border-t px-2 py-1">
+          {t.type === "ingreso" ? "Ingreso" : "Gasto"}
+        </td>
+
+        {/* CATEGORÍA */}
+        <td className="border-t px-2 py-1">{t.category}</td>
+
+        {/* MONTO */}
+        <td className="border-t px-2 py-1 text-right">
+          {formatMoney(t.amount)}
+        </td>
+
+        {/* MÉTODO */}
+        <td className="border-t px-2 py-1">{t.method}</td>
+
+        {/* NOTAS */}
+        <td className="border-t px-2 py-1 max-w-xs truncate">
+          {t.notes}
+        </td>
+
+        {/* ACCIONES */}
+        <td className="border-t px-2 py-1 text-center">
+          <button
+            type="button"
+            onClick={() => handleEdit(t)}
+            className="text-xs text-sky-600 hover:underline mr-2"
+          >
+            Editar
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDelete(t)}
+            className="text-xs text-red-600 hover:underline"
+          >
+            Eliminar
+          </button>
+        </td>
+      </tr>
+    ))}
+</tbody>
             </table>
           </div>
         </section>
