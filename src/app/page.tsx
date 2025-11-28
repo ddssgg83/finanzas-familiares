@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
@@ -16,6 +16,8 @@ import {
   LineChart,
   Line,
 } from "recharts";
+import { useTheme } from "next-themes";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export const dynamic = "force-dynamic";
 
@@ -152,43 +154,16 @@ export default function Home() {
   const [filterMethod, setFilterMethod] = useState<string>("TODOS");
   const [searchText, setSearchText] = useState<string>("");
 
-  // 🌙 Tema (claro / oscuro)
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  // 🌙 Tema global (para saber si es dark y ajustar gráficos)
+  const { theme, systemTheme } = useTheme();
+  const [mountedTheme, setMountedTheme] = useState(false);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const stored = window.localStorage.getItem("ff-theme");
-    const prefersDark =
-      window.matchMedia &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches;
-
-    const initial =
-      stored === "dark" || (!stored && prefersDark) ? "dark" : "light";
-
-    setTheme(initial);
-
-    if (initial === "dark") {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
+    setMountedTheme(true);
   }, []);
 
-  const toggleTheme = () => {
-    const next = theme === "dark" ? "light" : "dark";
-    setTheme(next);
-
-    if (next === "dark") {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
-
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("ff-theme", next);
-    }
-  };
+  const currentTheme = theme === "system" ? systemTheme : theme;
+  const isDark = mountedTheme && currentTheme === "dark";
 
   // --------------------------------------------------
   //   AUTH: usuario actual + listener
@@ -1049,106 +1024,104 @@ export default function Home() {
   // --------------------------------------------------
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-gray-100 dark:bg-slate-900 flex flex-col">
-        <header className="bg-sky-500 dark:bg-sky-700 text-white py-2 text-center text-sm">
-          Finanzas Familiares
-        </header>
-        <main className="flex-1 flex items-center justify-center">
-          <div className="text-gray-600 dark:text-gray-200 text-sm">
-            Cargando sesión...
-          </div>
-        </main>
+      <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
+        Cargando sesión...
       </div>
     );
   }
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-gray-100 dark:bg-slate-900 flex flex-col">
-        <header className="bg-sky-500 dark:bg-sky-700 text-white py-2 text-center text-sm">
-          Finanzas Familiares
-        </header>
-        <main className="flex-1 flex items-center justify-center px-4">
-          <div className="bg-white dark:bg-slate-800 shadow rounded-lg p-6 w-full max-w-md space-y-4">
-            <h1 className="text-lg font-semibold text-center mb-2">
-              {authMode === "login" ? "Inicia sesión" : "Crea tu cuenta"}
-            </h1>
-
-            <form
-              onSubmit={authMode === "login" ? handleSignIn : handleSignUp}
-              className="space-y-3 text-sm"
-            >
-              <div>
-                <label className="block text-xs text-gray-600 dark:text-gray-300 mb-1">
-                  Correo electrónico
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={authEmail}
-                  onChange={(e) => setAuthEmail(e.target.value)}
-                  className="border rounded px-3 py-2 w-full text-sm bg-white dark:bg-slate-900 dark:border-slate-700"
-                  placeholder="tucorreo@ejemplo.com"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs text-gray-600 dark:text-gray-300 mb-1">
-                  Contraseña
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={authPassword}
-                  onChange={(e) => setAuthPassword(e.target.value)}
-                  className="border rounded px-3 py-2 w-full text-sm bg-white dark:bg-slate-900 dark:border-slate-700"
-                  placeholder="Mínimo 6 caracteres"
-                />
-              </div>
-
-              {authError && (
-                <p className="text-xs text-red-600">{authError}</p>
-              )}
-
-              <button
-                type="submit"
-                className="w-full bg-sky-500 hover:bg-sky-600 text-white py-2 rounded text-sm font-medium"
-              >
-                {authMode === "login" ? "Entrar" : "Crear cuenta"}
-              </button>
-            </form>
-
-            <div className="text-center text-xs text-gray-600 dark:text-gray-300">
-              {authMode === "login" ? (
-                <>
-                  ¿No tienes cuenta?{" "}
-                  <button
-                    className="text-sky-600 underline"
-                    onClick={() => {
-                      setAuthMode("signup");
-                      setAuthError(null);
-                    }}
-                  >
-                    Crear una nueva
-                  </button>
-                </>
-              ) : (
-                <>
-                  ¿Ya tienes cuenta?{" "}
-                  <button
-                    className="text-sky-600 underline"
-                    onClick={() => {
-                      setAuthMode("login");
-                      setAuthError(null);
-                    }}
-                  >
-                    Inicia sesión
-                  </button>
-                </>
-              )}
+      <div className="flex flex-1 items-center justify-center">
+        <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-lg font-semibold">Finanzas familiares</h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Registra tus ingresos y gastos en un solo lugar.
+              </p>
             </div>
+            <ThemeToggle />
           </div>
-        </main>
+
+          <h2 className="text-sm font-medium">
+            {authMode === "login" ? "Inicia sesión" : "Crea tu cuenta"}
+          </h2>
+
+          <form
+            onSubmit={authMode === "login" ? handleSignIn : handleSignUp}
+            className="space-y-3 text-sm"
+          >
+            <div>
+              <label className="mb-1 block text-xs text-gray-600 dark:text-gray-300">
+                Correo electrónico
+              </label>
+              <input
+                type="email"
+                required
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="tucorreo@ejemplo.com"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs text-gray-600 dark:text-gray-300">
+                Contraseña
+              </label>
+              <input
+                type="password"
+                required
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="Mínimo 6 caracteres"
+              />
+            </div>
+
+            {authError && (
+              <p className="text-xs text-red-500">{authError}</p>
+            )}
+
+            <button
+              type="submit"
+              className="w-full rounded-lg bg-sky-500 py-2 text-sm font-medium text-white transition hover:bg-sky-600"
+            >
+              {authMode === "login" ? "Entrar" : "Crear cuenta"}
+            </button>
+          </form>
+
+          <div className="text-center text-xs text-gray-600 dark:text-gray-300">
+            {authMode === "login" ? (
+              <>
+                ¿No tienes cuenta?{" "}
+                <button
+                  className="text-sky-600 underline"
+                  onClick={() => {
+                    setAuthMode("signup");
+                    setAuthError(null);
+                  }}
+                >
+                  Crear una nueva
+                </button>
+              </>
+            ) : (
+              <>
+                ¿Ya tienes cuenta?{" "}
+                <button
+                  className="text-sky-600 underline"
+                  onClick={() => {
+                    setAuthMode("login");
+                    setAuthError(null);
+                  }}
+                >
+                  Inicia sesión
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       </div>
     );
   }
@@ -1157,186 +1130,194 @@ export default function Home() {
   //   Render: app logueada
   // --------------------------------------------------
   return (
-    <div className="min-h-screen bg-gray-100 text-gray-900 dark:bg-slate-900 dark:text-gray-100">
-      <header className="bg-sky-500 dark:bg-sky-700 text-white py-2 text-center text-sm relative">
-        Finanzas Familiares
-        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 text-[11px]">
-          <button
-            type="button"
-            onClick={toggleTheme}
-            className="border border-white/70 px-2 py-0.5 rounded hover:bg-white/10 transition"
-          >
-            {theme === "dark" ? "☀️ Claro" : "🌙 Oscuro"}
-          </button>
-          <span className="hidden sm:inline">{user.email}</span>
+    <main className="flex flex-1 flex-col gap-4">
+      {/* Header */}
+      <header className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div>
+          <h1 className="text-lg font-semibold sm:text-xl">
+            Finanzas familiares
+          </h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Controla ingresos, gastos y presupuesto mensual.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <span className="hidden text-[11px] text-slate-500 sm:inline">
+            {user.email}
+          </span>
           <button
             onClick={handleSignOut}
-            className="border border-white/70 px-2 py-0.5 rounded hover:bg-white hover:text-sky-600 transition text-[11px]"
+            className="rounded-full border border-slate-200 px-3 py-1 text-[11px] font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
           >
             Cerrar sesión
           </button>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto bg-white dark:bg-slate-800 shadow rounded-lg p-6 mt-4 mb-8">
-        {/* Mes + estado conexión + export */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
-          <div>
-            <div className="text-sm text-gray-500 dark:text-gray-300">
-              Mes
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="month"
-                value={month}
-                onChange={(e) => handleChangeMonth(e.target.value)}
-                className="border rounded px-3 py-1 text-sm bg-white dark:bg-slate-900 dark:border-slate-700"
-              />
-              <button
-                type="button"
-                onClick={() => setShowExportOptions((v) => !v)}
-                className="text-xs bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1 rounded"
-              >
-                {showExportOptions ? "Cerrar exportar" : "Exportar"}
-              </button>
-            </div>
-            <div className="text-xs text-gray-400 mt-1">{monthLabel}</div>
-
-            {showExportOptions && (
-              <div className="mt-3 p-3 border rounded-lg bg-gray-50 dark:bg-slate-900 dark:border-slate-700 space-y-2 text-xs max-w-md">
-                <div className="font-semibold text-gray-700 dark:text-gray-200 mb-1">
-                  Opciones de exportación
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <span className="text-[11px] text-gray-600 dark:text-gray-300">
-                    Tipo de movimientos
-                  </span>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setExportType("todos")}
-                      className={`px-2 py-1 rounded border text-[11px] ${
-                        exportType === "todos"
-                          ? "bg-emerald-500 text-white border-emerald-500"
-                          : "bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-slate-600"
-                      }`}
-                    >
-                      Todos
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setExportType("ingresos")}
-                      className={`px-2 py-1 rounded border text-[11px] ${
-                        exportType === "ingresos"
-                          ? "bg-emerald-500 text-white border-emerald-500"
-                          : "bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-slate-600"
-                      }`}
-                    >
-                      Sólo ingresos
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setExportType("gastos")}
-                      className={`px-2 py-1 rounded border text-[11px] ${
-                        exportType === "gastos"
-                          ? "bg-emerald-500 text-white border-emerald-500"
-                          : "bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-slate-600"
-                      }`}
-                    >
-                      Sólo gastos
-                    </button>
-                  </div>
-                </div>
-
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={exportIncludeCategorySummary}
-                    onChange={(e) =>
-                      setExportIncludeCategorySummary(e.target.checked)
-                    }
-                  />
-                  <span className="text-[11px] text-gray-700 dark:text-gray-200">
-                    Incluir resumen de gastos por categoría al final
-                  </span>
-                </label>
-
+      {/* Mes + resumen + estado conexión */}
+      <section className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-xs text-gray-500 dark:text-gray-300">
+                Mes
+              </div>
+              <div className="mt-1 flex items-center gap-2">
+                <input
+                  type="month"
+                  value={month}
+                  onChange={(e) => handleChangeMonth(e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                />
                 <button
                   type="button"
-                  onClick={handleExportCsv}
-                  className="mt-1 text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded"
+                  onClick={() => setShowExportOptions((v) => !v)}
+                  className="rounded-lg bg-emerald-500 px-3 py-1 text-xs font-medium text-white transition hover:bg-emerald-600"
                 >
-                  Descargar CSV
+                  {showExportOptions ? "Cerrar exportar" : "Exportar"}
                 </button>
               </div>
-            )}
+              <div className="mt-1 text-xs text-gray-400">{monthLabel}</div>
+            </div>
+
+            <div
+              className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs ${
+                isOnline
+                  ? "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300"
+                  : "bg-yellow-50 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300"
+              }`}
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  isOnline ? "bg-green-500" : "bg-yellow-500"
+                }`}
+              />
+              {isOnline ? "Conectado" : "Sin conexión (modo local)"}
+            </div>
           </div>
 
-          <div
-            className={`text-xs px-3 py-1 rounded-full inline-flex items-center gap-2 ${
-              isOnline
-                ? "bg-green-100 text-green-700"
-                : "bg-yellow-100 text-yellow-700"
-            }`}
-          >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                isOnline ? "bg-green-500" : "bg-yellow-500"
-              }`}
-            />
-            {isOnline ? "Conectado" : "Sin conexión (modo local)"}
-          </div>
+          {showExportOptions && (
+            <div className="mt-4 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900">
+              <div className="mb-1 font-semibold text-gray-700 dark:text-gray-200">
+                Opciones de exportación
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <span className="text-[11px] text-gray-600 dark:text-gray-300">
+                  Tipo de movimientos
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setExportType("todos")}
+                    className={`rounded-full border px-2 py-1 text-[11px] ${
+                      exportType === "todos"
+                        ? "border-emerald-500 bg-emerald-500 text-white"
+                        : "border-slate-300 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+                    }`}
+                  >
+                    Todos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExportType("ingresos")}
+                    className={`rounded-full border px-2 py-1 text-[11px] ${
+                      exportType === "ingresos"
+                        ? "border-emerald-500 bg-emerald-500 text-white"
+                        : "border-slate-300 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+                    }`}
+                  >
+                    Sólo ingresos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExportType("gastos")}
+                    className={`rounded-full border px-2 py-1 text-[11px] ${
+                      exportType === "gastos"
+                        ? "border-emerald-500 bg-emerald-500 text-white"
+                        : "border-slate-300 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+                    }`}
+                  >
+                    Sólo gastos
+                  </button>
+                </div>
+              </div>
+
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={exportIncludeCategorySummary}
+                  onChange={(e) =>
+                    setExportIncludeCategorySummary(e.target.checked)
+                  }
+                />
+                <span className="text-[11px] text-gray-700 dark:text-gray-200">
+                  Incluir resumen de gastos por categoría al final
+                </span>
+              </label>
+
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                className="mt-1 rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-emerald-700"
+              >
+                Descargar CSV
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Tarjetas resumen */}
-        <div className="grid md:grid-cols-4 gap-4 mb-6">
-          <div className="border rounded-lg p-4 bg-gray-50 dark:bg-slate-900 dark:border-slate-700">
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="text-xs text-gray-500 dark:text-gray-300">
               Ingresos del mes
             </div>
-            <div className="text-2xl font-semibold text-green-600">
+            <div className="mt-1 text-2xl font-semibold text-emerald-600 dark:text-emerald-400">
               {formatMoney(totalIngresos)}
             </div>
           </div>
 
-          <div className="border rounded-lg p-4 bg-gray-50 dark:bg-slate-900 dark:border-slate-700">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="text-xs text-gray-500 dark:text-gray-300">
               Gastos del mes
             </div>
-            <div className="text-2xl font-semibold text-red-600">
+            <div className="mt-1 text-2xl font-semibold text-rose-600 dark:text-rose-400">
               {formatMoney(totalGastos)}
             </div>
           </div>
 
-          <div className="border rounded-lg p-4 bg-gray-50 dark:bg-slate-900 dark:border-slate-700">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="text-xs text-gray-500 dark:text-gray-300">
               Flujo (Ingresos - Gastos)
             </div>
             <div
-              className={`text-2xl font-semibold ${
-                flujo >= 0 ? "text-green-600" : "text-red-600"
+              className={`mt-1 text-2xl font-semibold ${
+                flujo >= 0
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-rose-600 dark:text-rose-400"
               }`}
             >
               {formatMoney(flujo)}
             </div>
           </div>
 
-          <div className="border rounded-lg p-4 bg-gray-50 dark:bg-slate-900 dark:border-slate-700">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="text-xs text-gray-500 dark:text-gray-300">
               Presupuesto del mes
             </div>
-            <div className="flex items-baseline gap-2 mb-2">
+            <div className="mb-2 mt-1 flex items-baseline gap-2">
               <input
                 type="number"
                 value={budgetInput}
                 onChange={(e) => setBudgetInput(e.target.value)}
-                className="border rounded px-2 py-1 text-sm w-full bg-white dark:bg-slate-900 dark:border-slate-700"
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
                 placeholder="Ej. 20000"
               />
               <button
                 onClick={handleSaveBudget}
-                className="bg-sky-500 text-white text-xs px-3 py-1 rounded hover:bg-sky-600"
+                className="rounded-lg bg-sky-500 px-3 py-1 text-xs font-medium text-white hover:bg-sky-600"
               >
                 Guardar
               </button>
@@ -1345,8 +1326,8 @@ export default function Home() {
               <div
                 className={`text-xs ${
                   disponible != null && disponible < 0
-                    ? "text-red-400"
-                    : "text-green-300"
+                    ? "text-rose-400"
+                    : "text-emerald-300"
                 }`}
               >
                 Disponible:{" "}
@@ -1355,411 +1336,216 @@ export default function Home() {
             )}
           </div>
         </div>
+      </section>
 
-        {/* Resumen inteligente */}
-        <section className="mb-6">
-          <h2 className="font-semibold mb-2 text-sm">
-            Resumen inteligente del mes
-          </h2>
-          {smartSummary.length === 0 ? (
+      {/* Resumen inteligente */}
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <h2 className="mb-2 text-sm font-semibold">
+          Resumen inteligente del mes
+        </h2>
+        {smartSummary.length === 0 ? (
+          <p className="text-xs text-gray-500">
+            Aún no hay suficiente información para generar un resumen.
+          </p>
+        ) : (
+          <ul className="list-disc space-y-1 pl-5 text-xs">
+            {smartSummary.map((line, idx) => (
+              <li key={idx}>{line}</li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Gráficas */}
+      <section className="grid gap-4 md:grid-cols-2">
+        <div className="h-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h3 className="mb-2 text-xs font-semibold">Gastos por categoría</h3>
+          {chartDataCategorias.length === 0 ? (
             <p className="text-xs text-gray-500">
-              Aún no hay suficiente información para generar un resumen.
+              Aún no hay gastos registrados.
             </p>
           ) : (
-            <ul className="text-xs list-disc pl-5 space-y-1">
-              {smartSummary.map((line, idx) => (
-                <li key={idx}>{line}</li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {/* Gráficas */}
-        <section className="mb-8 grid md:grid-cols-2 gap-4">
-          <div className="border rounded-lg p-4 bg-gray-50 dark:bg-slate-900 dark:border-slate-700 h-72">
-            <h3 className="text-xs font-semibold mb-2">
-              Gastos por categoría
-            </h3>
-            {chartDataCategorias.length === 0 ? (
-              <p className="text-xs text-gray-500">
-                Aún no hay gastos registrados.
-              </p>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={chartDataCategorias}
-                  margin={{ top: 10, right: 10, left: 0, bottom: 40 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey="category"
-                    tick={{
-                      fontSize: 10,
-                      fill: theme === "dark" ? "#e5e7eb" : "#374151",
-                    }}
-                    angle={-30}
-                    textAnchor="end"
-                  />
-                  <YAxis
-                    tick={{
-                      fontSize: 10,
-                      fill: theme === "dark" ? "#e5e7eb" : "#374151",
-                    }}
-                  />
-                  <Tooltip />
-                  <Legend />
-                  <Bar
-                    dataKey="total"
-                    name="Gasto"
-                    radius={4}
-                    fill={theme === "dark" ? "#38bdf8" : "#0ea5e9"}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-
-          <div className="border rounded-lg p-4 bg-gray-50 dark:bg-slate-900 dark:border-slate-700 h-72">
-            <h3 className="text-xs font-semibold mb-2">
-              Ingresos vs Gastos por día
-            </h3>
-            {chartDataLinea.length === 0 ? (
-              <p className="text-xs text-gray-500">
-                Aún no hay movimientos suficientes para la gráfica.
-              </p>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartDataLinea}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey="dateLabel"
-                    tick={{
-                      fontSize: 10,
-                      fill: theme === "dark" ? "#e5e7eb" : "#374151",
-                    }}
-                  />
-                  <YAxis
-                    tick={{
-                      fontSize: 10,
-                      fill: theme === "dark" ? "#e5e7eb" : "#374151",
-                    }}
-                  />
-                  <Tooltip />
-                  <Legend />
-                  <Line
-                    type="monotone"
-                    dataKey="ingresos"
-                    name="Ingresos"
-                    dot={false}
-                    stroke={theme === "dark" ? "#22c55e" : "#16a34a"}
-                    strokeWidth={2}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="gastos"
-                    name="Gastos"
-                    dot={false}
-                    stroke={theme === "dark" ? "#f97373" : "#ef4444"}
-                    strokeWidth={2}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </section>
-
-        {/* Visor mensual: gastos por categoría */}
-        <section className="mb-8">
-          <h2 className="font-semibold mb-2 text-sm">
-            Visor mensual de gastos por categoría
-          </h2>
-          {gastosPorCategoria.length === 0 ? (
-            <p className="text-xs text-gray-500">
-              Aún no hay gastos registrados en este mes.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {gastosPorCategoria.map((item) => (
-                <div key={item.category} className="space-y-1">
-                  <div className="flex justify-between text-xs">
-                    <span>{item.category}</span>
-                    <span>
-                      {formatMoney(item.total)}{" "}
-                      <span className="text-gray-400">
-                        ({item.percent.toFixed(1)}%)
-                      </span>
-                    </span>
-                  </div>
-                  <div className="h-2 rounded bg-gray-200 dark:bg-slate-700 overflow-hidden">
-                    <div
-                      className="h-2 rounded bg-sky-500"
-                      style={{
-                        width: `${Math.max(item.percent, 2)}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* Formulario */}
-        <section className="mb-8">
-          <h2 className="font-semibold mb-3">
-            {editingId ? "Editar movimiento" : "Agregar movimiento"}
-          </h2>
-
-          <form onSubmit={handleSubmit} className="space-y-3 text-sm">
-            <div className="grid md:grid-cols-5 gap-3">
-              {/* Tipo */}
-              <div>
-                <div className="text-xs text-gray-500 dark:text-gray-300 mb-1">
-                  Tipo
-                </div>
-                <div className="inline-flex border rounded overflow-hidden dark:border-slate-700">
-                  <button
-                    type="button"
-                    onClick={() => handleChangeForm("type", "ingreso")}
-                    className={`px-3 py-1 text-xs ${
-                      form.type === "ingreso"
-                        ? "bg-green-500 text-white"
-                        : "bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-200"
-                    }`}
-                  >
-                    Ingreso
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleChangeForm("type", "gasto")}
-                    className={`px-3 py-1 text-xs ${
-                      form.type === "gasto"
-                        ? "bg-red-500 text-white"
-                        : "bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-200"
-                    }`}
-                  >
-                    Gasto
-                  </button>
-                </div>
-              </div>
-
-              {/* Fecha */}
-              <div>
-                <div className="text-xs text-gray-500 dark:text-gray-300 mb-1">
-                  Fecha
-                </div>
-                <input
-                  type="date"
-                  value={form.date}
-                  onChange={(e) => handleChangeForm("date", e.target.value)}
-                  className="border rounded px-2 py-1 w-full bg-white dark:bg-slate-900 dark:border-slate-700"
-                />
-              </div>
-
-              {/* Categoría */}
-              <div>
-                <div className="text-xs text-gray-500 dark:text-gray-300 mb-1">
-                  Categoría
-                </div>
-                <select
-                  value={form.category}
-                  onChange={(e) =>
-                    handleChangeForm("category", e.target.value)
-                  }
-                  className="border rounded px-2 py-1 w-full bg-white dark:bg-slate-900 dark:border-slate-700"
-                >
-                  {categories.map((c) => (
-                    <option key={c.value} value={c.value}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Monto */}
-              <div>
-                <div className="text-xs text-gray-500 dark:text-gray-300 mb-1">
-                  Monto
-                </div>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={form.amount}
-                  onChange={(e) => handleChangeForm("amount", e.target.value)}
-                  className="border rounded px-2 py-1 w-full bg-white dark:bg-slate-900 dark:border-slate-700"
-                />
-              </div>
-
-              {/* Método */}
-              <div>
-                <div className="text-xs text-gray-500 dark:text-gray-300 mb-1">
-                  Método de pago
-                </div>
-                <select
-                  value={form.method}
-                  onChange={(e) =>
-                    handleChangeForm("method", e.target.value)
-                  }
-                  className="border rounded px-2 py-1 w-full bg-white dark:bg-slate-900 dark:border-slate-700"
-                >
-                  {methods.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Editor rápido de categorías y métodos */}
-            <div className="grid md:grid-cols-2 gap-3">
-              <div>
-                <div className="text-xs text-gray-500 dark:text-gray-300 mb-1">
-                  Agregar nueva categoría
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newCategory}
-                    onChange={(e) => setNewCategory(e.target.value)}
-                    className="border rounded px-2 py-1 text-xs w-full bg-white dark:bg-slate-900 dark:border-slate-700"
-                    placeholder="Ej. Vacaciones, Mascotas, etc."
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddCategory}
-                    className="bg-gray-800 text-white text-xs px-3 py-1 rounded"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <div className="text-xs text-gray-500 dark:text-gray-300 mb-1">
-                  Agregar nuevo método de pago
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newMethod}
-                    onChange={(e) => setNewMethod(e.target.value)}
-                    className="border rounded px-2 py-1 text-xs w-full bg-white dark:bg-slate-900 dark:border-slate-700"
-                    placeholder="Ej. Tarjeta Amazon, Mercado Pago, etc."
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddMethod}
-                    className="bg-gray-800 text-white text-xs px-3 py-1 rounded"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Notas */}
-            <div>
-              <div className="text-xs text-gray-500 dark:text-gray-300 mb-1">
-                Notas (opcional)
-              </div>
-              <textarea
-                value={form.notes}
-                onChange={(e) => handleChangeForm("notes", e.target.value)}
-                className="border rounded px-3 py-2 w-full bg-white dark:bg-slate-900 dark:border-slate-700"
-                placeholder="Descripción, quién pagó, folio, etc."
-              />
-            </div>
-
-            {/* Botones */}
-            <div className="flex gap-3">
-              <button
-                type="submit"
-                disabled={saving}
-                className="bg-sky-500 hover:bg-sky-600 text-white px-4 py-2 rounded text-sm disabled:opacity-60"
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={chartDataCategorias}
+                margin={{ top: 10, right: 10, left: 0, bottom: 40 }}
               >
-                {saving
-                  ? "Guardando..."
-                  : editingId
-                  ? "Guardar cambios"
-                  : "Agregar"}
-              </button>
-              {editingId && (
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  className="text-sm text-gray-500 underline"
-                >
-                  Cancelar edición
-                </button>
-              )}
-            </div>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="category"
+                  tick={{
+                    fontSize: 10,
+                    fill: isDark ? "#e5e7eb" : "#374151",
+                  }}
+                  angle={-30}
+                  textAnchor="end"
+                />
+                <YAxis
+                  tick={{
+                    fontSize: 10,
+                    fill: isDark ? "#e5e7eb" : "#374151",
+                  }}
+                />
+                <Tooltip />
+                <Legend />
+                <Bar
+                  dataKey="total"
+                  name="Gasto"
+                  radius={4}
+                  fill={isDark ? "#38bdf8" : "#0ea5e9"}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
 
-            {error && (
-              <p className="text-xs text-red-600 mt-1">{error}</p>
-            )}
-          </form>
-        </section>
+        <div className="h-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h3 className="mb-2 text-xs font-semibold">
+            Ingresos vs Gastos por día
+          </h3>
+          {chartDataLinea.length === 0 ? (
+            <p className="text-xs text-gray-500">
+              Aún no hay movimientos suficientes para la gráfica.
+            </p>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartDataLinea}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="dateLabel"
+                  tick={{
+                    fontSize: 10,
+                    fill: isDark ? "#e5e7eb" : "#374151",
+                  }}
+                />
+                <YAxis
+                  tick={{
+                    fontSize: 10,
+                    fill: isDark ? "#e5e7eb" : "#374151",
+                  }}
+                />
+                <Tooltip />
+                <Legend />
+                <Line
+                  type="monotone"
+                  dataKey="ingresos"
+                  name="Ingresos"
+                  dot={false}
+                  stroke={isDark ? "#22c55e" : "#16a34a"}
+                  strokeWidth={2}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="gastos"
+                  name="Gastos"
+                  dot={false}
+                  stroke={isDark ? "#fb7185" : "#ef4444"}
+                  strokeWidth={2}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </section>
 
-        {/* Filtros de movimientos (ahora justo antes de la tabla) */}
-        <section className="mb-6">
-          <h2 className="font-semibold mb-2 text-sm">
-            Filtros de movimientos
-          </h2>
-          <div className="grid md:grid-cols-4 gap-3 text-xs">
+      {/* Visor mensual: gastos por categoría */}
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <h2 className="mb-2 text-sm font-semibold">
+          Visor mensual de gastos por categoría
+        </h2>
+        {gastosPorCategoria.length === 0 ? (
+          <p className="text-xs text-gray-500">
+            Aún no hay gastos registrados en este mes.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {gastosPorCategoria.map((item) => (
+              <div key={item.category} className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span>{item.category}</span>
+                  <span>
+                    {formatMoney(item.total)}{" "}
+                    <span className="text-gray-400">
+                      ({item.percent.toFixed(1)}%)
+                    </span>
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded bg-gray-200 dark:bg-slate-700">
+                  <div
+                    className="h-2 rounded bg-sky-500"
+                    style={{
+                      width: `${Math.max(item.percent, 2)}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Formulario */}
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <h2 className="mb-3 text-sm font-semibold">
+          {editingId ? "Editar movimiento" : "Agregar movimiento"}
+        </h2>
+
+        <form onSubmit={handleSubmit} className="space-y-3 text-sm">
+          <div className="grid gap-3 md:grid-cols-5">
             {/* Tipo */}
             <div>
-              <div className="mb-1 text-gray-500 dark:text-gray-300">
+              <div className="mb-1 text-xs text-gray-500 dark:text-gray-300">
                 Tipo
               </div>
-              <div className="inline-flex border rounded overflow-hidden dark:border-slate-700">
+              <div className="inline-flex overflow-hidden rounded-lg border dark:border-slate-700">
                 <button
                   type="button"
-                  onClick={() => setFilterType("todos")}
-                  className={`px-3 py-1 ${
-                    filterType === "todos"
-                      ? "bg-sky-500 text-white"
-                      : "bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-200"
+                  onClick={() => handleChangeForm("type", "ingreso")}
+                  className={`px-3 py-1 text-xs ${
+                    form.type === "ingreso"
+                      ? "bg-emerald-500 text-white"
+                      : "bg-white text-gray-700 dark:bg-slate-900 dark:text-gray-200"
                   }`}
                 >
-                  Todos
+                  Ingreso
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFilterType("ingreso")}
-                  className={`px-3 py-1 ${
-                    filterType === "ingreso"
-                      ? "bg-green-500 text-white"
-                      : "bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-200"
+                  onClick={() => handleChangeForm("type", "gasto")}
+                  className={`px-3 py-1 text-xs ${
+                    form.type === "gasto"
+                      ? "bg-rose-500 text-white"
+                      : "bg-white text-gray-700 dark:bg-slate-900 dark:text-gray-200"
                   }`}
                 >
-                  Ingresos
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFilterType("gasto")}
-                  className={`px-3 py-1 ${
-                    filterType === "gasto"
-                      ? "bg-red-500 text-white"
-                      : "bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-200"
-                  }`}
-                >
-                  Gastos
+                  Gasto
                 </button>
               </div>
+            </div>
+
+            {/* Fecha */}
+            <div>
+              <div className="mb-1 text-xs text-gray-500 dark:text-gray-300">
+                Fecha
+              </div>
+              <input
+                type="date"
+                value={form.date}
+                onChange={(e) => handleChangeForm("date", e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              />
             </div>
 
             {/* Categoría */}
             <div>
-              <div className="mb-1 text-gray-500 dark:text-gray-300">
+              <div className="mb-1 text-xs text-gray-500 dark:text-gray-300">
                 Categoría
               </div>
               <select
-                value={filterCategory}
-                onChange={(e) => setFilterCategory(e.target.value)}
-                className="border rounded px-2 py-1 w-full bg-white dark:bg-slate-900 dark:border-slate-700"
+                value={form.category}
+                onChange={(e) => handleChangeForm("category", e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               >
-                <option value="TODAS">Todas</option>
                 {categories.map((c) => (
                   <option key={c.value} value={c.value}>
                     {c.label}
@@ -1768,17 +1554,30 @@ export default function Home() {
               </select>
             </div>
 
+            {/* Monto */}
+            <div>
+              <div className="mb-1 text-xs text-gray-500 dark:text-gray-300">
+                Monto
+              </div>
+              <input
+                type="number"
+                step="0.01"
+                value={form.amount}
+                onChange={(e) => handleChangeForm("amount", e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              />
+            </div>
+
             {/* Método */}
             <div>
-              <div className="mb-1 text-gray-500 dark:text-gray-300">
+              <div className="mb-1 text-xs text-gray-500 dark:text-gray-300">
                 Método de pago
               </div>
               <select
-                value={filterMethod}
-                onChange={(e) => setFilterMethod(e.target.value)}
-                className="border rounded px-2 py-1 w-full bg-white dark:bg-slate-900 dark:border-slate-700"
+                value={form.method}
+                onChange={(e) => handleChangeForm("method", e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               >
-                <option value="TODOS">Todos</option>
                 {methods.map((m) => (
                   <option key={m.value} value={m.value}>
                     {m.label}
@@ -1786,117 +1585,289 @@ export default function Home() {
                 ))}
               </select>
             </div>
+          </div>
 
-            {/* Buscar */}
+          {/* Editor rápido de categorías y métodos */}
+          <div className="grid gap-3 md:grid-cols-2">
             <div>
-              <div className="mb-1 text-gray-500 dark:text-gray-300">
-                Buscar
+              <div className="mb-1 text-xs text-gray-500 dark:text-gray-300">
+                Agregar nueva categoría
               </div>
-              <input
-                type="text"
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                className="border rounded px-2 py-1 w-full bg-white dark:bg-slate-900 dark:border-slate-700"
-                placeholder="Notas, categoría, fecha..."
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newCategory}
+                  onChange={(e) => setNewCategory(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                  placeholder="Ej. Vacaciones, Mascotas, etc."
+                />
+                <button
+                  type="button"
+                  onClick={handleAddCategory}
+                  className="rounded-lg bg-slate-800 px-3 py-1 text-xs font-medium text-white hover:bg-slate-900"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-1 text-xs text-gray-500 dark:text-gray-300">
+                Agregar nuevo método de pago
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newMethod}
+                  onChange={(e) => setNewMethod(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                  placeholder="Ej. Tarjeta Amazon, Mercado Pago, etc."
+                />
+                <button
+                  type="button"
+                  onClick={handleAddMethod}
+                  className="rounded-lg bg-slate-800 px-3 py-1 text-xs font-medium text-white hover:bg-slate-900"
+                >
+                  +
+                </button>
+              </div>
             </div>
           </div>
-        </section>
 
-        {/* Tabla de movimientos */}
-        <section>
-          <h2 className="font-semibold mb-3 text-sm">
-            Movimientos de {month}
-          </h2>
-
-          <div className="overflow-x-auto text-sm">
-            <table className="min-w-full border border-gray-200 dark:border-slate-700 text-left text-xs md:text-sm">
-              <thead className="bg-gray-50 dark:bg-slate-900">
-                <tr>
-                  <th className="border-b px-2 py-2">Fecha</th>
-                  <th className="border-b px-2 py-2">Tipo</th>
-                  <th className="border-b px-2 py-2">Categoría</th>
-                  <th className="border-b px-2 py-2 text-right">Monto</th>
-                  <th className="border-b px-2 py-2">Método</th>
-                  <th className="border-b px-2 py-2">Notas</th>
-                  <th className="border-b px-2 py-2 text-center">
-                    Acciones
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading && (
-                  <tr>
-                    <td
-                      colSpan={7}
-                      className="text-center py-4 text-gray-500"
-                    >
-                      Cargando movimientos...
-                    </td>
-                  </tr>
-                )}
-                {!loading && filteredTransactions.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={7}
-                      className="text-center py-4 text-gray-500"
-                    >
-                      Sin movimientos registrados con esos filtros.
-                    </td>
-                  </tr>
-                )}
-                {!loading &&
-                  filteredTransactions.map((t) => (
-                    <tr
-                      key={t.id}
-                      className={`odd:bg-white even:bg-gray-50 dark:odd:bg-slate-800 dark:even:bg-slate-900 ${
-                        t.localOnly ? "opacity-70" : ""
-                      }`}
-                    >
-                      {/* FECHA */}
-                      <td className="border-t px-2 py-1">
-                        {formatDateDisplay(t.date)}
-                      </td>
-                      {/* TIPO */}
-                      <td className="border-t px-2 py-1">
-                        {t.type === "ingreso" ? "Ingreso" : "Gasto"}
-                      </td>
-                      {/* CATEGORÍA */}
-                      <td className="border-t px-2 py-1">{t.category}</td>
-                      {/* MONTO */}
-                      <td className="border-t px-2 py-1 text-right">
-                        {formatMoney(t.amount)}
-                      </td>
-                      {/* MÉTODO */}
-                      <td className="border-t px-2 py-1">{t.method}</td>
-                      {/* NOTAS */}
-                      <td className="border-t px-2 py-1 max-w-xs truncate">
-                        {t.notes}
-                      </td>
-                      {/* ACCIONES */}
-                      <td className="border-t px-2 py-1 text-center">
-                        <button
-                          type="button"
-                          onClick={() => handleEdit(t)}
-                          className="text-xs text-sky-600 hover:underline mr-2"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(t)}
-                          className="text-xs text-red-600 hover:underline"
-                        >
-                          Eliminar
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
+          {/* Notas */}
+          <div>
+            <div className="mb-1 text-xs text-gray-500 dark:text-gray-300">
+              Notas (opcional)
+            </div>
+            <textarea
+              value={form.notes}
+              onChange={(e) => handleChangeForm("notes", e.target.value)}
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              placeholder="Descripción, quién pagó, folio, etc."
+            />
           </div>
-        </section>
-      </main>
-    </div>
+
+          {/* Botones */}
+          <div className="flex gap-3">
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-600 disabled:opacity-60"
+            >
+              {saving
+                ? "Guardando..."
+                : editingId
+                ? "Guardar cambios"
+                : "Agregar"}
+            </button>
+            {editingId && (
+              <button
+                type="button"
+                onClick={resetForm}
+                className="text-sm text-gray-500 underline"
+              >
+                Cancelar edición
+              </button>
+            )}
+          </div>
+
+          {error && (
+            <p className="mt-1 text-xs text-red-500">{error}</p>
+          )}
+        </form>
+      </section>
+
+      {/* Filtros de movimientos */}
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <h2 className="mb-2 text-sm font-semibold">
+          Filtros de movimientos
+        </h2>
+        <div className="grid gap-3 text-xs md:grid-cols-4">
+          {/* Tipo */}
+          <div>
+            <div className="mb-1 text-gray-500 dark:text-gray-300">Tipo</div>
+            <div className="inline-flex overflow-hidden rounded-lg border dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => setFilterType("todos")}
+                className={`px-3 py-1 ${
+                  filterType === "todos"
+                    ? "bg-sky-500 text-white"
+                    : "bg-white text-gray-700 dark:bg-slate-900 dark:text-gray-200"
+                }`}
+              >
+                Todos
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterType("ingreso")}
+                className={`px-3 py-1 ${
+                  filterType === "ingreso"
+                    ? "bg-emerald-500 text-white"
+                    : "bg-white text-gray-700 dark:bg-slate-900 dark:text-gray-200"
+                }`}
+              >
+                Ingresos
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterType("gasto")}
+                className={`px-3 py-1 ${
+                  filterType === "gasto"
+                    ? "bg-rose-500 text-white"
+                    : "bg-white text-gray-700 dark:bg-slate-900 dark:text-gray-200"
+                }`}
+              >
+                Gastos
+              </button>
+            </div>
+          </div>
+
+          {/* Categoría */}
+          <div>
+            <div className="mb-1 text-gray-500 dark:text-gray-300">
+              Categoría
+            </div>
+            <select
+              value={filterCategory}
+              onChange={(e) => setFilterCategory(e.target.value)}
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+            >
+              <option value="TODAS">Todas</option>
+              {categories.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Método */}
+          <div>
+            <div className="mb-1 text-gray-500 dark:text-gray-300">
+              Método de pago
+            </div>
+            <select
+              value={filterMethod}
+              onChange={(e) => setFilterMethod(e.target.value)}
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+            >
+              <option value="TODOS">Todos</option>
+              {methods.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Buscar */}
+          <div>
+            <div className="mb-1 text-gray-500 dark:text-gray-300">
+              Buscar
+            </div>
+            <input
+              type="text"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              placeholder="Notas, categoría, fecha..."
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Tabla de movimientos */}
+      <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <h2 className="mb-3 text-sm font-semibold">
+          Movimientos de {month}
+        </h2>
+
+        <div className="overflow-x-auto text-sm">
+          <table className="min-w-full border border-gray-200 text-left text-xs dark:border-slate-700 md:text-sm">
+            <thead className="bg-gray-50 dark:bg-slate-900">
+              <tr>
+                <th className="px-2 py-2 border-b">Fecha</th>
+                <th className="px-2 py-2 border-b">Tipo</th>
+                <th className="px-2 py-2 border-b">Categoría</th>
+                <th className="px-2 py-2 text-right border-b">Monto</th>
+                <th className="px-2 py-2 border-b">Método</th>
+                <th className="px-2 py-2 border-b">Notas</th>
+                <th className="px-2 py-2 text-center border-b">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="py-4 text-center text-gray-500"
+                  >
+                    Cargando movimientos...
+                  </td>
+                </tr>
+              )}
+              {!loading && filteredTransactions.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="py-4 text-center text-gray-500"
+                  >
+                    Sin movimientos registrados con esos filtros.
+                  </td>
+                </tr>
+              )}
+              {!loading &&
+                filteredTransactions.map((t) => (
+                  <tr
+                    key={t.id}
+                    className={`odd:bg-white even:bg-gray-50 dark:odd:bg-slate-800 dark:even:bg-slate-900 ${
+                      t.localOnly ? "opacity-70" : ""
+                    }`}
+                  >
+                    {/* FECHA */}
+                    <td className="px-2 py-1 border-t">
+                      {formatDateDisplay(t.date)}
+                    </td>
+                    {/* TIPO */}
+                    <td className="px-2 py-1 border-t">
+                      {t.type === "ingreso" ? "Ingreso" : "Gasto"}
+                    </td>
+                    {/* CATEGORÍA */}
+                    <td className="px-2 py-1 border-t">{t.category}</td>
+                    {/* MONTO */}
+                    <td className="px-2 py-1 text-right border-t">
+                      {formatMoney(t.amount)}
+                    </td>
+                    {/* MÉTODO */}
+                    <td className="px-2 py-1 border-t">{t.method}</td>
+                    {/* NOTAS */}
+                    <td className="max-w-xs truncate px-2 py-1 border-t">
+                      {t.notes}
+                    </td>
+                    {/* ACCIONES */}
+                    <td className="px-2 py-1 text-center border-t">
+                      <button
+                        type="button"
+                        onClick={() => handleEdit(t)}
+                        className="mr-2 text-xs text-sky-600 hover:underline"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(t)}
+                        className="text-xs text-red-600 hover:underline"
+                      >
+                        Eliminar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
   );
 }
