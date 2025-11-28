@@ -177,10 +177,7 @@ export default function Home() {
       try {
         const { data, error } = await supabase.auth.getUser();
 
-        if (
-          error &&
-          (error as any).name !== "AuthSessionMissingError"
-        ) {
+        if (error && (error as any).name !== "AuthSessionMissingError") {
           console.error("Error obteniendo usuario actual", error);
         }
 
@@ -506,8 +503,227 @@ export default function Home() {
     }
   };
 
+    // --------------------------------------------------
+  //   Cambio de mes
   // --------------------------------------------------
-  //   Totales
+  const handleChangeMonth = (value: string) => {
+    setMonth(value);
+  };
+
+  // --------------------------------------------------
+  //   Manejo formulario
+  // --------------------------------------------------
+  const handleChangeForm = (field: keyof FormState, value: string) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const resetForm = () => {
+    setForm({
+      date: "",
+      type: "gasto",
+      category: categories[0]?.value ?? "",
+      amount: "",
+      method: methods[0]?.value ?? "",
+      notes: "",
+    });
+    setEditingId(null);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    if (!user) {
+      alert("Debes iniciar sesión para guardar movimientos.");
+      return;
+    }
+
+    const amountNumber = Number(form.amount);
+    if (!form.date) {
+      alert("Selecciona una fecha.");
+      return;
+    }
+    if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
+      alert("Ingresa un monto válido mayor a 0.");
+      return;
+    }
+
+    const payload = {
+      date: form.date,
+      type: form.type,
+      category: form.category,
+      amount: amountNumber,
+      method: form.method,
+      notes: form.notes || null,
+    };
+
+    setSaving(true);
+
+    try {
+      // 🔴 SIN CONEXIÓN → sólo local
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        const id = crypto.randomUUID();
+
+        const localTx: Tx = {
+          id,
+          ...payload,
+          localOnly: true,
+        };
+
+        setTransactions((prev) => [localTx, ...prev]);
+
+        try {
+          await saveOfflineTx({
+            id: localTx.id,
+            date: localTx.date,
+            type: localTx.type,
+            category: localTx.category,
+            amount: localTx.amount,
+            method: localTx.method,
+            notes: localTx.notes ?? null,
+          });
+        } catch (err) {
+          console.error("Error guardando movimiento offline", err);
+        }
+
+        alert(
+          "Estás sin conexión. El movimiento se guardó sólo en este dispositivo y se enviará cuando vuelva el internet."
+        );
+        resetForm();
+        return;
+      }
+
+      // 🟢 CON CONEXIÓN
+      if (editingId) {
+        const { error } = await supabase
+          .from("transactions")
+          .update({ ...payload, user_id: user.id })
+          .eq("id", editingId);
+
+        if (error) throw error;
+
+        setTransactions((prev) =>
+          prev.map((t) =>
+            t.id === editingId ? { ...t, ...payload } : t
+          )
+        );
+      } else {
+        const { data, error } = await supabase
+          .from("transactions")
+          .insert({ ...payload, user_id: user.id })
+          .select("*")
+          .single();
+
+        if (error) throw error;
+
+        const newTx: Tx = {
+          id: data.id,
+          date: data.date,
+          type: data.type,
+          category: data.category,
+          amount: Number(data.amount),
+          method: data.method,
+          notes: data.notes,
+        };
+
+        setTransactions((prev) => [newTx, ...prev]);
+      }
+
+      resetForm();
+    } catch (err) {
+      console.error("Error en handleSubmit:", err);
+      setError("No se pudo guardar el movimiento.");
+      alert("No se pudo guardar el movimiento.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // --------------------------------------------------
+  //   Editar / Eliminar
+  // --------------------------------------------------
+  const handleEdit = (tx: Tx) => {
+    setForm({
+      date: tx.date,
+      type: tx.type,
+      category: tx.category,
+      amount: String(tx.amount),
+      method: tx.method,
+      notes: tx.notes ?? "",
+    });
+    setEditingId(tx.id);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleDelete = async (tx: Tx) => {
+    if (!isOnline) {
+      alert("No puedes eliminar movimientos mientras estás sin conexión.");
+      return;
+    }
+    if (!user) {
+      alert("Debes iniciar sesión para eliminar movimientos.");
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from("transactions")
+        .delete()
+        .eq("id", tx.id)
+        .eq("user_id", user.id);
+
+      if (error) throw error;
+
+      setTransactions((prev) => prev.filter((t) => t.id !== tx.id));
+    } catch (err: any) {
+      console.error(err);
+      alert("No se pudo eliminar el movimiento.");
+    }
+  };
+
+  // --------------------------------------------------
+  //   Editor de categorías y métodos
+  // --------------------------------------------------
+  const handleAddCategory = () => {
+    const trimmed = newCategory.trim();
+    if (!trimmed) return;
+
+    const value = trimmed.toUpperCase().replace(/\s+/g, "_");
+    if (categories.some((c) => c.value === value)) {
+      alert("Esa categoría ya existe.");
+      return;
+    }
+
+    const updated = [...categories, { label: trimmed, value }];
+    setCategories(updated);
+    setNewCategory("");
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem(CUSTOM_CATEGORIES_KEY, JSON.stringify(updated));
+    }
+  };
+
+  const handleAddMethod = () => {
+    const trimmed = newMethod.trim();
+    if (!trimmed) return;
+
+    const value = trimmed.toUpperCase().replace(/\s+/g, "_");
+    if (methods.some((m) => m.value === value)) {
+      alert("Ese método ya existe.");
+      return;
+    }
+
+    const updated = [...methods, { label: trimmed, value }];
+    setMethods(updated);
+    setNewMethod("");
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem(CUSTOM_METHODS_KEY, JSON.stringify(updated));
+    }
+  };
+
+  // --------------------------------------------------
+  //   Totales de ingresos / gastos
   // --------------------------------------------------
   const { totalIngresos, totalGastos } = useMemo(() => {
     let ingresos = 0;
@@ -521,6 +737,32 @@ export default function Home() {
 
   const flujo = totalIngresos - totalGastos;
   const disponible = budget != null ? budget - totalGastos : null;
+
+  // --------------------------------------------------
+  //   👉 MOCK de Activos / Deudas / Metas / Inversiones
+  //   (sólo UI por ahora; luego conectamos Supabase)
+  // --------------------------------------------------
+  const mockAssets = [
+    { label: "Efectivo y cuentas", amount: 35000 },
+    { label: "Inversiones financieras", amount: 120000 },
+    { label: "Bienes (auto, casa, etc.)", amount: 800000 },
+  ];
+
+  const mockDebts = [
+    { label: "Tarjetas de crédito", amount: 25000 },
+    { label: "Crédito automotriz", amount: 180000 },
+    { label: "Hipoteca / préstamo largo plazo", amount: 450000 },
+  ];
+
+  const totalActivos = mockAssets.reduce((sum, a) => sum + a.amount, 0);
+  const totalDeudas = mockDebts.reduce((sum, d) => sum + d.amount, 0);
+  const patrimonioNeto = totalActivos - totalDeudas;
+
+  const mockGoals = [
+    { name: "Fondo de emergencia", target: 60000, current: 15000 },
+    { name: "Viaje familiar", target: 80000, current: 10000 },
+    { name: "Universidad hijos", target: 300000, current: 50000 },
+  ];
 
   // --------------------------------------------------
   //   Agregado mensual por categoría (sólo gastos)
@@ -786,228 +1028,6 @@ export default function Home() {
   };
 
   // --------------------------------------------------
-  //   Cambio de mes
-  // --------------------------------------------------
-  const handleChangeMonth = (value: string) => {
-    setMonth(value);
-  };
-
-  // --------------------------------------------------
-  //   Manejo formulario
-  // --------------------------------------------------
-  const handleChangeForm = (field: keyof FormState, value: string) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const resetForm = () => {
-    setForm({
-      date: "",
-      type: "gasto",
-      category: categories[0]?.value ?? "",
-      amount: "",
-      method: methods[0]?.value ?? "",
-      notes: "",
-    });
-    setEditingId(null);
-  };
-
-  // --------------------------------------------------
-  //   Guardar (crear o editar) con soporte offline
-  // --------------------------------------------------
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-
-    if (!user) {
-      alert("Debes iniciar sesión para guardar movimientos.");
-      return;
-    }
-
-    const amountNumber = Number(form.amount);
-    if (!form.date) {
-      alert("Selecciona una fecha.");
-      return;
-    }
-    if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
-      alert("Ingresa un monto válido mayor a 0.");
-      return;
-    }
-
-    const payload = {
-      date: form.date,
-      type: form.type,
-      category: form.category,
-      amount: amountNumber,
-      method: form.method,
-      notes: form.notes || null,
-    };
-
-    setSaving(true);
-
-    try {
-      // 🔴 SIN CONEXIÓN → sólo local
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
-        const id = crypto.randomUUID();
-
-        const localTx: Tx = {
-          id,
-          ...payload,
-          localOnly: true,
-        };
-
-        setTransactions((prev) => [localTx, ...prev]);
-
-        try {
-          await saveOfflineTx({
-            id: localTx.id,
-            date: localTx.date,
-            type: localTx.type,
-            category: localTx.category,
-            amount: localTx.amount,
-            method: localTx.method,
-            notes: localTx.notes ?? null,
-          });
-        } catch (err) {
-          console.error("Error guardando movimiento offline", err);
-        }
-
-        alert(
-          "Estás sin conexión. El movimiento se guardó sólo en este dispositivo y se enviará cuando vuelva el internet."
-        );
-        resetForm();
-        return;
-      }
-
-      // 🟢 CON CONEXIÓN
-      if (editingId) {
-        const { error } = await supabase
-          .from("transactions")
-          .update({ ...payload, user_id: user.id })
-          .eq("id", editingId);
-
-        if (error) throw error;
-
-        setTransactions((prev) =>
-          prev.map((t) =>
-            t.id === editingId ? { ...t, ...payload } : t
-          )
-        );
-      } else {
-        const { data, error } = await supabase
-          .from("transactions")
-          .insert({ ...payload, user_id: user.id })
-          .select("*")
-          .single();
-
-        if (error) throw error;
-
-        const newTx: Tx = {
-          id: data.id,
-          date: data.date,
-          type: data.type,
-          category: data.category,
-          amount: Number(data.amount),
-          method: data.method,
-          notes: data.notes,
-        };
-
-        setTransactions((prev) => [newTx, ...prev]);
-      }
-
-      resetForm();
-    } catch (err) {
-      console.error("Error en handleSubmit:", err);
-      setError("No se pudo guardar el movimiento.");
-      alert("No se pudo guardar el movimiento.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // --------------------------------------------------
-  //   Editar / Eliminar
-  // --------------------------------------------------
-  const handleEdit = (tx: Tx) => {
-    setForm({
-      date: tx.date,
-      type: tx.type,
-      category: tx.category,
-      amount: String(tx.amount),
-      method: tx.method,
-      notes: tx.notes ?? "",
-    });
-    setEditingId(tx.id);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const handleDelete = async (tx: Tx) => {
-    if (!isOnline) {
-      alert("No puedes eliminar movimientos mientras estás sin conexión.");
-      return;
-    }
-    if (!user) {
-      alert("Debes iniciar sesión para eliminar movimientos.");
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from("transactions")
-        .delete()
-        .eq("id", tx.id)
-        .eq("user_id", user.id);
-
-      if (error) throw error;
-
-      setTransactions((prev) => prev.filter((t) => t.id !== tx.id));
-    } catch (err: any) {
-      console.error(err);
-      alert("No se pudo eliminar el movimiento.");
-    }
-  };
-
-  // --------------------------------------------------
-  //   Editor de categorías y métodos
-  // --------------------------------------------------
-  const handleAddCategory = () => {
-    const trimmed = newCategory.trim();
-    if (!trimmed) return;
-
-    const value = trimmed.toUpperCase().replace(/\s+/g, "_");
-    if (categories.some((c) => c.value === value)) {
-      alert("Esa categoría ya existe.");
-      return;
-    }
-
-    const updated = [...categories, { label: trimmed, value }];
-    setCategories(updated);
-    setNewCategory("");
-
-    if (typeof window !== "undefined") {
-      localStorage.setItem(CUSTOM_CATEGORIES_KEY, JSON.stringify(updated));
-    }
-  };
-
-  const handleAddMethod = () => {
-    const trimmed = newMethod.trim();
-    if (!trimmed) return;
-
-    const value = trimmed.toUpperCase().replace(/\s+/g, "_");
-    if (methods.some((m) => m.value === value)) {
-      alert("Ese método ya existe.");
-      return;
-    }
-
-    const updated = [...methods, { label: trimmed, value }];
-    setMethods(updated);
-    setNewMethod("");
-
-    if (typeof window !== "undefined") {
-      localStorage.setItem(CUSTOM_METHODS_KEY, JSON.stringify(updated));
-    }
-  };
-
-  // --------------------------------------------------
   //   Etiqueta del mes
   // --------------------------------------------------
   const monthLabel = useMemo(() => {
@@ -1159,7 +1179,7 @@ export default function Home() {
         </div>
       </header>
 
-              {/* Mes + resumen + estado conexión */}
+      {/* Mes + resumen + estado conexión + tarjetas resumen */}
       <section className="space-y-4">
         {/* Tarjeta: mes + exportar + estado conexión */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -1363,6 +1383,133 @@ export default function Home() {
             ))}
           </ul>
         )}
+      </section>
+
+      {/* Patrimonio: activos / deudas / metas / inversiones (sólo UI por ahora) */}
+      <section className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)]">
+        {/* Columna izquierda: Activos / Deudas / Patrimonio neto */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-semibold">
+              Activos, deudas y patrimonio neto
+            </h2>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+              Versión demo
+            </span>
+          </div>
+          <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
+            Próximamente podrás registrar todos tus activos, deudas y ver tu
+            patrimonio neto familiar en tiempo real. Por ahora se muestran
+            valores de ejemplo.
+          </p>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                Activos totales
+              </div>
+              <div className="mt-1 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                {formatMoney(totalActivos)}
+              </div>
+              <ul className="mt-2 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                {mockAssets.map((a) => (
+                  <li key={a.label} className="flex justify-between">
+                    <span>{a.label}</span>
+                    <span>{formatMoney(a.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                Deudas totales
+              </div>
+              <div className="mt-1 text-sm font-semibold text-rose-600 dark:text-rose-400">
+                {formatMoney(totalDeudas)}
+              </div>
+              <ul className="mt-2 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                {mockDebts.map((d) => (
+                  <li key={d.label} className="flex justify-between">
+                    <span>{d.label}</span>
+                    <span>{formatMoney(d.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
+              <div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Patrimonio neto
+                </div>
+                <div
+                  className={`mt-1 text-base font-semibold ${
+                    patrimonioNeto >= 0
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-rose-600 dark:text-rose-400"
+                  }`}
+                >
+                  {formatMoney(patrimonioNeto)}
+                </div>
+              </div>
+              <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
+                Patrimonio neto = Activos totales - Deudas totales. En futuras
+                versiones podrás ver el detalle por persona (papás, hijos,
+                empresas, etc.).
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Columna derecha: Metas de ahorro e inversiones */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-semibold">Metas e inversiones</h2>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+              En construcción
+            </span>
+          </div>
+          <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
+            La idea es que aquí puedas ver cómo van tus metas de ahorro e
+            inversiones por familia. Por ahora son metas de ejemplo.
+          </p>
+
+          <div className="space-y-3">
+            {mockGoals.map((goal) => {
+              const pct =
+                goal.target > 0
+                  ? Math.min(
+                      100,
+                      Math.round((goal.current * 100) / goal.target)
+                    )
+                  : 0;
+              return (
+                <div key={goal.name} className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span>{goal.name}</span>
+                    <span>
+                      {formatMoney(goal.current)} / {formatMoney(goal.target)}{" "}
+                      <span className="text-slate-400">({pct}%)</span>
+                    </span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                    <div
+                      className="h-2 rounded-full bg-sky-500"
+                      style={{ width: `${Math.max(pct, 4)}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-4 rounded-lg bg-slate-50 p-2 text-[11px] text-slate-500 dark:bg-slate-900/60 dark:text-slate-300">
+            Próximo paso: conectar estas metas a tablas reales de Supabase para
+            que puedas registrar metas por persona y por tipo de inversión
+            (fondos, CETES, Afores, etc.).
+          </div>
+        </div>
       </section>
 
       {/* Gráficas */}
