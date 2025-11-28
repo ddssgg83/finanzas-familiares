@@ -1013,10 +1013,14 @@ export default function Home() {
   const monthLabel = useMemo(() => {
     const [y, m] = month.split("-");
     const date = new Date(Number(y), Number(m) - 1, 1);
-    return date.toLocaleDateString("es-MX", {
+
+    const raw = date.toLocaleDateString("es-MX", {
       year: "numeric",
       month: "long",
     });
+
+    // "noviembre de 2025" -> "Noviembre de 2025"
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
   }, [month]);
 
   // --------------------------------------------------
@@ -1155,8 +1159,9 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Mes + resumen + estado conexión */}
-      <section className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+              {/* Mes + resumen + estado conexión */}
+      <section className="space-y-4">
+        {/* Tarjeta: mes + exportar + estado conexión */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
@@ -1169,6 +1174,7 @@ export default function Home() {
                   value={month}
                   onChange={(e) => handleChangeMonth(e.target.value)}
                   className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                  aria-label={`Mes: ${monthLabel}`}
                 />
                 <button
                   type="button"
@@ -1178,7 +1184,10 @@ export default function Home() {
                   {showExportOptions ? "Cerrar exportar" : "Exportar"}
                 </button>
               </div>
-              <div className="mt-1 text-xs text-gray-400">{monthLabel}</div>
+              {/* Etiqueta bonita con mayúscula */}
+              <div className="mt-1 text-xs font-medium text-slate-700 dark:text-slate-200">
+                {monthLabel}
+              </div>
             </div>
 
             <div
@@ -1268,32 +1277,32 @@ export default function Home() {
           )}
         </div>
 
-        {/* Tarjetas resumen */}
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        {/* Tarjetas resumen: ahora usan todo el ancho */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="flex min-h-[110px] flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="text-xs text-gray-500 dark:text-gray-300">
               Ingresos del mes
             </div>
-            <div className="mt-1 text-2xl font-semibold text-emerald-600 dark:text-emerald-400">
+            <div className="mt-1 text-2xl md:text-3xl font-semibold tracking-tight text-emerald-600 dark:text-emerald-400">
               {formatMoney(totalIngresos)}
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex min-h-[110px] flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="text-xs text-gray-500 dark:text-gray-300">
               Gastos del mes
             </div>
-            <div className="mt-1 text-2xl font-semibold text-rose-600 dark:text-rose-400">
+            <div className="mt-1 text-2xl md:text-3xl font-semibold tracking-tight text-rose-600 dark:text-rose-400">
               {formatMoney(totalGastos)}
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex min-h-[110px] flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="text-xs text-gray-500 dark:text-gray-300">
               Flujo (Ingresos - Gastos)
             </div>
             <div
-              className={`mt-1 text-2xl font-semibold ${
+              className={`mt-1 text-2xl md:text-3xl font-semibold tracking-tight ${
                 flujo >= 0
                   ? "text-emerald-600 dark:text-emerald-400"
                   : "text-rose-600 dark:text-rose-400"
@@ -1303,7 +1312,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex min-h-[110px] flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="text-xs text-gray-500 dark:text-gray-300">
               Presupuesto del mes
             </div>
@@ -1787,13 +1796,13 @@ export default function Home() {
           <table className="min-w-full border border-gray-200 text-left text-xs dark:border-slate-700 md:text-sm">
             <thead className="bg-gray-50 dark:bg-slate-900">
               <tr>
-                <th className="px-2 py-2 border-b">Fecha</th>
-                <th className="px-2 py-2 border-b">Tipo</th>
-                <th className="px-2 py-2 border-b">Categoría</th>
-                <th className="px-2 py-2 text-right border-b">Monto</th>
-                <th className="px-2 py-2 border-b">Método</th>
-                <th className="px-2 py-2 border-b">Notas</th>
-                <th className="px-2 py-2 text-center border-b">Acciones</th>
+                <th className="border-b px-2 py-2">Fecha</th>
+                <th className="border-b px-2 py-2">Tipo</th>
+                <th className="border-b px-2 py-2">Categoría</th>
+                <th className="border-b px-2 py-2 text-right">Monto</th>
+                <th className="border-b px-2 py-2">Método</th>
+                <th className="border-b px-2 py-2">Notas</th>
+                <th className="border-b px-2 py-2 text-center">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -1826,27 +1835,27 @@ export default function Home() {
                     }`}
                   >
                     {/* FECHA */}
-                    <td className="px-2 py-1 border-t">
+                    <td className="border-t px-2 py-1">
                       {formatDateDisplay(t.date)}
                     </td>
                     {/* TIPO */}
-                    <td className="px-2 py-1 border-t">
+                    <td className="border-t px-2 py-1">
                       {t.type === "ingreso" ? "Ingreso" : "Gasto"}
                     </td>
                     {/* CATEGORÍA */}
-                    <td className="px-2 py-1 border-t">{t.category}</td>
+                    <td className="border-t px-2 py-1">{t.category}</td>
                     {/* MONTO */}
-                    <td className="px-2 py-1 text-right border-t">
+                    <td className="border-t px-2 py-1 text-right">
                       {formatMoney(t.amount)}
                     </td>
                     {/* MÉTODO */}
-                    <td className="px-2 py-1 border-t">{t.method}</td>
+                    <td className="border-t px-2 py-1">{t.method}</td>
                     {/* NOTAS */}
-                    <td className="max-w-xs truncate px-2 py-1 border-t">
+                    <td className="max-w-xs truncate border-t px-2 py-1">
                       {t.notes}
                     </td>
                     {/* ACCIONES */}
-                    <td className="px-2 py-1 text-center border-t">
+                    <td className="border-t px-2 py-1 text-center">
                       <button
                         type="button"
                         onClick={() => handleEdit(t)}
