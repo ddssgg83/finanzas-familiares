@@ -46,6 +46,13 @@ type FormState = {
 type Option = { label: string; value: string };
 type ExportType = "todos" | "ingresos" | "gastos";
 
+type NetWorthRow = {
+  user_id: string;
+  total_assets: number;
+  total_debts: number;
+  net_worth: number;
+};
+
 const DEFAULT_CATEGORIES: Option[] = [
   { label: "Sueldo", value: "SUELDO" },
   { label: "Comisión", value: "COMISION" },
@@ -158,6 +165,11 @@ export default function Home() {
   const { theme, systemTheme } = useTheme();
   const [mountedTheme, setMountedTheme] = useState(false);
 
+  // Patrimonio (vista family_net_worth)
+  const [netWorth, setNetWorth] = useState<NetWorthRow | null>(null);
+  const [loadingNetWorth, setLoadingNetWorth] = useState(false);
+  const [netWorthError, setNetWorthError] = useState<string | null>(null);
+
   useEffect(() => {
     setMountedTheme(true);
   }, []);
@@ -249,6 +261,7 @@ export default function Home() {
       setTransactions([]);
       setBudget(null);
       setBudgetInput("");
+      setNetWorth(null);
     } catch (err) {
       console.error("Error cerrando sesión", err);
     }
@@ -381,10 +394,7 @@ export default function Home() {
         );
 
         if (typeof window !== "undefined") {
-          localStorage.setItem(
-            `ff-cache-${month}`,
-            JSON.stringify(data ?? [])
-          );
+          localStorage.setItem(`ff-cache-${month}`, JSON.stringify(data ?? []));
         }
       } catch (err: any) {
         console.error(err);
@@ -443,7 +453,6 @@ export default function Home() {
 
         const syncedIds = new Set(synced.map((t) => t.id));
 
-        // No borramos nada, sólo marcamos localOnly → false
         setTransactions((prev) =>
           prev.map((tx) =>
             tx.localOnly && syncedIds.has(tx.id)
@@ -504,226 +513,75 @@ export default function Home() {
   };
 
     // --------------------------------------------------
-  //   Cambio de mes
+  //   Patrimonio familiar (net worth real desde Supabase)
   // --------------------------------------------------
-  const handleChangeMonth = (value: string) => {
-    setMonth(value);
-  };
-
-  // --------------------------------------------------
-  //   Manejo formulario
-  // --------------------------------------------------
-  const handleChangeForm = (field: keyof FormState, value: string) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const resetForm = () => {
-    setForm({
-      date: "",
-      type: "gasto",
-      category: categories[0]?.value ?? "",
-      amount: "",
-      method: methods[0]?.value ?? "",
-      notes: "",
-    });
-    setEditingId(null);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-
+  useEffect(() => {
     if (!user) {
-      alert("Debes iniciar sesión para guardar movimientos.");
+      setNetWorth(null);
       return;
     }
 
-    const amountNumber = Number(form.amount);
-    if (!form.date) {
-      alert("Selecciona una fecha.");
-      return;
-    }
-    if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
-      alert("Ingresa un monto válido mayor a 0.");
-      return;
-    }
+    const userId = user.id;
+    let cancelled = false;
 
-    const payload = {
-      date: form.date,
-      type: form.type,
-      category: form.category,
-      amount: amountNumber,
-      method: form.method,
-      notes: form.notes || null,
-    };
+    async function loadNetWorth() {
+      setLoadingNetWorth(true);
+      setNetWorthError(null);
 
-    setSaving(true);
+      try {
+        const { data, error } = await supabase
+          .from("family_net_worth")
+          .select("user_id,total_assets,total_debts,net_worth")
+          .eq("user_id", userId)
+          .limit(1);
 
-    try {
-      // 🔴 SIN CONEXIÓN → sólo local
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
-        const id = crypto.randomUUID();
-
-        const localTx: Tx = {
-          id,
-          ...payload,
-          localOnly: true,
-        };
-
-        setTransactions((prev) => [localTx, ...prev]);
-
-        try {
-          await saveOfflineTx({
-            id: localTx.id,
-            date: localTx.date,
-            type: localTx.type,
-            category: localTx.category,
-            amount: localTx.amount,
-            method: localTx.method,
-            notes: localTx.notes ?? null,
-          });
-        } catch (err) {
-          console.error("Error guardando movimiento offline", err);
+        // Si Supabase regresa error, lo manejamos suave
+        if (error) {
+          console.warn("Supabase: problema al leer family_net_worth", error);
+          if (!cancelled) {
+            setNetWorthError(
+              "No se pudo leer el patrimonio familiar desde Supabase."
+            );
+            setNetWorth(null);
+          }
+          return;
         }
 
-        alert(
-          "Estás sin conexión. El movimiento se guardó sólo en este dispositivo y se enviará cuando vuelva el internet."
-        );
-        resetForm();
-        return;
+        if (!cancelled) {
+          if (data && data.length > 0) {
+            setNetWorth(data[0] as NetWorthRow);
+            setNetWorthError(null);
+          } else {
+            // Sin filas: simplemente no hay datos todavía
+            setNetWorth(null);
+            setNetWorthError(null);
+          }
+        }
+      } catch (err) {
+        // Esto sólo se ejecuta si pasa algo raro NO venido de Supabase
+        console.warn("Error inesperado cargando patrimonio familiar", err);
+        if (!cancelled) {
+          setNetWorthError(
+            "Ocurrió un error inesperado al cargar el patrimonio familiar."
+          );
+          setNetWorth(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingNetWorth(false);
+        }
       }
-
-      // 🟢 CON CONEXIÓN
-      if (editingId) {
-        const { error } = await supabase
-          .from("transactions")
-          .update({ ...payload, user_id: user.id })
-          .eq("id", editingId);
-
-        if (error) throw error;
-
-        setTransactions((prev) =>
-          prev.map((t) =>
-            t.id === editingId ? { ...t, ...payload } : t
-          )
-        );
-      } else {
-        const { data, error } = await supabase
-          .from("transactions")
-          .insert({ ...payload, user_id: user.id })
-          .select("*")
-          .single();
-
-        if (error) throw error;
-
-        const newTx: Tx = {
-          id: data.id,
-          date: data.date,
-          type: data.type,
-          category: data.category,
-          amount: Number(data.amount),
-          method: data.method,
-          notes: data.notes,
-        };
-
-        setTransactions((prev) => [newTx, ...prev]);
-      }
-
-      resetForm();
-    } catch (err) {
-      console.error("Error en handleSubmit:", err);
-      setError("No se pudo guardar el movimiento.");
-      alert("No se pudo guardar el movimiento.");
-    } finally {
-      setSaving(false);
     }
-  };
+
+    loadNetWorth();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   // --------------------------------------------------
-  //   Editar / Eliminar
-  // --------------------------------------------------
-  const handleEdit = (tx: Tx) => {
-    setForm({
-      date: tx.date,
-      type: tx.type,
-      category: tx.category,
-      amount: String(tx.amount),
-      method: tx.method,
-      notes: tx.notes ?? "",
-    });
-    setEditingId(tx.id);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const handleDelete = async (tx: Tx) => {
-    if (!isOnline) {
-      alert("No puedes eliminar movimientos mientras estás sin conexión.");
-      return;
-    }
-    if (!user) {
-      alert("Debes iniciar sesión para eliminar movimientos.");
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from("transactions")
-        .delete()
-        .eq("id", tx.id)
-        .eq("user_id", user.id);
-
-      if (error) throw error;
-
-      setTransactions((prev) => prev.filter((t) => t.id !== tx.id));
-    } catch (err: any) {
-      console.error(err);
-      alert("No se pudo eliminar el movimiento.");
-    }
-  };
-
-  // --------------------------------------------------
-  //   Editor de categorías y métodos
-  // --------------------------------------------------
-  const handleAddCategory = () => {
-    const trimmed = newCategory.trim();
-    if (!trimmed) return;
-
-    const value = trimmed.toUpperCase().replace(/\s+/g, "_");
-    if (categories.some((c) => c.value === value)) {
-      alert("Esa categoría ya existe.");
-      return;
-    }
-
-    const updated = [...categories, { label: trimmed, value }];
-    setCategories(updated);
-    setNewCategory("");
-
-    if (typeof window !== "undefined") {
-      localStorage.setItem(CUSTOM_CATEGORIES_KEY, JSON.stringify(updated));
-    }
-  };
-
-  const handleAddMethod = () => {
-    const trimmed = newMethod.trim();
-    if (!trimmed) return;
-
-    const value = trimmed.toUpperCase().replace(/\s+/g, "_");
-    if (methods.some((m) => m.value === value)) {
-      alert("Ese método ya existe.");
-      return;
-    }
-
-    const updated = [...methods, { label: trimmed, value }];
-    setMethods(updated);
-    setNewMethod("");
-
-    if (typeof window !== "undefined") {
-      localStorage.setItem(CUSTOM_METHODS_KEY, JSON.stringify(updated));
-    }
-  };
-
-  // --------------------------------------------------
-  //   Totales de ingresos / gastos
+  //   Totales de ingresos/gastos
   // --------------------------------------------------
   const { totalIngresos, totalGastos } = useMemo(() => {
     let ingresos = 0;
@@ -738,31 +596,10 @@ export default function Home() {
   const flujo = totalIngresos - totalGastos;
   const disponible = budget != null ? budget - totalGastos : null;
 
-  // --------------------------------------------------
-  //   👉 MOCK de Activos / Deudas / Metas / Inversiones
-  //   (sólo UI por ahora; luego conectamos Supabase)
-  // --------------------------------------------------
-  const mockAssets = [
-    { label: "Efectivo y cuentas", amount: 35000 },
-    { label: "Inversiones financieras", amount: 120000 },
-    { label: "Bienes (auto, casa, etc.)", amount: 800000 },
-  ];
-
-  const mockDebts = [
-    { label: "Tarjetas de crédito", amount: 25000 },
-    { label: "Crédito automotriz", amount: 180000 },
-    { label: "Hipoteca / préstamo largo plazo", amount: 450000 },
-  ];
-
-  const totalActivos = mockAssets.reduce((sum, a) => sum + a.amount, 0);
-  const totalDeudas = mockDebts.reduce((sum, d) => sum + d.amount, 0);
-  const patrimonioNeto = totalActivos - totalDeudas;
-
-  const mockGoals = [
-    { name: "Fondo de emergencia", target: 60000, current: 15000 },
-    { name: "Viaje familiar", target: 80000, current: 10000 },
-    { name: "Universidad hijos", target: 300000, current: 50000 },
-  ];
+  // Totales de patrimonio (desde vista family_net_worth)
+  const totalActivos = netWorth?.total_assets ?? 0;
+  const totalDeudas = netWorth?.total_debts ?? 0;
+  const patrimonioNeto = netWorth?.net_worth ?? totalActivos - totalDeudas;
 
   // --------------------------------------------------
   //   Agregado mensual por categoría (sólo gastos)
@@ -829,7 +666,6 @@ export default function Home() {
   }, [gastosPorCategoria]);
 
   const chartDataLinea = useMemo(() => {
-    // Agrupamos por fecha
     const map = new Map<
       string,
       { date: string; ingresos: number; gastos: number }
@@ -859,7 +695,7 @@ export default function Home() {
   }, [transactions]);
 
   // --------------------------------------------------
-  //   Resumen "inteligente" del mes (sin IA externa)
+  //   Resumen "inteligente" del mes
   // --------------------------------------------------
   const smartSummary = useMemo(() => {
     const lines: string[] = [];
@@ -944,7 +780,7 @@ export default function Home() {
   ]);
 
   // --------------------------------------------------
-  //   Exportar CSV del mes (con opciones)
+  //   Exportar CSV del mes
   // --------------------------------------------------
   const handleExportCsv = () => {
     let data = transactions;
@@ -970,7 +806,7 @@ export default function Home() {
     ];
 
     const rows = data.map((t) => [
-      t.date, // ya viene en yyyy-mm-dd
+      t.date,
       t.type,
       t.category,
       t.amount,
@@ -1028,6 +864,215 @@ export default function Home() {
   };
 
   // --------------------------------------------------
+  //   Cambio de mes
+  // --------------------------------------------------
+  const handleChangeMonth = (value: string) => {
+    setMonth(value);
+  };
+
+  // --------------------------------------------------
+  //   Manejo formulario
+  // --------------------------------------------------
+  const handleChangeForm = (field: keyof FormState, value: string) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const resetForm = () => {
+    setForm({
+      date: "",
+      type: "gasto",
+      category: categories[0]?.value ?? "",
+      amount: "",
+      method: methods[0]?.value ?? "",
+      notes: "",
+    });
+    setEditingId(null);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    if (!user) {
+      alert("Debes iniciar sesión para guardar movimientos.");
+      return;
+    }
+
+    const amountNumber = Number(form.amount);
+    if (!form.date) {
+      alert("Selecciona una fecha.");
+      return;
+    }
+    if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
+      alert("Ingresa un monto válido mayor a 0.");
+      return;
+    }
+
+    const payload = {
+      date: form.date,
+      type: form.type,
+      category: form.category,
+      amount: amountNumber,
+      method: form.method,
+      notes: form.notes || null,
+    };
+
+    setSaving(true);
+
+    try {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        const id = crypto.randomUUID();
+
+        const localTx: Tx = {
+          id,
+          ...payload,
+          localOnly: true,
+        };
+
+        setTransactions((prev) => [localTx, ...prev]);
+
+        try {
+          await saveOfflineTx({
+            id: localTx.id,
+            date: localTx.date,
+            type: localTx.type,
+            category: localTx.category,
+            amount: localTx.amount,
+            method: localTx.method,
+            notes: localTx.notes ?? null,
+          });
+        } catch (err) {
+          console.error("Error guardando movimiento offline", err);
+        }
+
+        alert(
+          "Estás sin conexión. El movimiento se guardó sólo en este dispositivo y se enviará cuando vuelva el internet."
+        );
+        resetForm();
+        return;
+      }
+
+      if (editingId) {
+        const { error } = await supabase
+          .from("transactions")
+          .update({ ...payload, user_id: user.id })
+          .eq("id", editingId);
+
+        if (error) throw error;
+
+        setTransactions((prev) =>
+          prev.map((t) => (t.id === editingId ? { ...t, ...payload } : t))
+        );
+      } else {
+        const { data, error } = await supabase
+          .from("transactions")
+          .insert({ ...payload, user_id: user.id })
+          .select("*")
+          .single();
+
+        if (error) throw error;
+
+        const newTx: Tx = {
+          id: data.id,
+          date: data.date,
+          type: data.type,
+          category: data.category,
+          amount: Number(data.amount),
+          method: data.method,
+          notes: data.notes,
+        };
+
+        setTransactions((prev) => [newTx, ...prev]);
+      }
+
+      resetForm();
+    } catch (err) {
+      console.error("Error en handleSubmit:", err);
+      setError("No se pudo guardar el movimiento.");
+      alert("No se pudo guardar el movimiento.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleEdit = (tx: Tx) => {
+    setForm({
+      date: tx.date,
+      type: tx.type,
+      category: tx.category,
+      amount: String(tx.amount),
+      method: tx.method,
+      notes: tx.notes ?? "",
+    });
+    setEditingId(tx.id);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleDelete = async (tx: Tx) => {
+    if (!isOnline) {
+      alert("No puedes eliminar movimientos mientras estás sin conexión.");
+      return;
+    }
+    if (!user) {
+      alert("Debes iniciar sesión para eliminar movimientos.");
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from("transactions")
+        .delete()
+        .eq("id", tx.id)
+        .eq("user_id", user.id);
+
+      if (error) throw error;
+
+      setTransactions((prev) => prev.filter((t) => t.id !== tx.id));
+    } catch (err: any) {
+      console.error(err);
+      alert("No se pudo eliminar el movimiento.");
+    }
+  };
+
+  const handleAddCategory = () => {
+    const trimmed = newCategory.trim();
+    if (!trimmed) return;
+
+    const value = trimmed.toUpperCase().replace(/\s+/g, "_");
+    if (categories.some((c) => c.value === value)) {
+      alert("Esa categoría ya existe.");
+      return;
+    }
+
+    const updated = [...categories, { label: trimmed, value }];
+    setCategories(updated);
+    setNewCategory("");
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem(CUSTOM_CATEGORIES_KEY, JSON.stringify(updated));
+    }
+  };
+
+  const handleAddMethod = () => {
+    const trimmed = newMethod.trim();
+    if (!trimmed) return;
+
+    const value = trimmed.toUpperCase().replace(/\s+/g, "_");
+    if (methods.some((m) => m.value === value)) {
+      alert("Ese método ya existe.");
+      return;
+    }
+
+    const updated = [...methods, { label: trimmed, value }];
+    setMethods(updated);
+    setNewMethod("");
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem(CUSTOM_METHODS_KEY, JSON.stringify(updated));
+    }
+  };
+
+  // --------------------------------------------------
   //   Etiqueta del mes
   // --------------------------------------------------
   const monthLabel = useMemo(() => {
@@ -1039,12 +1084,11 @@ export default function Home() {
       month: "long",
     });
 
-    // "noviembre de 2025" -> "Noviembre de 2025"
     return raw.charAt(0).toUpperCase() + raw.slice(1);
   }, [month]);
 
   // --------------------------------------------------
-  //   Render: estados de auth
+  //   Render: auth
   // --------------------------------------------------
   if (authLoading) {
     return (
@@ -1162,7 +1206,7 @@ export default function Home() {
             Finanzas familiares
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Controla ingresos, gastos y presupuesto mensual.
+            Controla ingresos, gastos, presupuesto y patrimonio familiar.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -1179,9 +1223,9 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Mes + resumen + estado conexión + tarjetas resumen */}
+      {/* Mes + resumen + estado conexión */}
       <section className="space-y-4">
-        {/* Tarjeta: mes + exportar + estado conexión */}
+        {/* Tarjeta mes / exportar / conexión */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
@@ -1204,7 +1248,6 @@ export default function Home() {
                   {showExportOptions ? "Cerrar exportar" : "Exportar"}
                 </button>
               </div>
-              {/* Etiqueta bonita con mayúscula */}
               <div className="mt-1 text-xs font-medium text-slate-700 dark:text-slate-200">
                 {monthLabel}
               </div>
@@ -1297,7 +1340,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* Tarjetas resumen: ahora usan todo el ancho */}
+        {/* Tarjetas resumen */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="flex min-h-[110px] flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="text-xs text-gray-500 dark:text-gray-300">
@@ -1385,7 +1428,7 @@ export default function Home() {
         )}
       </section>
 
-      {/* Patrimonio: activos / deudas / metas / inversiones (sólo UI por ahora) */}
+      {/* Patrimonio: activos / deudas / metas / inversiones */}
       <section className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)]">
         {/* Columna izquierda: Activos / Deudas / Patrimonio neto */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -1394,16 +1437,32 @@ export default function Home() {
               Activos, deudas y patrimonio neto
             </h2>
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-300">
-              Versión demo
+              Conectado a Supabase
             </span>
           </div>
           <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
-            Próximamente podrás registrar todos tus activos, deudas y ver tu
-            patrimonio neto familiar en tiempo real. Por ahora se muestran
-            valores de ejemplo.
+            Resumen global de tu patrimonio familiar: suma de activos, deudas y
+            patrimonio neto calculado directamente en la base de datos.
           </p>
 
-          <div className="grid gap-4 md:grid-cols-3">
+          {loadingNetWorth && (
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Cargando patrimonio...
+            </p>
+          )}
+
+          {netWorthError && (
+            <p className="text-[11px] text-red-500">{netWorthError}</p>
+          )}
+
+          {!loadingNetWorth && !netWorthError && !netWorth && (
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Aún no tienes activos ni deudas registrados en Supabase. Cuando
+              empecemos a capturarlos desde la app, los totales aparecerán aquí.
+            </p>
+          )}
+
+          <div className="mt-3 grid gap-4 md:grid-cols-3">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
               <div className="text-[11px] text-slate-500 dark:text-slate-400">
                 Activos totales
@@ -1411,14 +1470,10 @@ export default function Home() {
               <div className="mt-1 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
                 {formatMoney(totalActivos)}
               </div>
-              <ul className="mt-2 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
-                {mockAssets.map((a) => (
-                  <li key={a.label} className="flex justify-between">
-                    <span>{a.label}</span>
-                    <span>{formatMoney(a.amount)}</span>
-                  </li>
-                ))}
-              </ul>
+              <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                Suma de todos tus activos (casas, autos, ahorros, inversiones,
+                etc.) registrados en tu patrimonio.
+              </p>
             </div>
 
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
@@ -1428,14 +1483,10 @@ export default function Home() {
               <div className="mt-1 text-sm font-semibold text-rose-600 dark:text-rose-400">
                 {formatMoney(totalDeudas)}
               </div>
-              <ul className="mt-2 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
-                {mockDebts.map((d) => (
-                  <li key={d.label} className="flex justify-between">
-                    <span>{d.label}</span>
-                    <span>{formatMoney(d.amount)}</span>
-                  </li>
-                ))}
-              </ul>
+              <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                Incluye hipotecas, autos, tarjetas y cualquier otra deuda
+                registrada.
+              </p>
             </div>
 
             <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
@@ -1454,15 +1505,14 @@ export default function Home() {
                 </div>
               </div>
               <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
-                Patrimonio neto = Activos totales - Deudas totales. En futuras
-                versiones podrás ver el detalle por persona (papás, hijos,
-                empresas, etc.).
+                Patrimonio neto = Activos totales - Deudas totales. Más adelante
+                lo podremos desglosar por persona (papás, hijos, empresas, etc.).
               </p>
             </div>
           </div>
         </div>
 
-        {/* Columna derecha: Metas de ahorro e inversiones */}
+        {/* Columna derecha: Metas e inversiones (por ahora demo) */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-semibold">Metas e inversiones</h2>
@@ -1471,43 +1521,26 @@ export default function Home() {
             </span>
           </div>
           <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
-            La idea es que aquí puedas ver cómo van tus metas de ahorro e
-            inversiones por familia. Por ahora son metas de ejemplo.
+            Aquí se conectarán tus metas de ahorro e inversiones familiares.
+            Por ahora esta sección es sólo visual, sin datos reales.
           </p>
 
-          <div className="space-y-3">
-            {mockGoals.map((goal) => {
-              const pct =
-                goal.target > 0
-                  ? Math.min(
-                      100,
-                      Math.round((goal.current * 100) / goal.target)
-                    )
-                  : 0;
-              return (
-                <div key={goal.name} className="space-y-1">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span>{goal.name}</span>
-                    <span>
-                      {formatMoney(goal.current)} / {formatMoney(goal.target)}{" "}
-                      <span className="text-slate-400">({pct}%)</span>
-                    </span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-                    <div
-                      className="h-2 rounded-full bg-sky-500"
-                      style={{ width: `${Math.max(pct, 4)}%` }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
+          <div className="space-y-3 text-[11px] text-slate-500 dark:text-slate-300">
+            <p>
+              Ejemplos de metas que podrás registrar:
+            </p>
+            <ul className="list-disc space-y-1 pl-4">
+              <li>Fondo de emergencia de 3–6 meses de gastos.</li>
+              <li>Ahorro para universidad de los hijos.</li>
+              <li>Meta para enganche de casa o departamento.</li>
+              <li>Inversiones a largo plazo (CETES, fondos, Afores, etc.).</li>
+            </ul>
           </div>
 
           <div className="mt-4 rounded-lg bg-slate-50 p-2 text-[11px] text-slate-500 dark:bg-slate-900/60 dark:text-slate-300">
-            Próximo paso: conectar estas metas a tablas reales de Supabase para
-            que puedas registrar metas por persona y por tipo de inversión
-            (fondos, CETES, Afores, etc.).
+            Próximo paso: conectar esta sección a tablas reales de Supabase
+            para registrar metas por persona y tipo de inversión, y ligarlas a
+            tu patrimonio neto.
           </div>
         </div>
       </section>
@@ -1835,9 +1868,7 @@ export default function Home() {
 
       {/* Filtros de movimientos */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h2 className="mb-2 text-sm font-semibold">
-          Filtros de movimientos
-        </h2>
+        <h2 className="mb-2 text-sm font-semibold">Filtros de movimientos</h2>
         <div className="grid gap-3 text-xs md:grid-cols-4">
           {/* Tipo */}
           <div>
@@ -1981,27 +2012,20 @@ export default function Home() {
                       t.localOnly ? "opacity-70" : ""
                     }`}
                   >
-                    {/* FECHA */}
                     <td className="border-t px-2 py-1">
                       {formatDateDisplay(t.date)}
                     </td>
-                    {/* TIPO */}
                     <td className="border-t px-2 py-1">
                       {t.type === "ingreso" ? "Ingreso" : "Gasto"}
                     </td>
-                    {/* CATEGORÍA */}
                     <td className="border-t px-2 py-1">{t.category}</td>
-                    {/* MONTO */}
                     <td className="border-t px-2 py-1 text-right">
                       {formatMoney(t.amount)}
                     </td>
-                    {/* MÉTODO */}
                     <td className="border-t px-2 py-1">{t.method}</td>
-                    {/* NOTAS */}
                     <td className="max-w-xs truncate border-t px-2 py-1">
                       {t.notes}
                     </td>
-                    {/* ACCIONES */}
                     <td className="border-t px-2 py-1 text-center">
                       <button
                         type="button"
