@@ -85,6 +85,7 @@ function formatMoney(num: number) {
   });
 }
 
+// 📅 Mostrar fecha sin problema de zona horaria
 function formatDateDisplay(ymd: string) {
   const s = (ymd ?? "").slice(0, 10);
   const [y, m, d] = s.split("-");
@@ -110,7 +111,7 @@ export default function GastosPage() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
 
-  // 💰 MOVIMIENTOS
+  // 💰 Movimientos
   const [transactions, setTransactions] = useState<Tx[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -146,7 +147,7 @@ export default function GastosPage() {
   const [exportIncludeCategorySummary, setExportIncludeCategorySummary] =
     useState(true);
 
-  // Filtros
+  // Filtros de movimientos
   const [filterType, setFilterType] = useState<"todos" | "ingreso" | "gasto">(
     "todos"
   );
@@ -154,7 +155,7 @@ export default function GastosPage() {
   const [filterMethod, setFilterMethod] = useState<string>("TODOS");
   const [searchText, setSearchText] = useState<string>("");
 
-  // Tema (para gráficas)
+  // 🌙 Tema global (para saber si es dark y ajustar gráficos)
   const { theme, systemTheme } = useTheme();
   const [mountedTheme, setMountedTheme] = useState(false);
 
@@ -165,7 +166,9 @@ export default function GastosPage() {
   const currentTheme = theme === "system" ? systemTheme : theme;
   const isDark = mountedTheme && currentTheme === "dark";
 
-  // ---------- AUTH ----------
+  // --------------------------------------------------
+  //   AUTH: usuario actual + listener
+  // --------------------------------------------------
   useEffect(() => {
     let ignore = false;
 
@@ -244,7 +247,6 @@ export default function GastosPage() {
   const handleSignOut = async () => {
     try {
       await supabase.auth.signOut();
-      setUser(null);
       setTransactions([]);
       setBudget(null);
       setBudgetInput("");
@@ -253,7 +255,9 @@ export default function GastosPage() {
     }
   };
 
-  // ---------- Cargar categorías / métodos personalizados ----------
+  // --------------------------------------------------
+  //   Cargar listas personalizadas de categorías/métodos
+  // --------------------------------------------------
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -282,7 +286,9 @@ export default function GastosPage() {
     }
   }, []);
 
-  // ---------- Estado conexión ----------
+  // --------------------------------------------------
+  //   Estado de conexión (online / offline)
+  // --------------------------------------------------
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -300,7 +306,9 @@ export default function GastosPage() {
     };
   }, []);
 
-  // ---------- Cargar offline ----------
+  // --------------------------------------------------
+  //   Cargar movimientos guardados offline
+  // --------------------------------------------------
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -324,7 +332,9 @@ export default function GastosPage() {
     loadOffline();
   }, []);
 
-  // ---------- Cargar transacciones del mes ----------
+  // --------------------------------------------------
+  //   Cargar transacciones del mes desde Supabase
+  // --------------------------------------------------
   useEffect(() => {
     if (!user) {
       setTransactions([]);
@@ -395,7 +405,7 @@ export default function GastosPage() {
                 }))
               );
             } catch {
-              // ignoramos
+              // ignoramos error de parseo
             }
           }
         }
@@ -409,7 +419,9 @@ export default function GastosPage() {
     }
   }, [month, user]);
 
-  // ---------- Sincronizar offline ----------
+  // --------------------------------------------------
+  //   Sincronizar cola offline al volver internet
+  // --------------------------------------------------
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!user) return;
@@ -458,7 +470,9 @@ export default function GastosPage() {
     };
   }, [user]);
 
-  // ---------- Presupuesto ----------
+  // --------------------------------------------------
+  //   Presupuesto mensual (localStorage)
+  // --------------------------------------------------
   useEffect(() => {
     const key = `ff-budget-${month}`;
     const raw =
@@ -487,7 +501,9 @@ export default function GastosPage() {
     }
   };
 
-  // ---------- Totales ingresos/gastos ----------
+  // --------------------------------------------------
+  //   Totales de ingresos/gastos
+  // --------------------------------------------------
   const { totalIngresos, totalGastos } = useMemo(() => {
     let ingresos = 0;
     let gastos = 0;
@@ -501,7 +517,9 @@ export default function GastosPage() {
   const flujo = totalIngresos - totalGastos;
   const disponible = budget != null ? budget - totalGastos : null;
 
-  // ---------- Gastos por categoría ----------
+  // --------------------------------------------------
+  //   Agregado mensual por categoría (sólo gastos)
+  // --------------------------------------------------
   const gastosPorCategoria = useMemo(() => {
     const map = new Map<string, number>();
 
@@ -526,7 +544,9 @@ export default function GastosPage() {
     }));
   }, [transactions]);
 
-  // ---------- Filtros ----------
+  // --------------------------------------------------
+  //   Filtros: lista filtrada de movimientos
+  // --------------------------------------------------
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
       if (filterType !== "todos" && t.type !== filterType) return false;
@@ -551,7 +571,9 @@ export default function GastosPage() {
     });
   }, [transactions, filterType, filterCategory, filterMethod, searchText]);
 
-  // ---------- Datos para gráficas ----------
+  // --------------------------------------------------
+  //   Datos para gráficas
+  // --------------------------------------------------
   const chartDataCategorias = useMemo(() => {
     return gastosPorCategoria.map((g) => ({
       category: g.category,
@@ -588,7 +610,9 @@ export default function GastosPage() {
     }));
   }, [transactions]);
 
-  // ---------- Resumen inteligente ----------
+  // --------------------------------------------------
+  //   Resumen "inteligente" del mes
+  // --------------------------------------------------
   const smartSummary = useMemo(() => {
     const lines: string[] = [];
 
@@ -671,7 +695,9 @@ export default function GastosPage() {
     gastosPorCategoria,
   ]);
 
-  // ---------- Exportar CSV ----------
+  // --------------------------------------------------
+  //   Exportar CSV del mes
+  // --------------------------------------------------
   const handleExportCsv = () => {
     let data = transactions;
     if (exportType === "ingresos") {
@@ -753,11 +779,16 @@ export default function GastosPage() {
     URL.revokeObjectURL(url);
   };
 
+  // --------------------------------------------------
+  //   Cambio de mes
+  // --------------------------------------------------
   const handleChangeMonth = (value: string) => {
     setMonth(value);
   };
 
-  // ---------- Form movimientos ----------
+  // --------------------------------------------------
+  //   Manejo formulario (movimientos)
+  // --------------------------------------------------
   const handleChangeForm = (field: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
@@ -774,6 +805,9 @@ export default function GastosPage() {
     setEditingId(null);
   };
 
+  // --------------------------------------------------
+  //   Guardar / editar / borrar movimiento
+  // --------------------------------------------------
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -805,6 +839,7 @@ export default function GastosPage() {
     setSaving(true);
 
     try {
+      // Modo offline
       if (typeof navigator !== "undefined" && !navigator.onLine) {
         const id = crypto.randomUUID();
 
@@ -837,6 +872,7 @@ export default function GastosPage() {
         return;
       }
 
+      // Modo online
       if (editingId) {
         const { error } = await supabase
           .from("transactions")
@@ -957,6 +993,9 @@ export default function GastosPage() {
     }
   };
 
+  // --------------------------------------------------
+  //   Etiqueta del mes
+  // --------------------------------------------------
   const monthLabel = useMemo(() => {
     const [y, m] = month.split("-");
     const date = new Date(Number(y), Number(m) - 1, 1);
@@ -969,7 +1008,9 @@ export default function GastosPage() {
     return raw.charAt(0).toUpperCase() + raw.slice(1);
   }, [month]);
 
-  // ---------- UI AUTH ----------
+  // --------------------------------------------------
+  //   Render: auth
+  // --------------------------------------------------
   if (authLoading) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
@@ -1074,20 +1115,22 @@ export default function GastosPage() {
     );
   }
 
-  // ---------- UI PRINCIPAL ----------
+  // --------------------------------------------------
+  //   Render: app logueada
+  // --------------------------------------------------
   return (
     <main className="flex flex-1 flex-col gap-4">
-      {/* Header */}
+      {/* Header con navegación */}
       <header className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-lg font-semibold sm:text-xl">
             Gastos e ingresos
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Registra tus movimientos del mes y analiza en qué se va el dinero.
+            Aquí capturas todos los movimientos del día a día.
           </p>
 
-          {/* Navegación principal */}
+          {/* Navegación */}
           <nav className="mt-2 flex flex-wrap gap-2 text-[11px]">
             <Link
               href="/"
@@ -1133,7 +1176,7 @@ export default function GastosPage() {
 
       {/* Mes + resumen + estado conexión */}
       <section className="space-y-4">
-        {/* Tarjeta mes / export / conexión */}
+        {/* Tarjeta mes / exportar / conexión */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
@@ -1428,42 +1471,6 @@ export default function GastosPage() {
         </div>
       </section>
 
-      {/* Visor mensual de gastos por categoría */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h2 className="mb-2 text-sm font-semibold">
-          Visor mensual de gastos por categoría
-        </h2>
-        {gastosPorCategoria.length === 0 ? (
-          <p className="text-xs text-gray-500">
-            Aún no hay gastos registrados en este mes.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {gastosPorCategoria.map((item) => (
-              <div key={item.category} className="space-y-1">
-                <div className="flex justify-between text-xs">
-                  <span>{item.category}</span>
-                  <span>
-                    {formatMoney(item.total)}{" "}
-                    <span className="text-gray-400">
-                      ({item.percent.toFixed(1)}%)
-                    </span>
-                  </span>
-                </div>
-                <div className="h-2 overflow-hidden rounded bg-gray-200 dark:bg-slate-700">
-                  <div
-                    className="h-2 rounded bg-sky-500"
-                    style={{
-                      width: `${Math.max(item.percent, 2)}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
       {/* Formulario de movimientos */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <h2 className="mb-3 text-sm font-semibold">
@@ -1659,7 +1666,33 @@ export default function GastosPage() {
 
       {/* Filtros de movimientos */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h2 className="mb-2 text-sm font-semibold">Filtros de movimientos</h2>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">Filtros de movimientos</h2>
+          {/* Pills resumen filtros */}
+          <div className="flex flex-wrap gap-1 text-[10px] text-slate-500 dark:text-slate-300">
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
+              Tipo:{" "}
+              {filterType === "todos"
+                ? "Todos"
+                : filterType === "ingreso"
+                ? "Ingresos"
+                : "Gastos"}
+            </span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
+              Categoría:{" "}
+              {filterCategory === "TODAS" ? "Todas" : filterCategory}
+            </span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
+              Método: {filterMethod === "TODOS" ? "Todos" : filterMethod}
+            </span>
+            {searchText && (
+              <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-700 dark:bg-sky-900/40 dark:text-sky-200">
+                Buscando: “{searchText}”
+              </span>
+            )}
+          </div>
+        </div>
+
         <div className="grid gap-3 text-xs md:grid-cols-4">
           {/* Tipo */}
           <div>
@@ -1755,11 +1788,53 @@ export default function GastosPage() {
         </div>
       </section>
 
+      {/* Visor mensual: gastos por categoría */}
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <h2 className="mb-2 text-sm font-semibold">
+          Visor mensual de gastos por categoría
+        </h2>
+        {gastosPorCategoria.length === 0 ? (
+          <p className="text-xs text-gray-500">
+            Aún no hay gastos registrados en este mes.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {gastosPorCategoria.map((item) => (
+              <div key={item.category} className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span>{item.category}</span>
+                  <span>
+                    {formatMoney(item.total)}{" "}
+                    <span className="text-gray-400">
+                      ({item.percent.toFixed(1)}%)
+                    </span>
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded bg-gray-200 dark:bg-slate-700">
+                  <div
+                    className="h-2 rounded bg-sky-500"
+                    style={{
+                      width: `${Math.max(item.percent, 2)}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
       {/* Tabla de movimientos */}
       <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h2 className="mb-3 text-sm font-semibold">
-          Movimientos de {month}
-        </h2>
+  <div className="mb-2 flex items-baseline justify-between gap-2">
+    <h2 className="text-sm font-semibold">
+      Movimientos de {month}
+    </h2>
+    <p className="text-[11px] text-slate-500 dark:text-slate-300">
+      Mostrando <span className="font-semibold">{filteredTransactions.length}</span> de{" "}
+      <span className="font-semibold">{transactions.length}</span> movimientos del mes
+    </p>
+  </div>
 
         <div className="overflow-x-auto text-sm">
           <table className="min-w-full border border-gray-200 text-left text-xs dark:border-slate-700 md:text-sm">
@@ -1798,11 +1873,15 @@ export default function GastosPage() {
               {!loading &&
                 filteredTransactions.map((t) => (
                   <tr
-                    key={t.id}
-                    className={`odd:bg-white even:bg-gray-50 dark:odd:bg-slate-800 dark:even:bg-slate-900 ${
-                      t.localOnly ? "opacity-70" : ""
-                    }`}
-                  >
+  key={t.id}
+  className={`odd:bg-white even:bg-gray-50 dark:odd:bg-slate-800 dark:even:bg-slate-900 ${
+    t.localOnly ? "opacity-70" : ""
+  } ${
+    t.type === "ingreso"
+      ? "border-l-4 border-l-emerald-400"
+      : "border-l-4 border-l-rose-400"
+  }`}
+>
                     <td className="border-t px-2 py-1">
                       {formatDateDisplay(t.date)}
                     </td>

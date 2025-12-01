@@ -36,14 +36,21 @@ type Tx = {
 type Asset = {
   id: string;
   name: string;
+  category: string | null;
   current_value: number | null;
+  owner: string | null;
+  notes: string | null;
+  created_at?: string;
 };
 
 type Debt = {
   id: string;
   name: string;
-  total_amount: number | null;
+  type: string;
+  total_amount: number;
   current_balance: number | null;
+  notes: string | null;
+  created_at?: string;
 };
 
 type Option = { label: string; value: string };
@@ -199,7 +206,7 @@ export default function HomeDashboardPage() {
     }
   };
 
-  // -------- Cargar datos de mes --------
+  // -------- Cargar datos de mes (transactions) --------
   useEffect(() => {
     if (!user) {
       setTransactions([]);
@@ -264,34 +271,42 @@ export default function HomeDashboardPage() {
     }
     const userId = user.id;
 
-async function loadPatrimonio() {
-  setLoadingPatrimonio(true);
+    async function loadPatrimonio() {
+      setLoadingPatrimonio(true);
 
-  const [assetsRes, debtsRes] = await Promise.all([
-    supabase
-      .from("assets")
-      .select("id,name,current_value")
-      .eq("user_id", userId),
-    supabase
-      .from("debts")
-      .select("id,name,total_amount,current_balance")
-      .eq("user_id", userId),
-  ]);
+      try {
+        const [assetsRes, debtsRes] = await Promise.all([
+          supabase
+            .from("assets")
+            .select(
+              "id,name,category,current_value,owner,notes,created_at"
+            )
+            .eq("user_id", userId),
+          supabase
+            .from("debts")
+            .select(
+              "id,name,type,total_amount,current_balance,notes,created_at"
+            )
+            .eq("user_id", userId),
+        ]);
 
-  if (assetsRes.error) {
-    console.warn("Error cargando activos", assetsRes.error);
-  } else {
-    setAssets((assetsRes.data ?? []) as Asset[]);
-  }
+        if (assetsRes.error) {
+          console.warn("Error cargando activos", assetsRes.error);
+        } else {
+          setAssets((assetsRes.data ?? []) as Asset[]);
+        }
 
-  if (debtsRes.error) {
-    console.warn("Error cargando deudas", debtsRes.error);
-  } else {
-    setDebts((debtsRes.data ?? []) as Debt[]);
-  }
-
-  setLoadingPatrimonio(false);
-}
+        if (debtsRes.error) {
+          console.warn("Error cargando deudas", debtsRes.error);
+        } else {
+          setDebts((debtsRes.data ?? []) as Debt[]);
+        }
+      } catch (err) {
+        console.error("Error cargando patrimonio en dashboard", err);
+      } finally {
+        setLoadingPatrimonio(false);
+      }
+    }
 
     loadPatrimonio();
   }, [user]);
@@ -332,7 +347,7 @@ async function loadPatrimonio() {
     () =>
       debts.reduce(
         (sum, d) =>
-          sum + (d.current_balance ?? d.total_amount ?? 0),
+          sum + Number(d.current_balance ?? d.total_amount ?? 0),
         0
       ),
     [debts]
