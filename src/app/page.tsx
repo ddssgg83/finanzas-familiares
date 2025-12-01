@@ -21,6 +21,15 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 
 export const dynamic = "force-dynamic";
 
+type Asset = {
+  id: string;
+  name: string;
+  category: string | null;
+  current_value: number | null;
+  owner: string | null;
+  notes: string | null;
+};
+
 type TxType = "ingreso" | "gasto";
 
 type Tx = {
@@ -45,13 +54,6 @@ type FormState = {
 
 type Option = { label: string; value: string };
 type ExportType = "todos" | "ingresos" | "gastos";
-
-type NetWorthRow = {
-  user_id: string;
-  total_assets: number;
-  total_debts: number;
-  net_worth: number;
-};
 
 const DEFAULT_CATEGORIES: Option[] = [
   { label: "Sueldo", value: "SUELDO" },
@@ -117,6 +119,18 @@ export default function Home() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
 
+  // Activos reales del usuario
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [loadingAssets, setLoadingAssets] = useState(false);
+  const [assetsError, setAssetsError] = useState<string | null>(null);
+  const [assetForm, setAssetForm] = useState({
+    name: "",
+    category: "",
+    currentValue: "",
+    owner: "",
+  });
+  const [savingAsset, setSavingAsset] = useState(false);
+
   // 💰 APP
   const [transactions, setTransactions] = useState<Tx[]>([]);
   const [loading, setLoading] = useState(false);
@@ -164,11 +178,6 @@ export default function Home() {
   // 🌙 Tema global (para saber si es dark y ajustar gráficos)
   const { theme, systemTheme } = useTheme();
   const [mountedTheme, setMountedTheme] = useState(false);
-
-  // Patrimonio (vista family_net_worth)
-  const [netWorth, setNetWorth] = useState<NetWorthRow | null>(null);
-  const [loadingNetWorth, setLoadingNetWorth] = useState(false);
-  const [netWorthError, setNetWorthError] = useState<string | null>(null);
 
   useEffect(() => {
     setMountedTheme(true);
@@ -261,7 +270,7 @@ export default function Home() {
       setTransactions([]);
       setBudget(null);
       setBudgetInput("");
-      setNetWorth(null);
+      setAssets([]);
     } catch (err) {
       console.error("Error cerrando sesión", err);
     }
@@ -438,13 +447,14 @@ export default function Home() {
     if (typeof window === "undefined") return;
     if (!user) return;
 
+    const userId = user.id;
     let cancelled = false;
 
     const syncAndMark = async () => {
       if (cancelled) return;
 
       try {
-        const synced = await syncOfflineTxs(user.id);
+        const synced = await syncOfflineTxs(userId);
         if (!synced.length) return;
 
         alert(
@@ -512,68 +522,46 @@ export default function Home() {
     }
   };
 
-    // --------------------------------------------------
-  //   Patrimonio familiar (net worth real desde Supabase)
+  // --------------------------------------------------
+  //   Activos reales (tabla assets)
   // --------------------------------------------------
   useEffect(() => {
     if (!user) {
-      setNetWorth(null);
+      setAssets([]);
       return;
     }
 
     const userId = user.id;
     let cancelled = false;
 
-    async function loadNetWorth() {
-      setLoadingNetWorth(true);
-      setNetWorthError(null);
-
+    async function loadAssets() {
+      setLoadingAssets(true);
+      setAssetsError(null);
       try {
         const { data, error } = await supabase
-          .from("family_net_worth")
-          .select("user_id,total_assets,total_debts,net_worth")
+          .from("assets")
+          .select("id,name,category,current_value,owner,notes,created_at")
           .eq("user_id", userId)
-          .limit(1);
+          .order("created_at", { ascending: false });
 
-        // Si Supabase regresa error, lo manejamos suave
-        if (error) {
-          console.warn("Supabase: problema al leer family_net_worth", error);
-          if (!cancelled) {
-            setNetWorthError(
-              "No se pudo leer el patrimonio familiar desde Supabase."
-            );
-            setNetWorth(null);
-          }
-          return;
-        }
+        if (error) throw error;
 
         if (!cancelled) {
-          if (data && data.length > 0) {
-            setNetWorth(data[0] as NetWorthRow);
-            setNetWorthError(null);
-          } else {
-            // Sin filas: simplemente no hay datos todavía
-            setNetWorth(null);
-            setNetWorthError(null);
-          }
+          setAssets((data ?? []) as Asset[]);
         }
       } catch (err) {
-        // Esto sólo se ejecuta si pasa algo raro NO venido de Supabase
-        console.warn("Error inesperado cargando patrimonio familiar", err);
+        console.error("Error cargando activos", err);
         if (!cancelled) {
-          setNetWorthError(
-            "Ocurrió un error inesperado al cargar el patrimonio familiar."
-          );
-          setNetWorth(null);
+          setAssetsError("No se pudieron cargar tus activos.");
         }
       } finally {
         if (!cancelled) {
-          setLoadingNetWorth(false);
+          setLoadingAssets(false);
         }
       }
     }
 
-    loadNetWorth();
+    loadAssets();
 
     return () => {
       cancelled = true;
@@ -596,10 +584,13 @@ export default function Home() {
   const flujo = totalIngresos - totalGastos;
   const disponible = budget != null ? budget - totalGastos : null;
 
-  // Totales de patrimonio (desde vista family_net_worth)
-  const totalActivos = netWorth?.total_assets ?? 0;
-  const totalDeudas = netWorth?.total_debts ?? 0;
-  const patrimonioNeto = netWorth?.net_worth ?? totalActivos - totalDeudas;
+  // Patrimonio (por ahora sólo desde assets; deudas = 0)
+  const totalActivos = useMemo(
+    () => assets.reduce((sum, a) => sum + (a.current_value ?? 0), 0),
+    [assets]
+  );
+  const totalDeudas = 0;
+  const patrimonioNeto = totalActivos - totalDeudas;
 
   // --------------------------------------------------
   //   Agregado mensual por categoría (sólo gastos)
@@ -871,7 +862,7 @@ export default function Home() {
   };
 
   // --------------------------------------------------
-  //   Manejo formulario
+  //   Manejo formulario (movimientos)
   // --------------------------------------------------
   const handleChangeForm = (field: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -889,6 +880,71 @@ export default function Home() {
     setEditingId(null);
   };
 
+  // --------------------------------------------------
+  //   Formulario de activos
+  // --------------------------------------------------
+  const handleChangeAssetForm = (
+    field: "name" | "category" | "currentValue" | "owner",
+    value: string
+  ) => {
+    setAssetForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSaveAsset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) {
+      alert("Debes iniciar sesión para guardar activos.");
+      return;
+    }
+
+    const valueNumber = Number(assetForm.currentValue);
+
+    if (!assetForm.name.trim()) {
+      alert("Ponle un nombre al activo (ej. Casa, Auto, Ahorros…).");
+      return;
+    }
+
+    if (!Number.isFinite(valueNumber) || valueNumber <= 0) {
+      alert("Ingresa un valor válido mayor a 0.");
+      return;
+    }
+
+    setSavingAsset(true);
+    setAssetsError(null);
+
+    try {
+      const { data, error } = await supabase
+        .from("assets")
+        .insert({
+          user_id: user.id,
+          name: assetForm.name.trim(),
+          category: assetForm.category.trim() || null,
+          current_value: valueNumber,
+          owner: assetForm.owner.trim() || null,
+        })
+        .select("id,name,category,current_value,owner,notes,created_at")
+        .single();
+
+      if (error) throw error;
+
+      setAssets((prev) => [data as Asset, ...prev]);
+      setAssetForm({
+        name: "",
+        category: "",
+        currentValue: "",
+        owner: "",
+      });
+    } catch (err) {
+      console.error("Error guardando activo", err);
+      setAssetsError("No se pudo guardar el activo.");
+    } finally {
+      setSavingAsset(false);
+    }
+  };
+
+  // --------------------------------------------------
+  //   Guardar / editar / borrar movimiento
+  // --------------------------------------------------
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -1436,33 +1492,20 @@ export default function Home() {
             <h2 className="text-sm font-semibold">
               Activos, deudas y patrimonio neto
             </h2>
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] uppercase tracking-wide text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
               Conectado a Supabase
             </span>
           </div>
+
           <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
-            Resumen global de tu patrimonio familiar: suma de activos, deudas y
-            patrimonio neto calculado directamente en la base de datos.
+            Resumen global de tu patrimonio familiar. Por ahora se basa en los
+            activos que has registrado aquí; en las siguientes fases
+            conectaremos también deudas, metas e inversiones.
           </p>
 
-          {loadingNetWorth && (
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Cargando patrimonio...
-            </p>
-          )}
-
-          {netWorthError && (
-            <p className="text-[11px] text-red-500">{netWorthError}</p>
-          )}
-
-          {!loadingNetWorth && !netWorthError && !netWorth && (
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Aún no tienes activos ni deudas registrados en Supabase. Cuando
-              empecemos a capturarlos desde la app, los totales aparecerán aquí.
-            </p>
-          )}
-
-          <div className="mt-3 grid gap-4 md:grid-cols-3">
+          {/* Tarjetas de resumen */}
+          <div className="grid gap-4 md:grid-cols-3">
+            {/* Activos totales */}
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
               <div className="text-[11px] text-slate-500 dark:text-slate-400">
                 Activos totales
@@ -1470,12 +1513,13 @@ export default function Home() {
               <div className="mt-1 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
                 {formatMoney(totalActivos)}
               </div>
-              <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+              <p className="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
                 Suma de todos tus activos (casas, autos, ahorros, inversiones,
                 etc.) registrados en tu patrimonio.
               </p>
             </div>
 
+            {/* Deudas totales (por ahora 0 hasta que conectemos la tabla) */}
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
               <div className="text-[11px] text-slate-500 dark:text-slate-400">
                 Deudas totales
@@ -1483,12 +1527,13 @@ export default function Home() {
               <div className="mt-1 text-sm font-semibold text-rose-600 dark:text-rose-400">
                 {formatMoney(totalDeudas)}
               </div>
-              <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                Incluye hipotecas, autos, tarjetas y cualquier otra deuda
-                registrada.
+              <p className="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
+                Incluye hipotecas, autos, tarjetas y cualquier otra deuda. Esta
+                parte la conectamos en la siguiente fase.
               </p>
             </div>
 
+            {/* Patrimonio neto */}
             <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
               <div>
                 <div className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -1505,10 +1550,116 @@ export default function Home() {
                 </div>
               </div>
               <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
-                Patrimonio neto = Activos totales - Deudas totales. Más adelante
-                lo podremos desglosar por persona (papás, hijos, empresas, etc.).
+                Patrimonio neto = Activos totales - Deudas totales.
               </p>
             </div>
+          </div>
+
+          {/* Nueva sección: formulario + lista de activos */}
+          <div className="mt-4 border-t border-slate-100 pt-4 text-xs dark:border-slate-700">
+            <h3 className="mb-2 text-[13px] font-semibold">
+              Activos registrados
+            </h3>
+
+            <form
+              onSubmit={handleSaveAsset}
+              className="mb-3 grid gap-2 md:grid-cols-[2fr_1.2fr_1.2fr_1.2fr_auto]"
+            >
+              <input
+                type="text"
+                value={assetForm.name}
+                onChange={(e) =>
+                  handleChangeAssetForm("name", e.target.value)
+                }
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="Nombre del activo (Casa, Auto, Ahorros...)"
+              />
+              <input
+                type="text"
+                value={assetForm.category}
+                onChange={(e) =>
+                  handleChangeAssetForm("category", e.target.value)
+                }
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="Categoría (Inversión, Propiedad, Efectivo...)"
+              />
+              <input
+                type="number"
+                value={assetForm.currentValue}
+                onChange={(e) =>
+                  handleChangeAssetForm("currentValue", e.target.value)
+                }
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="Valor actual"
+              />
+              <input
+                type="text"
+                value={assetForm.owner}
+                onChange={(e) =>
+                  handleChangeAssetForm("owner", e.target.value)
+                }
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="Dueño (Papá, Mamá, Hijo, etc.)"
+              />
+              <button
+                type="submit"
+                disabled={savingAsset}
+                className="rounded-lg bg-emerald-500 px-3 py-1 text-[11px] font-semibold text-white transition hover:bg-emerald-600 disabled:opacity-60"
+              >
+                {savingAsset ? "Guardando..." : "Agregar"}
+              </button>
+            </form>
+
+            {assetsError && (
+              <p className="mb-2 text-[11px] text-rose-500">{assetsError}</p>
+            )}
+
+            {loadingAssets && assets.length === 0 ? (
+              <p className="text-[11px] text-slate-500">
+                Cargando activos registrados...
+              </p>
+            ) : assets.length === 0 ? (
+              <p className="text-[11px] text-slate-500">
+                Aún no tienes activos registrados. Usa el formulario de arriba
+                para agregar tu primer activo.
+              </p>
+            ) : (
+              <div className="max-h-52 overflow-y-auto rounded-lg border border-slate-100 dark:border-slate-700">
+                <table className="min-w-full text-[11px]">
+                  <thead className="bg-slate-50 dark:bg-slate-900/60">
+                    <tr>
+                      <th className="px-2 py-1 text-left font-medium">
+                        Activo
+                      </th>
+                      <th className="px-2 py-1 text-left font-medium">
+                        Categoría
+                      </th>
+                      <th className="px-2 py-1 text-left font-medium">
+                        Dueño
+                      </th>
+                      <th className="px-2 py-1 text-right font-medium">
+                        Valor
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {assets.map((a) => (
+                      <tr
+                        key={a.id}
+                        className="odd:bg-white even:bg-slate-50 dark:odd:bg-slate-900 dark:even:bg-slate-800"
+                      >
+                        <td className="px-2 py-1">{a.name}</td>
+                        <td className="px-2 py-1">{a.category ?? "-"}</td>
+                        <td className="px-2 py-1">{a.owner ?? "-"}</td>
+                        <td className="px-2 py-1 text-right">
+                          {formatMoney(a.current_value ?? 0)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1521,14 +1672,12 @@ export default function Home() {
             </span>
           </div>
           <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
-            Aquí se conectarán tus metas de ahorro e inversiones familiares.
-            Por ahora esta sección es sólo visual, sin datos reales.
+            Aquí se conectarán tus metas de ahorro e inversiones familiares. Por
+            ahora esta sección es sólo visual, sin datos reales.
           </p>
 
           <div className="space-y-3 text-[11px] text-slate-500 dark:text-slate-300">
-            <p>
-              Ejemplos de metas que podrás registrar:
-            </p>
+            <p>Ejemplos de metas que podrás registrar:</p>
             <ul className="list-disc space-y-1 pl-4">
               <li>Fondo de emergencia de 3–6 meses de gastos.</li>
               <li>Ahorro para universidad de los hijos.</li>
@@ -1673,7 +1822,7 @@ export default function Home() {
         )}
       </section>
 
-      {/* Formulario */}
+      {/* Formulario de movimientos */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <h2 className="mb-3 text-sm font-semibold">
           {editingId ? "Editar movimiento" : "Agregar movimiento"}
