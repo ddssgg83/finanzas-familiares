@@ -1,80 +1,101 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import type { ComponentPropsWithoutRef } from "react";
 
-export function MainNavTabs() {
-  const pathname = usePathname() || "/";
+export type TabId = "dashboard" | "gastos" | "patrimonio" | "aprende" | "familia";
 
-  // Detectar pestaña activa según la ruta
-  let active: "dashboard" | "gastos" | "patrimonio" | "familia" | "aprende" =
-    "dashboard";
+type Props = {
+  active: TabId;
+  className?: string;
+} & ComponentPropsWithoutRef<"nav">;
 
-  if (pathname === "/") active = "dashboard";
-  else if (pathname.startsWith("/gastos")) active = "gastos";
-  else if (pathname.startsWith("/patrimonio")) active = "patrimonio";
-  else if (pathname.startsWith("/familia")) active = "familia";
-  else if (pathname.startsWith("/aprende")) active = "aprende";
+const basePill =
+  "rounded-full px-3 py-1 text-[11px] transition border";
 
-  const baseLink =
-    "rounded-full border border-slate-200 px-3 py-1 text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800";
+const inactiveDefault =
+  "border-slate-200 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800";
 
-  const aprendeInactive =
-    "rounded-full border border-amber-300 bg-amber-50 px-3 py-1 font-medium text-amber-700 transition hover:bg-amber-100 dark:border-amber-600 dark:bg-amber-900/30 dark:text-amber-200";
+const activeDefault =
+  "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900";
 
-  const defaultActive =
-    "rounded-full bg-slate-900 px-3 py-1 font-medium text-white dark:bg-slate-100 dark:text-slate-900";
+const inactiveAprende =
+  "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-600 dark:bg-amber-900/30 dark:text-amber-200";
 
-  const familiaActive =
-    "rounded-full bg-purple-600 px-3 py-1 font-medium text-white dark:bg-purple-400 dark:text-slate-900";
+const activeAprende =
+  "border-amber-500 bg-amber-500 text-white dark:border-amber-400 dark:bg-amber-400 dark:text-slate-900";
 
-  const aprendeActive =
-    "rounded-full bg-amber-500 px-3 py-1 font-medium text-white dark:bg-amber-400 dark:text-slate-900";
-
+export function MainNavTabs({ active, className = "", ...rest }: Props) {
   return (
-    <nav className="mt-2 flex flex-wrap gap-2 text-[11px]">
+    <nav
+      className={`flex flex-wrap gap-2 text-[11px] ${className}`}
+      {...rest}
+    >
       {/* Dashboard */}
       {active === "dashboard" ? (
-        <span className={defaultActive}>Dashboard</span>
+        <span className={`${basePill} ${activeDefault}`}>Dashboard</span>
       ) : (
-        <Link href="/" className={baseLink}>
+        <Link
+          href="/"
+          className={`${basePill} ${inactiveDefault}`}
+        >
           Dashboard
         </Link>
       )}
 
       {/* Gastos */}
       {active === "gastos" ? (
-        <span className={defaultActive}>Gastos e ingresos</span>
+        <span className={`${basePill} ${activeDefault}`}>
+          Gastos e ingresos
+        </span>
       ) : (
-        <Link href="/gastos" className={baseLink}>
+        <Link
+          href="/gastos"
+          className={`${basePill} ${inactiveDefault}`}
+        >
           Gastos e ingresos
         </Link>
       )}
 
       {/* Patrimonio */}
       {active === "patrimonio" ? (
-        <span className={defaultActive}>Patrimonio</span>
-      ) : (
-        <Link href="/patrimonio" className={baseLink}>
+        <span className={`${basePill} ${activeDefault}`}>
           Patrimonio
+        </span>
+      ) : (
+        <Link
+          href="/patrimonio"
+          className={`${basePill} ${inactiveDefault}`}
+        >
+          Patrimonio
+        </Link>
+      )}
+
+      {/* Aprende */}
+      {active === "aprende" ? (
+        <span className={`${basePill} ${activeAprende}`}>
+          Aprende finanzas
+        </span>
+      ) : (
+        <Link
+          href="/aprende"
+          className={`${basePill} ${inactiveAprende}`}
+        >
+          Aprende finanzas
         </Link>
       )}
 
       {/* Familia */}
       {active === "familia" ? (
-        <span className={familiaActive}>Familia</span>
-      ) : (
-        <Link href="/familia" className={baseLink}>
+        <span className={`${basePill} ${activeDefault}`}>
           Familia
-        </Link>
-      )}
-
-      {/* Aprende finanzas */}
-      {active === "aprende" ? (
-        <span className={aprendeActive}>Aprende finanzas</span>
+        </span>
       ) : (
-        <Link href="/aprende" className={aprendeInactive}>
-          Aprende finanzas
+        <Link
+          href="/familia"
+          className={`${basePill} ${inactiveDefault}`}
+        >
+          Familia
         </Link>
       )}
     </nav>
