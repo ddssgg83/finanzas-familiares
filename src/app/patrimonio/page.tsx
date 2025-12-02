@@ -86,10 +86,6 @@ export default function PatrimonioPage() {
   const [savingDebt, setSavingDebt] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // IDs en edición
-  const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
-  const [editingDebtId, setEditingDebtId] = useState<string | null>(null);
-
   const [assetForm, setAssetForm] = useState<AssetForm>({
     name: "",
     category: "",
@@ -110,6 +106,9 @@ export default function PatrimonioPage() {
     currentBalance: "",
     notes: "",
   });
+
+  // panel de exportación estilo "Gastos"
+  const [showExportOptions, setShowExportOptions] = useState(false);
 
   const { theme, systemTheme } = useTheme();
   const [mountedTheme, setMountedTheme] = useState(false);
@@ -257,7 +256,6 @@ export default function PatrimonioPage() {
       owner: "",
       notes: "",
     });
-    setEditingAssetId(null);
   };
 
   const resetDebtForm = () => {
@@ -273,7 +271,6 @@ export default function PatrimonioPage() {
       currentBalance: "",
       notes: "",
     });
-    setEditingDebtId(null);
   };
 
   const handleSaveAsset = async (e: React.FormEvent) => {
@@ -296,53 +293,26 @@ export default function PatrimonioPage() {
     setSavingAsset(true);
 
     try {
-      if (editingAssetId) {
-        // UPDATE
-        const { data, error } = await supabase
-          .from("assets")
-          .update({
-            name: assetForm.name.trim(),
-            category: assetForm.category.trim() || null,
-            current_value: valueNumber,
-            owner: assetForm.owner.trim() || null,
-            notes: assetForm.notes.trim() || null,
-          })
-          .eq("id", editingAssetId)
-          .eq("user_id", user.id)
-          .select(
-            "id,name,category,current_value,owner,notes,family_member_id,created_at"
-          )
-          .single();
+      const { data, error } = await supabase
+        .from("assets")
+        .insert({
+          user_id: user.id,
+          name: assetForm.name.trim(),
+          category: assetForm.category.trim() || null,
+          current_value: valueNumber,
+          owner: assetForm.owner.trim() || null,
+          notes: assetForm.notes.trim() || null,
+          family_member_id: null, // por ahora no lo usamos en formulario
+        })
+        .select(
+          "id,name,category,current_value,owner,notes,family_member_id,created_at"
+        )
+        .single();
 
-        if (error) throw error;
+      if (error) throw error;
 
-        setAssets((prev) =>
-          prev.map((a) => (a.id === editingAssetId ? (data as Asset) : a))
-        );
-        resetAssetForm();
-      } else {
-        // INSERT
-        const { data, error } = await supabase
-          .from("assets")
-          .insert({
-            user_id: user.id,
-            name: assetForm.name.trim(),
-            category: assetForm.category.trim() || null,
-            current_value: valueNumber,
-            owner: assetForm.owner.trim() || null,
-            notes: assetForm.notes.trim() || null,
-            family_member_id: null, // por ahora no lo usamos en formulario
-          })
-          .select(
-            "id,name,category,current_value,owner,notes,family_member_id,created_at"
-          )
-          .single();
-
-        if (error) throw error;
-
-        setAssets((prev) => [data as Asset, ...prev]);
-        resetAssetForm();
-      }
+      setAssets((prev) => [data as Asset, ...prev]);
+      resetAssetForm();
     } catch (err) {
       console.error("Error guardando activo", err);
       alert("No se pudo guardar el activo.");
@@ -384,109 +354,36 @@ export default function PatrimonioPage() {
     setSavingDebt(true);
 
     try {
-      if (editingDebtId) {
-        // UPDATE
-        const { data, error } = await supabase
-          .from("debts")
-          .update({
-            name: debtForm.name.trim(),
-            category: debtForm.category.trim() || null,
-            type: debtForm.type.trim() || null,
-            total_amount: totalAmount,
-            monthly_payment: monthlyPayment,
-            interest_rate: interestRate,
-            due_date: debtForm.dueDate || null,
-            owner: debtForm.owner.trim() || null,
-            current_balance: currentBalance,
-            notes: debtForm.notes.trim() || null,
-          })
-          .eq("id", editingDebtId)
-          .eq("user_id", user.id)
-          .select(
-            "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at"
-          )
-          .single();
+      const { data, error } = await supabase
+        .from("debts")
+        .insert({
+          user_id: user.id,
+          name: debtForm.name.trim(),
+          category: debtForm.category.trim() || null,
+          type: debtForm.type.trim() || null,
+          total_amount: totalAmount,
+          monthly_payment: monthlyPayment,
+          interest_rate: interestRate,
+          due_date: debtForm.dueDate || null,
+          owner: debtForm.owner.trim() || null,
+          current_balance: currentBalance,
+          notes: debtForm.notes.trim() || null,
+          family_member_id: null, // por ahora no lo usamos en formulario
+        })
+        .select(
+          "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at"
+        )
+        .single();
 
-        if (error) throw error;
+      if (error) throw error;
 
-        setDebts((prev) =>
-          prev.map((d) => (d.id === editingDebtId ? (data as Debt) : d))
-        );
-        resetDebtForm();
-      } else {
-        // INSERT
-        const { data, error } = await supabase
-          .from("debts")
-          .insert({
-            user_id: user.id,
-            name: debtForm.name.trim(),
-            category: debtForm.category.trim() || null,
-            type: debtForm.type.trim() || null,
-            total_amount: totalAmount,
-            monthly_payment: monthlyPayment,
-            interest_rate: interestRate,
-            due_date: debtForm.dueDate || null,
-            owner: debtForm.owner.trim() || null,
-            current_balance: currentBalance,
-            notes: debtForm.notes.trim() || null,
-            family_member_id: null, // por ahora no lo usamos en formulario
-          })
-          .select(
-            "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at"
-          )
-          .single();
-
-        if (error) throw error;
-
-        setDebts((prev) => [data as Debt, ...prev]);
-        resetDebtForm();
-      }
+      setDebts((prev) => [data as Debt, ...prev]);
+      resetDebtForm();
     } catch (err) {
       console.error("Error guardando deuda", err);
       alert("No se pudo guardar la deuda.");
     } finally {
       setSavingDebt(false);
-    }
-  };
-
-  // -------- Editar / eliminar --------
-  const handleEditAsset = (asset: Asset) => {
-    setAssetForm({
-      name: asset.name ?? "",
-      category: asset.category ?? "",
-      currentValue:
-        asset.current_value != null ? String(asset.current_value) : "",
-      owner: asset.owner ?? "",
-      notes: asset.notes ?? "",
-    });
-    setEditingAssetId(asset.id);
-    if (typeof window !== "undefined") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  };
-
-  const handleEditDebt = (debt: Debt) => {
-    setDebtForm({
-      name: debt.name ?? "",
-      category: debt.category ?? "",
-      type: debt.type ?? "",
-      totalAmount:
-        debt.total_amount != null ? String(debt.total_amount) : "",
-      monthlyPayment:
-        debt.monthly_payment != null ? String(debt.monthly_payment) : "",
-      interestRate:
-        debt.interest_rate != null ? String(debt.interest_rate) : "",
-      dueDate: debt.due_date ?? "",
-      owner: debt.owner ?? "",
-      currentBalance:
-        debt.current_balance != null
-          ? String(debt.current_balance)
-          : "",
-      notes: debt.notes ?? "",
-    });
-    setEditingDebtId(debt.id);
-    if (typeof window !== "undefined") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
 
@@ -507,9 +404,6 @@ export default function PatrimonioPage() {
       if (error) throw error;
 
       setAssets((prev) => prev.filter((a) => a.id !== asset.id));
-      if (editingAssetId === asset.id) {
-        resetAssetForm();
-      }
     } catch (err) {
       console.error("Error eliminando activo", err);
       alert("No se pudo eliminar el activo.");
@@ -533,12 +427,95 @@ export default function PatrimonioPage() {
       if (error) throw error;
 
       setDebts((prev) => prev.filter((d) => d.id !== debt.id));
-      if (editingDebtId === debt.id) {
-        resetDebtForm();
-      }
     } catch (err) {
       console.error("Error eliminando deuda", err);
       alert("No se pudo eliminar la deuda.");
+    }
+  };
+
+  // -------- Exportar PDF patrimonio --------
+  const handleExportPatrimonioPdf = async () => {
+    try {
+      const { jsPDF } = await import("jspdf");
+      const autoTable = (await import("jspdf-autotable")).default as any;
+
+      const doc = new jsPDF();
+
+      let y = 14;
+      doc.setFontSize(16);
+      doc.text("Patrimonio familiar", 14, y);
+      y += 8;
+
+      doc.setFontSize(10);
+      doc.text(`Activos totales: ${formatMoney(totalActivos)}`, 14, y);
+      y += 5;
+      doc.text(`Deudas totales: ${formatMoney(totalDeudas)}`, 14, y);
+      y += 5;
+      doc.text(`Patrimonio neto: ${formatMoney(patrimonioNeto)}`, 14, y);
+      y += 8;
+
+      // Activos
+      doc.setFontSize(12);
+      doc.text("Activos", 14, y);
+      y += 4;
+
+      autoTable(doc, {
+        head: [["Nombre", "Categoría", "Dueño", "Valor"]],
+        body: assets.map((a) => [
+          a.name,
+          a.category ?? "-",
+          a.owner ?? "-",
+          formatMoney(a.current_value ?? 0),
+        ]),
+        startY: y,
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [15, 23, 42] },
+      });
+
+      const finalY1 =
+        (doc as any).lastAutoTable?.finalY != null
+          ? (doc as any).lastAutoTable.finalY
+          : y + 10;
+
+      let y2 = finalY1 + 10;
+      doc.setFontSize(12);
+      doc.text("Deudas", 14, y2);
+      y2 += 4;
+
+      autoTable(doc, {
+        head: [
+          [
+            "Deuda",
+            "Tipo",
+            "Total",
+            "Saldo",
+            "Pago mensual",
+            "Tasa %",
+            "Vence",
+          ],
+        ],
+        body: debts.map((d) => [
+          d.name,
+          d.type || d.category || "-",
+          formatMoney(d.total_amount ?? 0),
+          formatMoney(d.current_balance ?? d.total_amount ?? 0),
+          formatMoney(d.monthly_payment ?? 0),
+          d.interest_rate != null ? `${d.interest_rate}%` : "-",
+          formatDateDisplay(d.due_date),
+        ]),
+        startY: y2,
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [15, 23, 42] },
+      });
+
+      const fileDate = new Date()
+        .toISOString()
+        .slice(0, 10)
+        .replace(/-/g, "");
+      doc.save(`patrimonio_${fileDate}.pdf`);
+    } catch (err) {
+      console.error("Error exportando PDF de patrimonio", err);
+      alert("No se pudo generar el PDF de patrimonio.");
     }
   };
 
@@ -567,9 +544,7 @@ export default function PatrimonioPage() {
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Ve al dashboard principal para iniciar sesión.
           </p>
-          {authError && (
-            <p className="text-xs text-red-500">{authError}</p>
-          )}
+          {authError && <p className="text-xs text-red-500">{authError}</p>}
           <Link
             href="/"
             className="inline-flex items-center justify-center rounded-full bg-sky-500 px-4 py-2 text-xs font-medium text-white hover:bg-sky-600"
@@ -689,24 +664,45 @@ export default function PatrimonioPage() {
           <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
             Suma de todos los pagos mensuales que definiste en tus deudas.
           </p>
+          <button
+            type="button"
+            onClick={() => setShowExportOptions((v) => !v)}
+            className="mt-3 inline-flex items-center justify-center rounded-full bg-sky-500 px-3 py-1 text-[11px] font-medium text-white hover:bg-sky-600"
+          >
+            {showExportOptions ? "Cerrar exportar" : "Exportar PDF patrimonio"}
+          </button>
         </div>
       </section>
+
+      {/* Panel de exportación (igual estilo que Gastos) */}
+      {showExportOptions && (
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="mb-2 text-sm font-semibold">
+            Exportar resumen de patrimonio
+          </h2>
+          <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
+            El PDF incluirá un resumen con totales de activos, deudas y
+            patrimonio neto, además de tablas detalladas de cada activo y cada
+            deuda.
+          </p>
+          <button
+            type="button"
+            onClick={handleExportPatrimonioPdf}
+            className="rounded-lg bg-sky-500 px-4 py-2 text-xs font-medium text-white hover:bg-sky-600"
+          >
+            Descargar PDF patrimonio
+          </button>
+        </section>
+      )}
 
       {/* Formularios + tablas */}
       <section className="grid gap-4 lg:grid-cols-2">
         {/* Activos */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="mb-1 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Activos</h2>
-            {editingAssetId && (
-              <span className="text-[11px] text-amber-500">
-                Editando activo...
-              </span>
-            )}
-          </div>
+          <h2 className="mb-2 text-sm font-semibold">Activos</h2>
           <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
-            Registra todo lo que tienes a tu nombre o de tu familia: propiedades, autos,
-            cuentas, inversiones, etc.
+            Registra todo lo que tienes a tu nombre o de tu familia:
+            propiedades, autos, cuentas, inversiones, etc.
           </p>
 
           <form
@@ -716,9 +712,7 @@ export default function PatrimonioPage() {
             <input
               type="text"
               value={assetForm.name}
-              onChange={(e) =>
-                handleChangeAssetForm("name", e.target.value)
-              }
+              onChange={(e) => handleChangeAssetForm("name", e.target.value)}
               className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               placeholder="Nombre (Casa, Auto, Ahorros...)"
             />
@@ -743,48 +737,27 @@ export default function PatrimonioPage() {
             <input
               type="text"
               value={assetForm.owner}
-              onChange={(e) =>
-                handleChangeAssetForm("owner", e.target.value)
-              }
+              onChange={(e) => handleChangeAssetForm("owner", e.target.value)}
               className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               placeholder="Dueño (Papá, Mamá, Hijo...)"
             />
             <textarea
               value={assetForm.notes}
-              onChange={(e) =>
-                handleChangeAssetForm("notes", e.target.value)
-              }
+              onChange={(e) => handleChangeAssetForm("notes", e.target.value)}
               className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 md:col-span-4"
               placeholder="Notas (ubicación, institución, algún detalle, etc.)"
             />
-            <div className="mt-1 flex items-center gap-2 md:col-span-4">
-              <button
-                type="submit"
-                disabled={savingAsset}
-                className="inline-flex items-center justify-center rounded-lg bg-emerald-500 px-3 py-1 text-[11px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-60"
-              >
-                {savingAsset
-                  ? "Guardando..."
-                  : editingAssetId
-                  ? "Guardar cambios"
-                  : "Agregar activo"}
-              </button>
-              {editingAssetId && (
-                <button
-                  type="button"
-                  onClick={resetAssetForm}
-                  className="text-[11px] text-slate-400 hover:underline"
-                >
-                  Cancelar edición
-                </button>
-              )}
-            </div>
+            <button
+              type="submit"
+              disabled={savingAsset}
+              className="mt-1 inline-flex items-center justify-center rounded-lg bg-emerald-500 px-3 py-1 text-[11px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-60 md:col-span-4"
+            >
+              {savingAsset ? "Guardando..." : "Agregar activo"}
+            </button>
           </form>
 
           {loading && assets.length === 0 ? (
-            <p className="text-[11px] text-slate-500">
-              Cargando activos...
-            </p>
+            <p className="text-[11px] text-slate-500">Cargando activos...</p>
           ) : assets.length === 0 ? (
             <p className="text-[11px] text-slate-500">
               Aún no tienes activos registrados.
@@ -794,18 +767,12 @@ export default function PatrimonioPage() {
               <table className="min-w-full text-[11px]">
                 <thead className="bg-slate-50 dark:bg-slate-900/60">
                   <tr>
-                    <th className="px-2 py-1 text-left font-medium">
-                      Nombre
-                    </th>
+                    <th className="px-2 py-1 text-left font-medium">Nombre</th>
                     <th className="px-2 py-1 text-left font-medium">
                       Categoría
                     </th>
-                    <th className="px-2 py-1 text-left font-medium">
-                      Dueño
-                    </th>
-                    <th className="px-2 py-1 text-right font-medium">
-                      Valor
-                    </th>
+                    <th className="px-2 py-1 text-left font-medium">Dueño</th>
+                    <th className="px-2 py-1 text-right font-medium">Valor</th>
                     <th className="px-2 py-1 text-center font-medium">
                       Acciones
                     </th>
@@ -826,13 +793,6 @@ export default function PatrimonioPage() {
                       <td className="px-2 py-1 text-center">
                         <button
                           type="button"
-                          onClick={() => handleEditAsset(a)}
-                          className="mr-2 text-[10px] text-sky-600 hover:underline"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          type="button"
                           onClick={() => handleDeleteAsset(a)}
                           className="text-[10px] text-rose-600 hover:underline"
                         >
@@ -849,14 +809,7 @@ export default function PatrimonioPage() {
 
         {/* Deudas */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="mb-1 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Deudas</h2>
-            {editingDebtId && (
-              <span className="text-[11px] text-amber-500">
-                Editando deuda...
-              </span>
-            )}
-          </div>
+          <h2 className="mb-2 text-sm font-semibold">Deudas</h2>
           <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
             Registra hipotecas, créditos de auto, tarjetas y cualquier otro
             compromiso. El campo de pago mensual te ayuda a ver la carga fija al
@@ -870,18 +823,14 @@ export default function PatrimonioPage() {
             <input
               type="text"
               value={debtForm.name}
-              onChange={(e) =>
-                handleChangeDebtForm("name", e.target.value)
-              }
+              onChange={(e) => handleChangeDebtForm("name", e.target.value)}
               className="md:col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               placeholder="Nombre (Hipoteca casa, Tarjeta BBVA...)"
             />
             <input
               type="text"
               value={debtForm.type}
-              onChange={(e) =>
-                handleChangeDebtForm("type", e.target.value)
-              }
+              onChange={(e) => handleChangeDebtForm("type", e.target.value)}
               className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               placeholder="Tipo (Hipoteca, Auto, Tarjeta...)"
             />
@@ -943,48 +892,27 @@ export default function PatrimonioPage() {
             <input
               type="text"
               value={debtForm.owner}
-              onChange={(e) =>
-                handleChangeDebtForm("owner", e.target.value)
-              }
+              onChange={(e) => handleChangeDebtForm("owner", e.target.value)}
               className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               placeholder="De quién es la deuda"
             />
             <textarea
               value={debtForm.notes}
-              onChange={(e) =>
-                handleChangeDebtForm("notes", e.target.value)
-              }
+              onChange={(e) => handleChangeDebtForm("notes", e.target.value)}
               className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 md:col-span-3"
               placeholder="Notas (institución, condiciones, etc.)"
             />
-            <div className="mt-1 flex items-center gap-2 md:col-span-3">
-              <button
-                type="submit"
-                disabled={savingDebt}
-                className="inline-flex items-center justify-center rounded-lg bg-rose-500 px-3 py-1 text-[11px] font-semibold text-white hover:bg-rose-600 disabled:opacity-60"
-              >
-                {savingDebt
-                  ? "Guardando..."
-                  : editingDebtId
-                  ? "Guardar cambios"
-                  : "Agregar deuda"}
-              </button>
-              {editingDebtId && (
-                <button
-                  type="button"
-                  onClick={resetDebtForm}
-                  className="text-[11px] text-slate-400 hover:underline"
-                >
-                  Cancelar edición
-                </button>
-              )}
-            </div>
+            <button
+              type="submit"
+              disabled={savingDebt}
+              className="mt-1 inline-flex items-center justify-center rounded-lg bg-rose-500 px-3 py-1 text-[11px] font-semibold text-white hover:bg-rose-600 disabled:opacity-60 md:col-span-3"
+            >
+              {savingDebt ? "Guardando..." : "Agregar deuda"}
+            </button>
           </form>
 
           {loading && debts.length === 0 ? (
-            <p className="text-[11px] text-slate-500">
-              Cargando deudas...
-            </p>
+            <p className="text-[11px] text-slate-500">Cargando deudas...</p>
           ) : debts.length === 0 ? (
             <p className="text-[11px] text-slate-500">
               Aún no tienes deudas registradas.
@@ -994,24 +922,14 @@ export default function PatrimonioPage() {
               <table className="min-w-full text-[11px]">
                 <thead className="bg-slate-50 dark:bg-slate-900/60">
                   <tr>
-                    <th className="px-2 py-1 text-left font-medium">
-                      Deuda
-                    </th>
-                    <th className="px-2 py-1 text-left font-medium">
-                      Tipo
-                    </th>
-                    <th className="px-2 py-1 text-right font-medium">
-                      Total
-                    </th>
-                    <th className="px-2 py-1 text-right font-medium">
-                      Saldo
-                    </th>
+                    <th className="px-2 py-1 text-left font-medium">Deuda</th>
+                    <th className="px-2 py-1 text-left font-medium">Tipo</th>
+                    <th className="px-2 py-1 text-right font-medium">Total</th>
+                    <th className="px-2 py-1 text-right font-medium">Saldo</th>
                     <th className="px-2 py-1 text-right font-medium">
                       Pago mensual
                     </th>
-                    <th className="px-2 py-1 text-left font-medium">
-                      Vence
-                    </th>
+                    <th className="px-2 py-1 text-left font-medium">Vence</th>
                     <th className="px-2 py-1 text-center font-medium">
                       Acciones
                     </th>
@@ -1031,9 +949,7 @@ export default function PatrimonioPage() {
                         {formatMoney(d.total_amount ?? 0)}
                       </td>
                       <td className="px-2 py-1 text-right">
-                        {formatMoney(
-                          d.current_balance ?? d.total_amount ?? 0
-                        )}
+                        {formatMoney(d.current_balance ?? d.total_amount ?? 0)}
                       </td>
                       <td className="px-2 py-1 text-right">
                         {formatMoney(d.monthly_payment ?? 0)}
@@ -1042,13 +958,6 @@ export default function PatrimonioPage() {
                         {formatDateDisplay(d.due_date)}
                       </td>
                       <td className="px-2 py-1 text-center">
-                        <button
-                          type="button"
-                          onClick={() => handleEditDebt(d)}
-                          className="mr-2 text-[10px] text-sky-600 hover:underline"
-                        >
-                          Editar
-                        </button>
                         <button
                           type="button"
                           onClick={() => handleDeleteDebt(d)}
