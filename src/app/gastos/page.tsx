@@ -70,6 +70,7 @@ const DEFAULT_METHODS: Option[] = [
 
 const CUSTOM_CATEGORIES_KEY = "ff-custom-categories";
 const CUSTOM_METHODS_KEY = "ff-custom-methods";
+const CATEGORY_BUDGET_KEY_PREFIX = "ff-cat-budgets-";
 
 function getCurrentMonthKey(date = new Date()) {
   const y = date.getFullYear();
@@ -134,9 +135,13 @@ export default function GastosPage() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // Presupuesto
+  // Presupuesto general
   const [budgetInput, setBudgetInput] = useState("");
   const [budget, setBudget] = useState<number | null>(null);
+
+  // Presupuesto por categoría
+  const [categoryBudgets, setCategoryBudgets] = useState<Record<string, number>>({});
+  const [categoryBudgetInputs, setCategoryBudgetInputs] = useState<Record<string, string>>({});
 
   // Online / offline
   const [isOnline, setIsOnline] = useState<boolean>(true);
@@ -250,6 +255,8 @@ export default function GastosPage() {
       setTransactions([]);
       setBudget(null);
       setBudgetInput("");
+      setCategoryBudgets({});
+      setCategoryBudgetInputs({});
     } catch (err) {
       console.error("Error cerrando sesión", err);
     }
@@ -471,7 +478,7 @@ export default function GastosPage() {
   }, [user]);
 
   // --------------------------------------------------
-  //   Presupuesto mensual (localStorage)
+  //   Presupuesto mensual (global, localStorage)
   // --------------------------------------------------
   useEffect(() => {
     const key = `ff-budget-${month}`;
@@ -498,6 +505,69 @@ export default function GastosPage() {
     setBudget(val);
     if (typeof window !== "undefined") {
       localStorage.setItem(`ff-budget-${month}`, String(val));
+    }
+  };
+
+  // --------------------------------------------------
+  //   Presupuesto por categoría (localStorage por mes)
+  // --------------------------------------------------
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const key = `${CATEGORY_BUDGET_KEY_PREFIX}${month}`;
+    const raw = localStorage.getItem(key);
+
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as Record<string, number>;
+        if (parsed && typeof parsed === "object") {
+          setCategoryBudgets(parsed);
+          const inputs: Record<string, string> = {};
+          for (const [cat, value] of Object.entries(parsed)) {
+            inputs[cat] = String(value);
+          }
+          setCategoryBudgetInputs(inputs);
+          return;
+        }
+      } catch {
+        // ignoramos error
+      }
+    }
+
+    // Si no hay nada guardado
+    setCategoryBudgets({});
+    setCategoryBudgetInputs({});
+  }, [month]);
+
+  const handleChangeCategoryBudgetInput = (category: string, value: string) => {
+    setCategoryBudgetInputs((prev) => ({
+      ...prev,
+      [category]: value,
+    }));
+  };
+
+  const handleSaveCategoryBudget = (category: string) => {
+    const raw = categoryBudgetInputs[category];
+    const key = `${CATEGORY_BUDGET_KEY_PREFIX}${month}`;
+
+    const num = Number(raw);
+    // Si está vacío o no es válido, borramos el presupuesto de esa categoría
+    if (!raw || !Number.isFinite(num) || num <= 0) {
+      const updated = { ...categoryBudgets };
+      delete updated[category];
+      setCategoryBudgets(updated);
+      if (typeof window !== "undefined") {
+        localStorage.setItem(key, JSON.stringify(updated));
+      }
+      return;
+    }
+
+    const updated = {
+      ...categoryBudgets,
+      [category]: num,
+    };
+    setCategoryBudgets(updated);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(key, JSON.stringify(updated));
     }
   };
 
@@ -543,6 +613,40 @@ export default function GastosPage() {
       percent: totalGastosMes ? (e.total * 100) / totalGastosMes : 0,
     }));
   }, [transactions]);
+
+  // Gastos por categoría + cruza con presupuestos
+  const gastosPorCategoriaConPresupuesto = useMemo(() => {
+    const baseMap = new Map(
+      gastosPorCategoria.map((item) => [item.category, item])
+    );
+
+    const allKeys = new Set<string>([
+      ...gastosPorCategoria.map((g) => g.category),
+      ...Object.keys(categoryBudgets),
+    ]);
+
+    return Array.from(allKeys).map((category) => {
+      const base = baseMap.get(category);
+      const total = base?.total ?? 0;
+      const percent = base?.percent ?? 0;
+      const budgetForCat = categoryBudgets[category];
+      const remaining =
+        budgetForCat != null ? budgetForCat - total : null;
+      const percentOfBudget =
+        budgetForCat != null && budgetForCat > 0
+          ? (total * 100) / budgetForCat
+          : null;
+
+      return {
+        category,
+        total,
+        percent,
+        budget: budgetForCat ?? null,
+        remaining,
+        percentOfBudget,
+      };
+    });
+  }, [gastosPorCategoria, categoryBudgets]);
 
   // --------------------------------------------------
   //   Filtros: lista filtrada de movimientos
@@ -1788,53 +1892,171 @@ export default function GastosPage() {
         </div>
       </section>
 
-      {/* Visor mensual: gastos por categoría */}
+      {/* Visor mensual: gastos + presupuesto por categoría */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <h2 className="mb-2 text-sm font-semibold">
-          Visor mensual de gastos por categoría
+          Presupuestos por categoría
         </h2>
-        {gastosPorCategoria.length === 0 ? (
+        <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
+          Define un presupuesto para cada categoría y ve en qué punto del mes vas.
+          Si dejas un presupuesto en blanco, esa categoría no tendrá límite.
+        </p>
+        {gastosPorCategoriaConPresupuesto.length === 0 ? (
           <p className="text-xs text-gray-500">
-            Aún no hay gastos registrados en este mes.
+            Aún no hay categorías con gasto este mes. Cuando registres gastos o
+            asignes presupuestos, aparecerán aquí.
           </p>
         ) : (
-          <div className="space-y-2">
-            {gastosPorCategoria.map((item) => (
-              <div key={item.category} className="space-y-1">
-                <div className="flex justify-between text-xs">
-                  <span>{item.category}</span>
-                  <span>
-                    {formatMoney(item.total)}{" "}
-                    <span className="text-gray-400">
-                      ({item.percent.toFixed(1)}%)
-                    </span>
-                  </span>
+          <div className="space-y-3">
+            {gastosPorCategoriaConPresupuesto.map((item) => {
+              const label =
+                categories.find((c) => c.value === item.category)?.label ??
+                item.category;
+              const inputValue =
+                categoryBudgetInputs[item.category] ??
+                (item.budget != null ? String(item.budget) : "");
+              const overBudget =
+                item.budget != null && item.total > item.budget;
+              const nearBudget =
+                item.budget != null &&
+                !overBudget &&
+                (item.percentOfBudget ?? 0) >= 80;
+
+              return (
+                <div
+                  key={item.category}
+                  className="rounded-xl border border-slate-200 p-3 dark:border-slate-700"
+                >
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <div className="text-xs font-medium text-slate-800 dark:text-slate-100">
+                        {label}
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Gastado este mes:{" "}
+                        <span className="font-medium">
+                          {formatMoney(item.total)}
+                        </span>{" "}
+                        {item.percent ? (
+                          <span className="text-slate-400">
+                            ({item.percent.toFixed(1)}% del total de gastos)
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-end gap-1 text-[11px]">
+                      <span className="text-slate-500 dark:text-slate-300">
+                        Presupuesto de la categoría
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          value={inputValue}
+                          onChange={(e) =>
+                            handleChangeCategoryBudgetInput(
+                              item.category,
+                              e.target.value
+                            )
+                          }
+                          className="w-28 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                          placeholder="Ej. 3000"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleSaveCategoryBudget(item.category)
+                          }
+                          className="rounded-lg bg-sky-500 px-3 py-1 text-[11px] font-medium text-white hover:bg-sky-600"
+                        >
+                          Guardar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {item.budget != null ? (
+                    <>
+                      <div className="mt-2 flex justify-between text-[11px]">
+                        <span className="text-slate-500 dark:text-slate-300">
+                          Usado:{" "}
+                          {item.percentOfBudget != null
+                            ? item.percentOfBudget.toFixed(1)
+                            : 0}
+                          % del presupuesto
+                        </span>
+                        <span
+                          className={
+                            overBudget
+                              ? "font-medium text-rose-500"
+                              : "font-medium text-emerald-500"
+                          }
+                        >
+                          {item.remaining != null &&
+                            (overBudget
+                              ? `Te pasaste por ${formatMoney(
+                                  Math.abs(item.remaining)
+                                )}`
+                              : `Te quedan ${formatMoney(
+                                  item.remaining
+                                )} disponibles`)}
+                        </span>
+                      </div>
+                      <div className="mt-1 h-2 overflow-hidden rounded bg-gray-200 dark:bg-slate-700">
+                        <div
+                          className={`h-2 rounded ${
+                            overBudget
+                              ? "bg-rose-500"
+                              : nearBudget
+                              ? "bg-amber-500"
+                              : "bg-sky-500"
+                          }`}
+                          style={{
+                            width: `${Math.min(
+                              item.percentOfBudget ?? 0,
+                              130
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                        {overBudget
+                          ? "Regla rápida: revisa esta categoría y congela todos los gastos no esenciales el resto del mes."
+                          : nearBudget
+                          ? "Regla rápida: estás cerca de tu límite, procura pagar solo lo estrictamente necesario en esta categoría."
+                          : "Regla rápida: vas bien en esta categoría, mantén los mismos hábitos de gasto."}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                      Si defines un presupuesto para esta categoría, aquí verás
+                      el avance y recibirás una alerta visual cuando estés
+                      cerca de pasarte.
+                    </div>
+                  )}
                 </div>
-                <div className="h-2 overflow-hidden rounded bg-gray-200 dark:bg-slate-700">
-                  <div
-                    className="h-2 rounded bg-sky-500"
-                    style={{
-                      width: `${Math.max(item.percent, 2)}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
 
       {/* Tabla de movimientos */}
       <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-  <div className="mb-2 flex items-baseline justify-between gap-2">
-    <h2 className="text-sm font-semibold">
-      Movimientos de {month}
-    </h2>
-    <p className="text-[11px] text-slate-500 dark:text-slate-300">
-      Mostrando <span className="font-semibold">{filteredTransactions.length}</span> de{" "}
-      <span className="font-semibold">{transactions.length}</span> movimientos del mes
-    </p>
-  </div>
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <h2 className="text-sm font-semibold">
+            Movimientos de {month}
+          </h2>
+          <p className="text-[11px] text-slate-500 dark:text-slate-300">
+            Mostrando{" "}
+            <span className="font-semibold">
+              {filteredTransactions.length}
+            </span>{" "}
+            de{" "}
+            <span className="font-semibold">{transactions.length}</span>{" "}
+            movimientos del mes
+          </p>
+        </div>
 
         <div className="overflow-x-auto text-sm">
           <table className="min-w-full border border-gray-200 text-left text-xs dark:border-slate-700 md:text-sm">
@@ -1873,15 +2095,15 @@ export default function GastosPage() {
               {!loading &&
                 filteredTransactions.map((t) => (
                   <tr
-  key={t.id}
-  className={`odd:bg-white even:bg-gray-50 dark:odd:bg-slate-800 dark:even:bg-slate-900 ${
-    t.localOnly ? "opacity-70" : ""
-  } ${
-    t.type === "ingreso"
-      ? "border-l-4 border-l-emerald-400"
-      : "border-l-4 border-l-rose-400"
-  }`}
->
+                    key={t.id}
+                    className={`odd:bg-white even:bg-gray-50 dark:odd:bg-slate-800 dark:even:bg-slate-900 ${
+                      t.localOnly ? "opacity-70" : ""
+                    } ${
+                      t.type === "ingreso"
+                        ? "border-l-4 border-l-emerald-400"
+                        : "border-l-4 border-l-rose-400"
+                    }`}
+                  >
                     <td className="border-t px-2 py-1">
                       {formatDateDisplay(t.date)}
                     </td>
