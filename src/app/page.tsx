@@ -18,6 +18,7 @@ import {
 } from "recharts";
 import { useTheme } from "next-themes";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { MainNavTabs } from "@/components/MainNavTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -541,33 +542,8 @@ export default function HomeDashboardPage() {
           </p>
 
           {/* Navegación */}
-          <nav className="mt-2 flex flex-wrap gap-2 text-[11px]">
-            {/* pestaña ACTIVA */}
-            <span className="rounded-full bg-slate-900 px-3 py-1 font-medium text-white dark:bg-slate-100 dark:text-slate-900">
-              Dashboard
-            </span>
-
-            <Link
-              href="/gastos"
-              className="rounded-full border border-slate-200 px-3 py-1 text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-            >
-              Gastos e ingresos
-            </Link>
-
-            <Link
-              href="/patrimonio"
-              className="rounded-full border border-slate-200 px-3 py-1 text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-            >
-              Patrimonio
-            </Link>
-
-            <Link
-              href="/aprende"
-              className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 font-medium text-amber-700 transition hover:bg-amber-100 dark:border-amber-600 dark:bg-amber-900/30 dark:text-amber-200"
-            >
-              Aprende finanzas
-            </Link>
-          </nav>
+        
+<MainNavTabs />
         </div>
 
         <div className="flex items-center gap-2">
@@ -605,25 +581,31 @@ export default function HomeDashboardPage() {
           </div>
 
           <div className="flex flex-wrap gap-2 text-[11px]">
-            <Link
-              href="/gastos"
-              className="rounded-full bg-sky-500 px-3 py-1 font-medium text-white hover:bg-sky-600"
-            >
-              Capturar gastos / ingresos
-            </Link>
-            <Link
-              href="/patrimonio"
-              className="rounded-full bg-emerald-500 px-3 py-1 font-medium text-white hover:bg-emerald-600"
-            >
-              Ver / editar patrimonio
-            </Link>
-            <Link
-              href="/aprende"
-              className="rounded-full bg-amber-500 px-3 py-1 font-medium text-white hover:bg-amber-600"
-            >
-              Aprender finanzas
-            </Link>
-          </div>
+  <Link
+    href="/gastos"
+    className="rounded-full bg-sky-500 px-3 py-1 font-medium text-white hover:bg-sky-600"
+  >
+    Capturar gastos / ingresos
+  </Link>
+  <Link
+    href="/patrimonio"
+    className="rounded-full bg-emerald-500 px-3 py-1 font-medium text-white hover:bg-emerald-600"
+  >
+    Ver / editar patrimonio
+  </Link>
+  <Link
+    href="/aprende"
+    className="rounded-full bg-amber-500 px-3 py-1 font-medium text-white hover:bg-amber-600"
+  >
+    Aprender finanzas
+  </Link>
+  <Link
+    href="/familia"
+    className="rounded-full bg-indigo-500 px-3 py-1 font-medium text-white hover:bg-indigo-600"
+  >
+    Gestionar familia
+  </Link>
+</div>
         </div>
       </section>
 

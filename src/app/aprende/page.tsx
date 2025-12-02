@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { useTheme } from "next-themes";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import Link from "next/link";
+import { MainNavTabs } from "@/components/MainNavTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -100,29 +101,7 @@ export default function AprendePage() {
           </p>
 
           {/* Navegación */}
-          <nav className="mt-2 flex flex-wrap gap-2 text-[11px]">
-            <Link
-              href="/"
-              className="rounded-full border border-slate-200 px-3 py-1 text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-            >
-              Dashboard
-            </Link>
-            <Link
-              href="/gastos"
-              className="rounded-full border border-slate-200 px-3 py-1 text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-            >
-              Gastos e ingresos
-            </Link>
-            <Link
-              href="/patrimonio"
-              className="rounded-full border border-slate-200 px-3 py-1 text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-            >
-              Patrimonio
-            </Link>
-            <span className="rounded-full bg-amber-400 px-3 py-1 font-medium text-black dark:bg-amber-200">
-              Aprende finanzas
-            </span>
-          </nav>
+          <MainNavTabs />
         </div>
 
         <div className="flex items-center gap-2">
