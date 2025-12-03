@@ -1,12 +1,9 @@
 "use client";
 
+import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
-import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { useTheme } from "next-themes";
-import { ThemeToggle } from "@/components/ThemeToggle";
-import { MainNavTabs } from "@/components/MainNavTabs";
 import { AppHeader } from "@/components/AppHeader";
 
 export const dynamic = "force-dynamic";
@@ -60,6 +57,8 @@ type DebtForm = {
   notes: string;
 };
 
+const BASE_OWNER_OPTIONS = ["Yo", "Esposa", "Hijo / Hija", "Otro"];
+
 function formatMoney(num: number) {
   return num.toLocaleString("es-MX", {
     style: "currency",
@@ -77,10 +76,12 @@ function formatDateDisplay(ymd: string | null | undefined) {
 }
 
 export default function PatrimonioPage() {
+  // -------- AUTH --------
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
+  // -------- DATA --------
   const [assets, setAssets] = useState<Asset[]>([]);
   const [debts, setDebts] = useState<Debt[]>([]);
   const [loading, setLoading] = useState(false);
@@ -88,11 +89,12 @@ export default function PatrimonioPage() {
   const [savingDebt, setSavingDebt] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Formularios
   const [assetForm, setAssetForm] = useState<AssetForm>({
     name: "",
     category: "",
     currentValue: "",
-    owner: "",
+    owner: "Yo",
     notes: "",
   });
 
@@ -104,23 +106,20 @@ export default function PatrimonioPage() {
     monthlyPayment: "",
     interestRate: "",
     dueDate: "",
-    owner: "",
+    owner: "Yo",
     currentBalance: "",
     notes: "",
   });
 
-  // panel de exportación estilo "Gastos"
-  const [showExportOptions, setShowExportOptions] = useState(false);
+  // Filtros
+  const [ownerFilter, setOwnerFilter] = useState<string>("TODOS");
+  const [searchText, setSearchText] = useState<string>("");
 
-  const { theme, systemTheme } = useTheme();
-  const [mountedTheme, setMountedTheme] = useState(false);
-  useEffect(() => {
-    setMountedTheme(true);
-  }, []);
-  const currentTheme = theme === "system" ? systemTheme : theme;
-  const isDark = mountedTheme && currentTheme === "dark";
+  // Edición
+  const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
+  const [editingDebtId, setEditingDebtId] = useState<string | null>(null);
 
-  // -------- AUTH --------
+  // -------- AUTH EFFECT --------
   useEffect(() => {
     let ignore = false;
 
@@ -131,6 +130,7 @@ export default function PatrimonioPage() {
         const { data, error } = await supabase.auth.getUser();
         if (error && (error as any).name !== "AuthSessionMissingError") {
           console.error("Error obteniendo usuario actual", error);
+          setAuthError("Hubo un problema al cargar tu sesión.");
         }
         if (!ignore) {
           setUser(data?.user ?? null);
@@ -165,7 +165,7 @@ export default function PatrimonioPage() {
     }
   };
 
-  // -------- Cargar activos + deudas --------
+   // -------- Cargar activos + deudas --------
   useEffect(() => {
     if (!user) {
       setAssets([]);
@@ -173,6 +173,7 @@ export default function PatrimonioPage() {
       return;
     }
 
+    // TS: garantizamos que usamos un id ya no-null
     const userId = user.id;
 
     async function loadPatrimonio() {
@@ -218,7 +219,7 @@ export default function PatrimonioPage() {
     loadPatrimonio();
   }, [user]);
 
-  // -------- Cálculos --------
+  // -------- Totales generales (sin filtros) --------
   const totalActivos = useMemo(
     () => assets.reduce((sum, a) => sum + (a.current_value ?? 0), 0),
     [assets]
@@ -236,9 +237,93 @@ export default function PatrimonioPage() {
   const patrimonioNeto = totalActivos - totalDeudas;
 
   const totalPagoMensualDeudas = useMemo(
-    () =>
-      debts.reduce((sum, d) => sum + Number(d.monthly_payment ?? 0), 0),
+    () => debts.reduce((sum, d) => sum + Number(d.monthly_payment ?? 0), 0),
     [debts]
+  );
+
+  // -------- Opciones de dueño (para filtros y selects) --------
+  const ownerOptions = useMemo(() => {
+    const set = new Set<string>(BASE_OWNER_OPTIONS);
+    for (const a of assets) {
+      if (a.owner) set.add(a.owner);
+    }
+    for (const d of debts) {
+      if (d.owner) set.add(d.owner);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "es-MX"));
+  }, [assets, debts]);
+
+  // -------- Listas filtradas --------
+  const filteredAssets = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    return assets.filter((a) => {
+      if (
+        ownerFilter !== "TODOS" &&
+        (a.owner ?? "").toLowerCase() !== ownerFilter.toLowerCase()
+      ) {
+        return false;
+      }
+
+      if (!q) return true;
+
+      const haystack = [a.name, a.category ?? "", a.owner ?? "", a.notes ?? ""]
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(q);
+    });
+  }, [assets, ownerFilter, searchText]);
+
+  const filteredDebts = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    return debts.filter((d) => {
+      if (
+        ownerFilter !== "TODOS" &&
+        (d.owner ?? "").toLowerCase() !== ownerFilter.toLowerCase()
+      ) {
+        return false;
+      }
+
+      if (!q) return true;
+
+      const haystack = [
+        d.name,
+        d.type ?? "",
+        d.category ?? "",
+        d.owner ?? "",
+        d.notes ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(q);
+    });
+  }, [debts, ownerFilter, searchText]);
+
+  // -------- Totales filtrados --------
+  const filteredTotalActivos = useMemo(
+    () => filteredAssets.reduce((sum, a) => sum + (a.current_value ?? 0), 0),
+    [filteredAssets]
+  );
+
+  const filteredTotalDeudas = useMemo(
+    () =>
+      filteredDebts.reduce(
+        (sum, d) => sum + Number(d.current_balance ?? d.total_amount ?? 0),
+        0
+      ),
+    [filteredDebts]
+  );
+
+  const filteredPatrimonioNeto = filteredTotalActivos - filteredTotalDeudas;
+
+  const filteredPagoMensual = useMemo(
+    () =>
+      filteredDebts.reduce(
+        (sum, d) => sum + Number(d.monthly_payment ?? 0),
+        0
+      ),
+    [filteredDebts]
   );
 
   // -------- Handlers formularios --------
@@ -255,9 +340,10 @@ export default function PatrimonioPage() {
       name: "",
       category: "",
       currentValue: "",
-      owner: "",
+      owner: "Yo",
       notes: "",
     });
+    setEditingAssetId(null);
   };
 
   const resetDebtForm = () => {
@@ -269,13 +355,22 @@ export default function PatrimonioPage() {
       monthlyPayment: "",
       interestRate: "",
       dueDate: "",
-      owner: "",
+      owner: "Yo",
       currentBalance: "",
       notes: "",
     });
+    setEditingDebtId(null);
   };
 
-  const handleSaveAsset = async (e: React.FormEvent) => {
+  const cancelAssetEdit = () => {
+    resetAssetForm();
+  };
+
+  const cancelDebtEdit = () => {
+    resetDebtForm();
+  };
+
+  const handleSaveAsset = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!user) {
       alert("Debes iniciar sesión para registrar activos.");
@@ -294,27 +389,52 @@ export default function PatrimonioPage() {
 
     setSavingAsset(true);
 
+    const payload = {
+      name: assetForm.name.trim(),
+      category: assetForm.category.trim() || null,
+      current_value: valueNumber,
+      owner: assetForm.owner.trim() || null,
+      notes: assetForm.notes.trim() || null,
+      family_member_id: null as string | null,
+    };
+
     try {
-      const { data, error } = await supabase
-        .from("assets")
-        .insert({
-          user_id: user.id,
-          name: assetForm.name.trim(),
-          category: assetForm.category.trim() || null,
-          current_value: valueNumber,
-          owner: assetForm.owner.trim() || null,
-          notes: assetForm.notes.trim() || null,
-          family_member_id: null, // por ahora no lo usamos en formulario
-        })
-        .select(
-          "id,name,category,current_value,owner,notes,family_member_id,created_at"
-        )
-        .single();
+      if (editingAssetId) {
+        // UPDATE
+        const { data, error } = await supabase
+          .from("assets")
+          .update(payload)
+          .eq("id", editingAssetId)
+          .eq("user_id", user.id)
+          .select(
+            "id,name,category,current_value,owner,notes,family_member_id,created_at"
+          )
+          .single();
 
-      if (error) throw error;
+        if (error) throw error;
 
-      setAssets((prev) => [data as Asset, ...prev]);
-      resetAssetForm();
+        setAssets((prev) =>
+          prev.map((a) => (a.id === editingAssetId ? (data as Asset) : a))
+        );
+        resetAssetForm();
+      } else {
+        // INSERT
+        const { data, error } = await supabase
+          .from("assets")
+          .insert({
+            user_id: user.id,
+            ...payload,
+          })
+          .select(
+            "id,name,category,current_value,owner,notes,family_member_id,created_at"
+          )
+          .single();
+
+        if (error) throw error;
+
+        setAssets((prev) => [data as Asset, ...prev]);
+        resetAssetForm();
+      }
     } catch (err) {
       console.error("Error guardando activo", err);
       alert("No se pudo guardar el activo.");
@@ -323,7 +443,7 @@ export default function PatrimonioPage() {
     }
   };
 
-  const handleSaveDebt = async (e: React.FormEvent) => {
+  const handleSaveDebt = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!user) {
       alert("Debes iniciar sesión para registrar deudas.");
@@ -355,32 +475,57 @@ export default function PatrimonioPage() {
 
     setSavingDebt(true);
 
+    const payload = {
+      name: debtForm.name.trim(),
+      category: debtForm.category.trim() || null,
+      type: debtForm.type.trim() || null,
+      total_amount: totalAmount,
+      monthly_payment: monthlyPayment,
+      interest_rate: interestRate,
+      due_date: debtForm.dueDate || null,
+      owner: debtForm.owner.trim() || null,
+      current_balance: currentBalance,
+      notes: debtForm.notes.trim() || null,
+      family_member_id: null as string | null,
+    };
+
     try {
-      const { data, error } = await supabase
-        .from("debts")
-        .insert({
-          user_id: user.id,
-          name: debtForm.name.trim(),
-          category: debtForm.category.trim() || null,
-          type: debtForm.type.trim() || null,
-          total_amount: totalAmount,
-          monthly_payment: monthlyPayment,
-          interest_rate: interestRate,
-          due_date: debtForm.dueDate || null,
-          owner: debtForm.owner.trim() || null,
-          current_balance: currentBalance,
-          notes: debtForm.notes.trim() || null,
-          family_member_id: null, // por ahora no lo usamos en formulario
-        })
-        .select(
-          "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at"
-        )
-        .single();
+      if (editingDebtId) {
+        // UPDATE
+        const { data, error } = await supabase
+          .from("debts")
+          .update(payload)
+          .eq("id", editingDebtId)
+          .eq("user_id", user.id)
+          .select(
+            "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at"
+          )
+          .single();
 
-      if (error) throw error;
+        if (error) throw error;
 
-      setDebts((prev) => [data as Debt, ...prev]);
-      resetDebtForm();
+        setDebts((prev) =>
+          prev.map((d) => (d.id === editingDebtId ? (data as Debt) : d))
+        );
+        resetDebtForm();
+      } else {
+        // INSERT
+        const { data, error } = await supabase
+          .from("debts")
+          .insert({
+            user_id: user.id,
+            ...payload,
+          })
+          .select(
+            "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at"
+          )
+          .single();
+
+        if (error) throw error;
+
+        setDebts((prev) => [data as Debt, ...prev]);
+        resetDebtForm();
+      }
     } catch (err) {
       console.error("Error guardando deuda", err);
       alert("No se pudo guardar la deuda.");
@@ -406,6 +551,9 @@ export default function PatrimonioPage() {
       if (error) throw error;
 
       setAssets((prev) => prev.filter((a) => a.id !== asset.id));
+      if (editingAssetId === asset.id) {
+        resetAssetForm();
+      }
     } catch (err) {
       console.error("Error eliminando activo", err);
       alert("No se pudo eliminar el activo.");
@@ -429,95 +577,69 @@ export default function PatrimonioPage() {
       if (error) throw error;
 
       setDebts((prev) => prev.filter((d) => d.id !== debt.id));
+      if (editingDebtId === debt.id) {
+        resetDebtForm();
+      }
     } catch (err) {
       console.error("Error eliminando deuda", err);
       alert("No se pudo eliminar la deuda.");
     }
   };
 
-  // -------- Exportar PDF patrimonio --------
-  const handleExportPatrimonioPdf = async () => {
-    try {
-      const { jsPDF } = await import("jspdf");
-      const autoTable = (await import("jspdf-autotable")).default as any;
+  const handleEditAsset = (asset: Asset) => {
+    setEditingDebtId(null);
+    setEditingAssetId(asset.id);
+    setAssetForm({
+      name: asset.name ?? "",
+      category: asset.category ?? "",
+      currentValue:
+        typeof asset.current_value === "number"
+          ? asset.current_value.toString()
+          : "",
+      owner: asset.owner ?? "Yo",
+      notes: asset.notes ?? "",
+    });
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
 
-      const doc = new jsPDF();
+  const handleEditDebt = (debt: Debt) => {
+    setEditingAssetId(null);
+    setEditingDebtId(debt.id);
+    setDebtForm({
+      name: debt.name ?? "",
+      category: debt.category ?? "",
+      type: debt.type ?? "",
+      totalAmount:
+        typeof debt.total_amount === "number"
+          ? debt.total_amount.toString()
+          : "",
+      monthlyPayment:
+        typeof debt.monthly_payment === "number"
+          ? debt.monthly_payment.toString()
+          : "",
+      interestRate:
+        typeof debt.interest_rate === "number"
+          ? debt.interest_rate.toString()
+          : "",
+      dueDate: debt.due_date ?? "",
+      owner: debt.owner ?? "Yo",
+      currentBalance:
+        typeof debt.current_balance === "number"
+          ? debt.current_balance.toString()
+          : "",
+      notes: debt.notes ?? "",
+    });
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
 
-      let y = 14;
-      doc.setFontSize(16);
-      doc.text("Patrimonio familiar", 14, y);
-      y += 8;
-
-      doc.setFontSize(10);
-      doc.text(`Activos totales: ${formatMoney(totalActivos)}`, 14, y);
-      y += 5;
-      doc.text(`Deudas totales: ${formatMoney(totalDeudas)}`, 14, y);
-      y += 5;
-      doc.text(`Patrimonio neto: ${formatMoney(patrimonioNeto)}`, 14, y);
-      y += 8;
-
-      // Activos
-      doc.setFontSize(12);
-      doc.text("Activos", 14, y);
-      y += 4;
-
-      autoTable(doc, {
-        head: [["Nombre", "Categoría", "Dueño", "Valor"]],
-        body: assets.map((a) => [
-          a.name,
-          a.category ?? "-",
-          a.owner ?? "-",
-          formatMoney(a.current_value ?? 0),
-        ]),
-        startY: y,
-        styles: { fontSize: 8 },
-        headStyles: { fillColor: [15, 23, 42] },
-      });
-
-      const finalY1 =
-        (doc as any).lastAutoTable?.finalY != null
-          ? (doc as any).lastAutoTable.finalY
-          : y + 10;
-
-      let y2 = finalY1 + 10;
-      doc.setFontSize(12);
-      doc.text("Deudas", 14, y2);
-      y2 += 4;
-
-      autoTable(doc, {
-        head: [
-          [
-            "Deuda",
-            "Tipo",
-            "Total",
-            "Saldo",
-            "Pago mensual",
-            "Tasa %",
-            "Vence",
-          ],
-        ],
-        body: debts.map((d) => [
-          d.name,
-          d.type || d.category || "-",
-          formatMoney(d.total_amount ?? 0),
-          formatMoney(d.current_balance ?? d.total_amount ?? 0),
-          formatMoney(d.monthly_payment ?? 0),
-          d.interest_rate != null ? `${d.interest_rate}%` : "-",
-          formatDateDisplay(d.due_date),
-        ]),
-        startY: y2,
-        styles: { fontSize: 8 },
-        headStyles: { fillColor: [15, 23, 42] },
-      });
-
-      const fileDate = new Date()
-        .toISOString()
-        .slice(0, 10)
-        .replace(/-/g, "");
-      doc.save(`patrimonio_${fileDate}.pdf`);
-    } catch (err) {
-      console.error("Error exportando PDF de patrimonio", err);
-      alert("No se pudo generar el PDF de patrimonio.");
+  const handleExportPdf = () => {
+    // Versión simple: usa imprimir del navegador (puedes guardar como PDF)
+    if (typeof window !== "undefined") {
+      window.print();
     }
   };
 
@@ -532,27 +654,18 @@ export default function PatrimonioPage() {
 
   if (!user) {
     return (
-      <div className="flex flex-1 items-center justify-center">
-        <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-lg font-semibold">Patrimonio familiar</h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Inicia sesión para ver y registrar activos y deudas.
-              </p>
-            </div>
-            <ThemeToggle />
-          </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Ve al dashboard principal para iniciar sesión.
+      <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
+        <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <p className="text-sm font-semibold">Patrimonio familiar</p>
+          <p className="text-slate-500 dark:text-slate-400">
+            Inicia sesión desde el dashboard para ver y registrar tus activos y
+            deudas.
           </p>
-          {authError && <p className="text-xs text-red-500">{authError}</p>}
-          <Link
-            href="/"
-            className="inline-flex items-center justify-center rounded-full bg-sky-500 px-4 py-2 text-xs font-medium text-white hover:bg-sky-600"
-          >
-            Ir al dashboard
-          </Link>
+          {authError && (
+            <p className="text-[11px] text-rose-600 dark:text-rose-400">
+              {authError}
+            </p>
+          )}
         </div>
       </div>
     );
@@ -560,17 +673,37 @@ export default function PatrimonioPage() {
 
   // -------- UI PATRIMONIO --------
   return (
-    <main className="flex flex-1 flex-col gap-4">
-      {/* Header con navegación */}
-            <AppHeader
+    <main className="flex flex-1 flex-col gap-4 print:bg-white">
+      <AppHeader
         title="Patrimonio familiar"
         subtitle="Aquí llevas el control de tus activos (lo que tienes) y tus deudas (lo que debes)."
         activeTab="patrimonio"
-        userEmail={user.email}
+        userEmail={user?.email ?? ""}
         onSignOut={handleSignOut}
       />
 
-      {/* Resumen */}
+      {/* Barra de acciones */}
+      <section className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900 print:border-0 print:shadow-none">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Resumen de patrimonio
+          </span>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+            Foto completa de lo que tienes menos lo que debes.
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExportPdf}
+            className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 print:hidden"
+          >
+            Exportar PDF / Imprimir
+          </button>
+        </div>
+      </section>
+
+      {/* Resumen general */}
       <section className="grid gap-4 md:grid-cols-4">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="text-xs text-slate-500 dark:text-slate-400">
@@ -624,36 +757,109 @@ export default function PatrimonioPage() {
           <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
             Suma de todos los pagos mensuales que definiste en tus deudas.
           </p>
-          <button
-            type="button"
-            onClick={() => setShowExportOptions((v) => !v)}
-            className="mt-3 inline-flex items-center justify-center rounded-full bg-sky-500 px-3 py-1 text-[11px] font-medium text-white hover:bg-sky-600"
-          >
-            {showExportOptions ? "Cerrar exportar" : "Exportar PDF patrimonio"}
-          </button>
         </div>
       </section>
 
-      {/* Panel de exportación (igual estilo que Gastos) */}
-      {showExportOptions && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="mb-2 text-sm font-semibold">
-            Exportar resumen de patrimonio
-          </h2>
-          <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
-            El PDF incluirá un resumen con totales de activos, deudas y
-            patrimonio neto, además de tablas detalladas de cada activo y cada
-            deuda.
-          </p>
-          <button
-            type="button"
-            onClick={handleExportPatrimonioPdf}
-            className="rounded-lg bg-sky-500 px-4 py-2 text-xs font-medium text-white hover:bg-sky-600"
-          >
-            Descargar PDF patrimonio
-          </button>
-        </section>
-      )}
+      {/* Filtros de patrimonio */}
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          {/* Filtros lado izquierdo */}
+          <div className="w-full lg:max-w-lg">
+            <h2 className="text-sm font-semibold">Filtros de patrimonio</h2>
+
+            <div className="mt-3 grid gap-3 text-xs md:grid-cols-2">
+              <div>
+                <div className="mb-1 text-slate-500 dark:text-slate-300">
+                  Dueño
+                </div>
+                <select
+                  value={ownerFilter}
+                  onChange={(e) => setOwnerFilter(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                >
+                  <option value="TODOS">Todos</option>
+                  {ownerOptions.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="mb-1 text-slate-500 dark:text-slate-300">
+                  Buscar
+                </div>
+                <input
+                  type="text"
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                  placeholder="Nombre, banco, categoría, notas..."
+                />
+              </div>
+            </div>
+
+            <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-slate-500 dark:text-slate-300">
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
+                Dueño: {ownerFilter === "TODOS" ? "Todos" : ownerFilter}
+              </span>
+              {searchText && (
+                <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-700 dark:bg-sky-900/40 dark:text-sky-200">
+                  Buscando: “{searchText}”
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Totales filtrados */}
+          <div className="grid w-full gap-3 text-xs sm:grid-cols-2 lg:max-w-md">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                Activos filtrados
+              </div>
+              <div className="mt-1 text-lg font-semibold text-emerald-600 dark:text-emerald-400">
+                {formatMoney(filteredTotalActivos)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                Deudas filtradas
+              </div>
+              <div className="mt-1 text-lg font-semibold text-rose-600 dark:text-rose-400">
+                {formatMoney(filteredTotalDeudas)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                Patrimonio filtrado
+              </div>
+              <div
+                className={`mt-1 text-lg font-semibold ${
+                  filteredPatrimonioNeto >= 0
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-rose-600 dark:text-rose-400"
+                }`}
+              >
+                {formatMoney(filteredPatrimonioNeto)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                Pago mensual filtrado
+              </div>
+              <div className="mt-1 text-lg font-semibold text-amber-600 dark:text-amber-400">
+                {formatMoney(filteredPagoMensual)}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
+          Los montos de esta sección y las tablas de abajo se calculan solo con
+          los activos y deudas que coinciden con los filtros seleccionados.
+        </p>
+      </section>
 
       {/* Formularios + tablas */}
       <section className="grid gap-4 lg:grid-cols-2">
@@ -661,19 +867,19 @@ export default function PatrimonioPage() {
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <h2 className="mb-2 text-sm font-semibold">Activos</h2>
           <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
-            Registra todo lo que tienes a tu nombre o de tu familia:
-            propiedades, autos, cuentas, inversiones, etc.
+            Registra todo lo que tienes a tu nombre o de tu familia: propiedades,
+            autos, cuentas, inversiones, etc.
           </p>
 
           <form
             onSubmit={handleSaveAsset}
-            className="mb-3 grid gap-2 text-xs md:grid-cols-[2fr_1.5fr_1.5fr_1.5fr]"
+            className="mb-3 grid gap-2 text-xs md:grid-cols-4"
           >
             <input
               type="text"
               value={assetForm.name}
               onChange={(e) => handleChangeAssetForm("name", e.target.value)}
-              className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              className="md:col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               placeholder="Nombre (Casa, Auto, Ahorros...)"
             />
             <input
@@ -682,7 +888,7 @@ export default function PatrimonioPage() {
               onChange={(e) =>
                 handleChangeAssetForm("category", e.target.value)
               }
-              className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               placeholder="Categoría (Propiedad, Efectivo, Inversión...)"
             />
             <input
@@ -691,41 +897,68 @@ export default function PatrimonioPage() {
               onChange={(e) =>
                 handleChangeAssetForm("currentValue", e.target.value)
               }
-              className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               placeholder="Valor actual"
             />
-            <input
-              type="text"
-              value={assetForm.owner}
-              onChange={(e) => handleChangeAssetForm("owner", e.target.value)}
-              className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              placeholder="Dueño (Papá, Mamá, Hijo...)"
-            />
+            {/* Dueño */}
+            <div className="md:col-span-2">
+              <div className="mb-1 text-[11px] text-slate-500 dark:text-slate-300">
+                Dueño
+              </div>
+              <select
+                value={assetForm.owner}
+                onChange={(e) =>
+                  handleChangeAssetForm("owner", e.target.value)
+                }
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              >
+                {ownerOptions.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </select>
+            </div>
             <textarea
               value={assetForm.notes}
               onChange={(e) => handleChangeAssetForm("notes", e.target.value)}
               className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 md:col-span-4"
               placeholder="Notas (ubicación, institución, algún detalle, etc.)"
             />
-            <button
-              type="submit"
-              disabled={savingAsset}
-              className="mt-1 inline-flex items-center justify-center rounded-lg bg-emerald-500 px-3 py-1 text-[11px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-60 md:col-span-4"
-            >
-              {savingAsset ? "Guardando..." : "Agregar activo"}
-            </button>
+            <div className="mt-1 flex flex-wrap gap-2 md:col-span-4">
+              <button
+                type="submit"
+                disabled={savingAsset}
+                className="inline-flex flex-1 items-center justify-center rounded-lg bg-emerald-500 px-3 py-1 text-[11px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-60"
+              >
+                {savingAsset
+                  ? "Guardando..."
+                  : editingAssetId
+                  ? "Guardar cambios"
+                  : "Agregar activo"}
+              </button>
+              {editingAssetId && (
+                <button
+                  type="button"
+                  onClick={cancelAssetEdit}
+                  className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Cancelar edición
+                </button>
+              )}
+            </div>
           </form>
 
           {loading && assets.length === 0 ? (
             <p className="text-[11px] text-slate-500">Cargando activos...</p>
-          ) : assets.length === 0 ? (
+          ) : filteredAssets.length === 0 ? (
             <p className="text-[11px] text-slate-500">
-              Aún no tienes activos registrados.
+              No hay activos que coincidan con los filtros.
             </p>
           ) : (
             <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-100 dark:border-slate-700">
-              <table className="min-w-full text-[11px]">
-                <thead className="bg-slate-50 dark:bg-slate-900/60">
+              <table className="min-w-full border-collapse text-[11px]">
+                <thead className="sticky top-0 bg-slate-50 text-slate-600 dark:bg-slate-900/80 dark:text-slate-300">
                   <tr>
                     <th className="px-2 py-1 text-left font-medium">Nombre</th>
                     <th className="px-2 py-1 text-left font-medium">
@@ -739,25 +972,38 @@ export default function PatrimonioPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {assets.map((a) => (
+                  {filteredAssets.map((a) => (
                     <tr
                       key={a.id}
-                      className="odd:bg-white even:bg-slate-50 dark:odd:bg-slate-900 dark:even:bg-slate-800"
+                      className="border-t border-slate-100 odd:bg-white even:bg-slate-50 hover:bg-slate-100/70 dark:border-slate-700 dark:odd:bg-slate-900 dark:even:bg-slate-800 dark:hover:bg-slate-700/60"
                     >
                       <td className="px-2 py-1">{a.name}</td>
                       <td className="px-2 py-1">{a.category ?? "-"}</td>
-                      <td className="px-2 py-1">{a.owner ?? "-"}</td>
+                      <td className="px-2 py-1">
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                          {a.owner ?? "-"}
+                        </span>
+                      </td>
                       <td className="px-2 py-1 text-right">
                         {formatMoney(a.current_value ?? 0)}
                       </td>
                       <td className="px-2 py-1 text-center">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteAsset(a)}
-                          className="text-[10px] text-rose-600 hover:underline"
-                        >
-                          Eliminar
-                        </button>
+                        <div className="flex justify-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleEditAsset(a)}
+                            className="rounded px-1 py-0.5 text-[10px] text-sky-700 hover:bg-sky-50 dark:text-sky-300 dark:hover:bg-sky-900/40"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteAsset(a)}
+                            className="rounded px-1 py-0.5 text-[10px] text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/40"
+                          >
+                            Eliminar
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -778,7 +1024,7 @@ export default function PatrimonioPage() {
 
           <form
             onSubmit={handleSaveDebt}
-            className="mb-3 grid gap-2 text-xs md:grid-cols-3"
+            className="mb-3 grid gap-2 text-xs md:grid-cols-4"
           >
             <input
               type="text"
@@ -791,7 +1037,7 @@ export default function PatrimonioPage() {
               type="text"
               value={debtForm.type}
               onChange={(e) => handleChangeDebtForm("type", e.target.value)}
-              className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               placeholder="Tipo (Hipoteca, Auto, Tarjeta...)"
             />
             <input
@@ -800,7 +1046,7 @@ export default function PatrimonioPage() {
               onChange={(e) =>
                 handleChangeDebtForm("category", e.target.value)
               }
-              className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               placeholder="Categoría (Banco, Tienda, etc.)"
             />
             <input
@@ -809,7 +1055,7 @@ export default function PatrimonioPage() {
               onChange={(e) =>
                 handleChangeDebtForm("totalAmount", e.target.value)
               }
-              className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               placeholder="Monto total"
             />
             <input
@@ -818,7 +1064,7 @@ export default function PatrimonioPage() {
               onChange={(e) =>
                 handleChangeDebtForm("currentBalance", e.target.value)
               }
-              className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               placeholder="Saldo actual"
             />
             <input
@@ -827,7 +1073,7 @@ export default function PatrimonioPage() {
               onChange={(e) =>
                 handleChangeDebtForm("monthlyPayment", e.target.value)
               }
-              className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               placeholder="Pago mensual fijo"
             />
             <input
@@ -837,53 +1083,76 @@ export default function PatrimonioPage() {
               onChange={(e) =>
                 handleChangeDebtForm("interestRate", e.target.value)
               }
-              className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               placeholder="Tasa interés (%)"
             />
             <input
               type="date"
               value={debtForm.dueDate}
-              onChange={(e) =>
-                handleChangeDebtForm("dueDate", e.target.value)
-              }
-              className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              placeholder="Fecha de vencimiento"
+              onChange={(e) => handleChangeDebtForm("dueDate", e.target.value)}
+              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
             />
-            <input
-              type="text"
-              value={debtForm.owner}
-              onChange={(e) => handleChangeDebtForm("owner", e.target.value)}
-              className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              placeholder="De quién es la deuda"
-            />
+            {/* Dueño */}
+            <div className="md:col-span-2">
+              <div className="mb-1 text-[11px] text-slate-500 dark:text-slate-300">
+                De quién es la deuda
+              </div>
+              <select
+                value={debtForm.owner}
+                onChange={(e) => handleChangeDebtForm("owner", e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              >
+                {ownerOptions.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </select>
+            </div>
             <textarea
               value={debtForm.notes}
               onChange={(e) => handleChangeDebtForm("notes", e.target.value)}
-              className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 md:col-span-3"
+              className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 md:col-span-4"
               placeholder="Notas (institución, condiciones, etc.)"
             />
-            <button
-              type="submit"
-              disabled={savingDebt}
-              className="mt-1 inline-flex items-center justify-center rounded-lg bg-rose-500 px-3 py-1 text-[11px] font-semibold text-white hover:bg-rose-600 disabled:opacity-60 md:col-span-3"
-            >
-              {savingDebt ? "Guardando..." : "Agregar deuda"}
-            </button>
+            <div className="mt-1 flex flex-wrap gap-2 md:col-span-4">
+              <button
+                type="submit"
+                disabled={savingDebt}
+                className="inline-flex flex-1 items-center justify-center rounded-lg bg-rose-500 px-3 py-1 text-[11px] font-semibold text-white hover:bg-rose-600 disabled:opacity-60"
+              >
+                {savingDebt
+                  ? "Guardando..."
+                  : editingDebtId
+                  ? "Guardar cambios"
+                  : "Agregar deuda"}
+              </button>
+              {editingDebtId && (
+                <button
+                  type="button"
+                  onClick={cancelDebtEdit}
+                  className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Cancelar edición
+                </button>
+              )}
+            </div>
           </form>
 
           {loading && debts.length === 0 ? (
             <p className="text-[11px] text-slate-500">Cargando deudas...</p>
-          ) : debts.length === 0 ? (
+          ) : filteredDebts.length === 0 ? (
             <p className="text-[11px] text-slate-500">
-              Aún no tienes deudas registradas.
+              No hay deudas que coincidan con los filtros.
             </p>
           ) : (
             <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-100 dark:border-slate-700">
-              <table className="min-w-full text-[11px]">
-                <thead className="bg-slate-50 dark:bg-slate-900/60">
+              <table className="min-w-full border-collapse text-[11px]">
+                <thead className="sticky top-0 bg-slate-50 text-slate-600 dark:bg-slate-900/80 dark:text-slate-300">
                   <tr>
                     <th className="px-2 py-1 text-left font-medium">Deuda</th>
                     <th className="px-2 py-1 text-left font-medium">Tipo</th>
+                    <th className="px-2 py-1 text-left font-medium">Dueño</th>
                     <th className="px-2 py-1 text-right font-medium">Total</th>
                     <th className="px-2 py-1 text-right font-medium">Saldo</th>
                     <th className="px-2 py-1 text-right font-medium">
@@ -896,14 +1165,19 @@ export default function PatrimonioPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {debts.map((d) => (
+                  {filteredDebts.map((d) => (
                     <tr
                       key={d.id}
-                      className="odd:bg-white even:bg-slate-50 dark:odd:bg-slate-900 dark:even:bg-slate-800"
+                      className="border-t border-slate-100 odd:bg-white even:bg-slate-50 hover:bg-slate-100/70 dark:border-slate-700 dark:odd:bg-slate-900 dark:even:bg-slate-800 dark:hover:bg-slate-700/60"
                     >
                       <td className="px-2 py-1">{d.name}</td>
                       <td className="px-2 py-1">
                         {d.type || d.category || "-"}
+                      </td>
+                      <td className="px-2 py-1">
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                          {d.owner ?? "-"}
+                        </span>
                       </td>
                       <td className="px-2 py-1 text-right">
                         {formatMoney(d.total_amount ?? 0)}
@@ -918,13 +1192,22 @@ export default function PatrimonioPage() {
                         {formatDateDisplay(d.due_date)}
                       </td>
                       <td className="px-2 py-1 text-center">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteDebt(d)}
-                          className="text-[10px] text-rose-600 hover:underline"
-                        >
-                          Eliminar
-                        </button>
+                        <div className="flex justify-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleEditDebt(d)}
+                            className="rounded px-1 py-0.5 text-[10px] text-sky-700 hover:bg-sky-50 dark:text-sky-300 dark:hover:bg-sky-900/40"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteDebt(d)}
+                            className="rounded px-1 py-0.5 text-[10px] text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/40"
+                          >
+                            Eliminar
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

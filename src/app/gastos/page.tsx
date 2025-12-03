@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
-import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { saveOfflineTx, getOfflineTxs, syncOfflineTxs } from "@/lib/offline";
 import {
@@ -19,7 +18,6 @@ import {
 } from "recharts";
 import { useTheme } from "next-themes";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { MainNavTabs } from "@/components/MainNavTabs";
 import { AppHeader } from "@/components/AppHeader";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +32,14 @@ type Tx = {
   amount: number;
   method: string;
   notes?: string | null;
+  created_by?: string | null;
+  card_id?: string | null;
+
+  // NUEVO (opcionales, para compatibilidad con datos viejos y offline)
+  owner_user_id?: string | null; // quién paga realmente
+  spender_user_id?: string | null; // quién lo registró (normalmente user.id)
+  spender_label?: string | null; // "Yo", "Esposa", "Hijo", etc.
+
   localOnly?: boolean;
 };
 
@@ -44,6 +50,7 @@ type FormState = {
   amount: string;
   method: string;
   notes: string;
+  spenderLabel: string; // NUEVO: quién generó
 };
 
 type Option = { label: string; value: string };
@@ -68,6 +75,14 @@ const DEFAULT_METHODS: Option[] = [
   { label: "BBVA débito", value: "BBVA_DEBITO" },
   { label: "Tarjeta crédito otra", value: "CREDITO_OTRA" },
   { label: "Tarjeta débito otra", value: "DEBITO_OTRA" },
+];
+
+// NUEVO: opciones para "Quién generó"
+const SPENDER_OPTIONS: Option[] = [
+  { label: "Yo", value: "Yo" },
+  { label: "Esposa", value: "Esposa" },
+  { label: "Hijo / Hija", value: "Hijo / Hija" },
+  { label: "Otro", value: "Otro" },
 ];
 
 const CUSTOM_CATEGORIES_KEY = "ff-custom-categories";
@@ -132,6 +147,7 @@ export default function GastosPage() {
     amount: "",
     method: DEFAULT_METHODS[0]?.value ?? "",
     notes: "",
+    spenderLabel: SPENDER_OPTIONS[0]?.value ?? "Yo",
   });
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -156,6 +172,10 @@ export default function GastosPage() {
   const [filterCategory, setFilterCategory] = useState<string>("TODAS");
   const [filterMethod, setFilterMethod] = useState<string>("TODOS");
   const [searchText, setSearchText] = useState<string>("");
+
+  // 💳 Tarjetas
+  const [cards, setCards] = useState<{ id: string; name: string }[]>([]);
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
 
   // 🌙 Tema global (para saber si es dark y ajustar gráficos)
   const { theme, systemTheme } = useTheme();
@@ -334,92 +354,104 @@ export default function GastosPage() {
     loadOffline();
   }, []);
 
-  // --------------------------------------------------
-  //   Cargar transacciones del mes desde Supabase
-  // --------------------------------------------------
-  useEffect(() => {
-    if (!user) {
-      setTransactions([]);
-      return;
-    }
+ // --------------------------------------------------
+//   Cargar transacciones del mes desde Supabase
+// --------------------------------------------------
+useEffect(() => {
+  if (!user) {
+    setTransactions([]);
+    return;
+  }
 
-    const userId = user.id;
+  const userId = user.id; // ✅ aquí ya es tipo string, no User | null
 
-    async function load() {
-      setLoading(true);
-      setError(null);
+  async function load() {
+    setLoading(true);
+    setError(null);
 
-      try {
-        const [year, monthNumber] = month.split("-");
-        const from = `${month}-01`;
-        const to = `${month}-${new Date(
-          Number(year),
-          Number(monthNumber),
-          0
+    try {
+      const [year, monthNumber] = month.split("-");
+      const from = `${month}-01`;
+      const to = `${month}-${new Date(
+        Number(year),
+        Number(monthNumber),
+        0
+      )
+        .getDate()
+        .toString()
+        .padStart(2, "0")}`;
+
+      const { data, error } = await supabase
+        .from("transactions")
+        .select(
+          "id,date,type,category,amount,method,notes,owner_user_id,spender_user_id,spender_label,created_by,card_id"
         )
-          .getDate()
-          .toString()
-          .padStart(2, "0")}`;
+        .or(`created_by.is.null,created_by.eq.${userId}`)  // 👈 aquí el cambio
+  .gte("date", from)
+  .lte("date", to)
+  .order("date", { ascending: false });
 
-        const { data, error } = await supabase
-          .from("transactions")
-          .select("*")
-          .eq("user_id", userId)
-          .gte("date", from)
-          .lte("date", to)
-          .order("date", { ascending: false });
+      if (error) throw error;
 
-        if (error) throw error;
+      setTransactions(
+        (data ?? []).map((t: any) => ({
+          id: t.id,
+          date: t.date,
+          type: t.type,
+          category: t.category,
+          amount: Number(t.amount),
+          method: t.method,
+          notes: t.notes,
+          owner_user_id: t.owner_user_id ?? null,
+          spender_user_id: t.spender_user_id ?? null,
+          spender_label: t.spender_label ?? null,
+          created_by: t.created_by ?? null,
+          card_id: t.card_id ?? null,
+        }))
+      );
 
-        setTransactions(
-          (data ?? []).map((t: any) => ({
-            id: t.id,
-            date: t.date,
-            type: t.type,
-            category: t.category,
-            amount: Number(t.amount),
-            method: t.method,
-            notes: t.notes,
-          }))
-        );
+      if (typeof window !== "undefined") {
+        localStorage.setItem(`ff-cache-${month}`, JSON.stringify(data ?? []));
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError("No se pudieron cargar los movimientos.");
 
-        if (typeof window !== "undefined") {
-          localStorage.setItem(`ff-cache-${month}`, JSON.stringify(data ?? []));
-        }
-      } catch (err: any) {
-        console.error(err);
-        setError("No se pudieron cargar los movimientos.");
-
-        if (typeof window !== "undefined") {
-          const cache = localStorage.getItem(`ff-cache-${month}`);
-          if (cache) {
-            try {
-              const parsed = JSON.parse(cache);
-              setTransactions(
-                (parsed ?? []).map((t: any) => ({
-                  id: t.id,
-                  date: t.date,
-                  type: t.type,
-                  category: t.category,
-                  amount: Number(t.amount),
-                  method: t.method,
-                  notes: t.notes,
-                }))
-              );
-            } catch {
-              // ignoramos error de parseo
-            }
+      if (typeof window !== "undefined") {
+        const cache = localStorage.getItem(`ff-cache-${month}`);
+        if (cache) {
+          try {
+            const parsed = JSON.parse(cache);
+            setTransactions(
+              (parsed ?? []).map((t: any) => ({
+                id: t.id,
+                date: t.date,
+                type: t.type,
+                category: t.category,
+                amount: Number(t.amount),
+                method: t.method,
+                notes: t.notes,
+                owner_user_id: t.owner_user_id ?? null,
+                spender_user_id: t.spender_user_id ?? null,
+                spender_label: t.spender_label ?? null,
+                created_by: t.created_by ?? null,
+                card_id: t.card_id ?? null,
+              }))
+            );
+          } catch {
+            // ignoramos error de parseo
           }
         }
-      } finally {
-        setLoading(false);
       }
+    } finally {
+      setLoading(false);
     }
+  }
 
-    if (typeof window !== "undefined") {
-      load();
-    }
-  }, [month, user]);
+  if (typeof window !== "undefined") {
+    load();
+  }
+}, [month, user]);
 
   // --------------------------------------------------
   //   Sincronizar cola offline al volver internet
@@ -490,6 +522,30 @@ export default function GastosPage() {
       setBudgetInput("");
     }
   }, [month]);
+
+  // --------------------------------------------------
+  //   Cargar tarjetas de Supabase
+  // --------------------------------------------------
+  useEffect(() => {
+    const loadCards = async () => {
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from("cards")
+        .select("id, name")
+        .eq("owner_id", user.id)
+        .order("name", { ascending: true });
+
+      if (error) {
+        console.error("Error al cargar tarjetas", error);
+        return;
+      }
+
+      setCards(data ?? []);
+    };
+
+    loadCards();
+  }, [user]);
 
   const handleSaveBudget = () => {
     const val = Number(budgetInput);
@@ -572,6 +628,44 @@ export default function GastosPage() {
       return true;
     });
   }, [transactions, filterType, filterCategory, filterMethod, searchText]);
+
+  // Totales sobre los movimientos *filtrados*
+  const { filteredIngresos, filteredGastos, filteredFlujo } = useMemo(() => {
+    let ingresos = 0;
+    let gastos = 0;
+
+    for (const t of filteredTransactions) {
+      if (t.type === "ingreso") ingresos += t.amount;
+      else gastos += t.amount;
+    }
+
+    return {
+      filteredIngresos: ingresos,
+      filteredGastos: gastos,
+      filteredFlujo: ingresos - gastos,
+    };
+  }, [filteredTransactions]);
+
+  // Totales solo de los movimientos filtrados (para el resumen debajo de filtros)
+  const {
+    totalIngresosFiltrados,
+    totalGastosFiltrados,
+    flujoFiltrado,
+  } = useMemo(() => {
+    let ingresos = 0;
+    let gastos = 0;
+
+    for (const t of filteredTransactions) {
+      if (t.type === "ingreso") ingresos += t.amount;
+      else gastos += t.amount;
+    }
+
+    return {
+      totalIngresosFiltrados: ingresos,
+      totalGastosFiltrados: gastos,
+      flujoFiltrado: ingresos - gastos,
+    };
+  }, [filteredTransactions]);
 
   // --------------------------------------------------
   //   Datos para gráficas
@@ -782,15 +876,29 @@ export default function GastosPage() {
   };
 
   // --------------------------------------------------
+  //   Etiqueta del mes (se usa también en PDF)
+  // --------------------------------------------------
+  const monthLabel = useMemo(() => {
+    const [y, m] = month.split("-");
+    const date = new Date(Number(y), Number(m) - 1, 1);
+
+    const raw = date.toLocaleDateString("es-MX", {
+      year: "numeric",
+      month: "long",
+    });
+
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+  }, [month]);
+
+  // --------------------------------------------------
   //   Exportar PDF del mes
   // --------------------------------------------------
-    const handleExportPdf = async () => {
+  const handleExportPdf = async () => {
     if (!transactions.length) {
       alert("No hay movimientos en este mes para generar el PDF.");
       return;
     }
 
-    // 👇 NUEVA FORMA DE IMPORTAR
     const jsPDFmod = await import("jspdf");
     const autoTable = (await import("jspdf-autotable")).default as any;
 
@@ -849,7 +957,6 @@ export default function GastosPage() {
       t.notes ?? "",
     ]);
 
-    // 👇 AQUÍ USAMOS autoTable(doc, {...})
     autoTable(doc, {
       head: [["Fecha", "Tipo", "Categoría", "Monto", "Método", "Notas"]],
       body,
@@ -859,7 +966,7 @@ export default function GastosPage() {
         cellPadding: 2,
       },
       headStyles: {
-        fillColor: [15, 23, 42], // azul oscuro
+        fillColor: [15, 23, 42],
         textColor: 255,
       },
       columnStyles: {
@@ -887,129 +994,180 @@ export default function GastosPage() {
   };
 
   const resetForm = () => {
-    setForm({
-      date: "",
-      type: "gasto",
-      category: categories[0]?.value ?? "",
-      amount: "",
-      method: methods[0]?.value ?? "",
-      notes: "",
-    });
-    setEditingId(null);
-  };
+  setForm({
+    date: "",
+    type: "gasto",
+    category: categories[0]?.value ?? "",
+    amount: "",
+    method: methods[0]?.value ?? "",
+    notes: "",
+    spenderLabel: SPENDER_OPTIONS[0]?.value ?? "Yo",
+  });
+  setSelectedCardId(null);   // 👈 limpiar tarjeta
+  setEditingId(null);
+};
 
   // --------------------------------------------------
   //   Guardar / editar / borrar movimiento
   // --------------------------------------------------
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
+  e.preventDefault();
+  setError(null);
 
-    if (!user) {
-      alert("Debes iniciar sesión para guardar movimientos.");
-      return;
-    }
+  if (!user) {
+    alert("Debes iniciar sesión para guardar movimientos.");
+    return;
+  }
 
-    const amountNumber = Number(form.amount);
-    if (!form.date) {
-      alert("Selecciona una fecha.");
-      return;
-    }
-    if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
-      alert("Ingresa un monto válido mayor a 0.");
-      return;
-    }
+  const amountNumber = Number(form.amount);
+  if (!form.date) {
+    alert("Selecciona una fecha.");
+    return;
+  }
+  if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
+    alert("Ingresa un monto válido mayor a 0.");
+    return;
+  }
 
-    const payload = {
-      date: form.date,
-      type: form.type,
-      category: form.category,
-      amount: amountNumber,
-      method: form.method,
-      notes: form.notes || null,
-    };
+  const spenderLabel = form.spenderLabel || "Yo";
 
-    setSaving(true);
-
-    try {
-      // Modo offline
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
-        const id = crypto.randomUUID();
-
-        const localTx: Tx = {
-          id,
-          ...payload,
-          localOnly: true,
-        };
-
-        setTransactions((prev) => [localTx, ...prev]);
-
-        try {
-          await saveOfflineTx({
-            id: localTx.id,
-            date: localTx.date,
-            type: localTx.type,
-            category: localTx.category,
-            amount: localTx.amount,
-            method: localTx.method,
-            notes: localTx.notes ?? null,
-          });
-        } catch (err) {
-          console.error("Error guardando movimiento offline", err);
-        }
-
-        alert(
-          "Estás sin conexión. El movimiento se guardó sólo en este dispositivo y se enviará cuando vuelva el internet."
-        );
-        resetForm();
-        return;
-      }
-
-      // Modo online
-      if (editingId) {
-        const { error } = await supabase
-          .from("transactions")
-          .update({ ...payload, user_id: user.id })
-          .eq("id", editingId);
-
-        if (error) throw error;
-
-        setTransactions((prev) =>
-          prev.map((t) => (t.id === editingId ? { ...t, ...payload } : t))
-        );
-      } else {
-        const { data, error } = await supabase
-          .from("transactions")
-          .insert({ ...payload, user_id: user.id })
-          .select("*")
-          .single();
-
-        if (error) throw error;
-
-        const newTx: Tx = {
-          id: data.id,
-          date: data.date,
-          type: data.type,
-          category: data.category,
-          amount: Number(data.amount),
-          method: data.method,
-          notes: data.notes,
-        };
-
-        setTransactions((prev) => [newTx, ...prev]);
-      }
-
-      resetForm();
-    } catch (err) {
-      console.error("Error en handleSubmit:", err);
-      setError("No se pudo guardar el movimiento.");
-      alert("No se pudo guardar el movimiento.");
-    } finally {
-      setSaving(false);
-    }
+  const basePayload = {
+    date: form.date,
+    type: form.type,
+    category: form.category,
+    amount: amountNumber,
+    method: form.method,
+    notes: form.notes || null,
+    spender_label: spenderLabel,
   };
 
+  // Por ahora, el dueño financiero y quien genera el gasto eres tú mismo
+  const ownerUserId = user.id;
+  const spenderUserId = user.id;
+
+  setSaving(true);
+
+  try {
+    // 📴 Modo offline
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      const id = crypto.randomUUID();
+
+      const localTx: Tx = {
+        id,
+        ...basePayload,
+        owner_user_id: ownerUserId,
+        spender_user_id: spenderUserId,
+        spender_label: spenderLabel,
+        created_by: user.id,
+        card_id: selectedCardId ?? null,
+        localOnly: true,
+      };
+
+      setTransactions((prev) => [localTx, ...prev]);
+
+      try {
+        // Offline en disco: sólo guardamos los campos base clásicos
+        await saveOfflineTx({
+          id: localTx.id,
+          date: localTx.date,
+          type: localTx.type,
+          category: localTx.category,
+          amount: localTx.amount,
+          method: localTx.method,
+          notes: localTx.notes ?? null,
+        });
+      } catch (err) {
+        console.error("Error guardando movimiento offline", err);
+      }
+
+      alert(
+        "Estás sin conexión. El movimiento se guardó sólo en este dispositivo y se enviará cuando vuelva el internet."
+      );
+      resetForm();
+      return;
+    }
+
+    // 🌐 Modo online
+    if (editingId) {
+      const { error } = await supabase
+        .from("transactions")
+        .update({
+          ...basePayload,
+          user_id: user.id,
+          owner_user_id: ownerUserId,
+          spender_user_id: spenderUserId,
+          card_id: selectedCardId ?? null,
+        })
+        .eq("id", editingId);
+
+      if (error) throw error;
+
+      setTransactions((prev) =>
+        prev.map((t) =>
+          t.id === editingId
+            ? {
+                ...t,
+                ...basePayload,
+                owner_user_id: ownerUserId,
+                spender_user_id: spenderUserId,
+                card_id: selectedCardId ?? null,
+              }
+            : t
+        )
+      );
+    } else {
+      const { data, error } = await supabase
+        .from("transactions")
+        .insert({
+          ...basePayload,
+          user_id: user.id,
+          owner_user_id: ownerUserId,
+          spender_user_id: spenderUserId,
+
+          // 🔐 NUEVO
+          created_by: user.id,
+          card_id: selectedCardId ?? null,
+        })
+        .select(
+          "id,date,type,category,amount,method,notes,owner_user_id,spender_user_id,spender_label,created_by,card_id"
+        )
+        .single();
+
+      if (error) throw error;
+
+      const newTx: Tx = {
+        id: data.id,
+        date: data.date,
+        type: data.type,
+        category: data.category,
+        amount: Number(data.amount),
+        method: data.method,
+        notes: data.notes,
+        owner_user_id: data.owner_user_id ?? null,
+        spender_user_id: data.spender_user_id ?? null,
+        spender_label: data.spender_label ?? null,
+        created_by: data.created_by ?? null,
+        card_id: data.card_id ?? null,
+      };
+
+      setTransactions((prev) => [newTx, ...prev]);
+    }
+
+    resetForm();
+  } catch (err) {
+    console.error("Error en handleSubmit:", err);
+    setError("No se pudo guardar el movimiento.");
+    alert("No se pudo guardar el movimiento.");
+  } finally {
+    setSaving(false);
+  }
+};
+
   const handleEdit = (tx: Tx) => {
+    const inferredSpender =
+      tx.spender_label ??
+      (tx.spender_user_id === user?.id ? "Yo" : "Otro");
+
     setForm({
       date: tx.date,
       type: tx.type,
@@ -1017,7 +1175,9 @@ export default function GastosPage() {
       amount: String(tx.amount),
       method: tx.method,
       notes: tx.notes ?? "",
+      spenderLabel: inferredSpender,
     });
+    setSelectedCardId(tx.card_id ?? null); // 💳 cargar tarjeta en edición
     setEditingId(tx.id);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -1085,21 +1245,6 @@ export default function GastosPage() {
       localStorage.setItem(CUSTOM_METHODS_KEY, JSON.stringify(updated));
     }
   };
-
-  // --------------------------------------------------
-  //   Etiqueta del mes
-  // --------------------------------------------------
-  const monthLabel = useMemo(() => {
-    const [y, m] = month.split("-");
-    const date = new Date(Number(y), Number(m) - 1, 1);
-
-    const raw = date.toLocaleDateString("es-MX", {
-      year: "numeric",
-      month: "long",
-    });
-
-    return raw.charAt(0).toUpperCase() + raw.slice(1);
-  }, [month]);
 
   // --------------------------------------------------
   //   Render: auth
@@ -1214,7 +1359,7 @@ export default function GastosPage() {
   return (
     <main className="flex flex-1 flex-col gap-4">
       {/* Header con navegación */}
-            <AppHeader
+      <AppHeader
         title="Gastos e ingresos"
         subtitle="Aquí capturas todos los movimientos del día a día."
         activeTab="gastos"
@@ -1528,14 +1673,36 @@ export default function GastosPage() {
         </div>
       </section>
 
-      {/* Formulario de movimientos */}
+            {/* Formulario de movimientos */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <h2 className="mb-3 text-sm font-semibold">
           {editingId ? "Editar movimiento" : "Agregar movimiento"}
         </h2>
 
         <form onSubmit={handleSubmit} className="space-y-3 text-sm">
-          <div className="grid gap-3 md:grid-cols-5">
+          {/* Fila principal */}
+          <div className="grid gap-3 md:grid-cols-7">
+            {/* Tarjeta */}
+            <div>
+              <div className="mb-1 text-xs text-gray-500 dark:text-gray-300">
+                Tarjeta
+              </div>
+              <select
+                value={selectedCardId ?? ""}
+                onChange={(e) =>
+                  setSelectedCardId(e.target.value ? e.target.value : null)
+                }
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              >
+                <option value="">Sin tarjeta específica</option>
+                {cards.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {/* Tipo */}
             <div>
               <div className="mb-1 text-xs text-gray-500 dark:text-gray-300">
@@ -1545,7 +1712,7 @@ export default function GastosPage() {
                 <button
                   type="button"
                   onClick={() => handleChangeForm("type", "ingreso")}
-                  className={`px-3 py-1 text-xs ${
+                  className={`px-3 py-1 ${
                     form.type === "ingreso"
                       ? "bg-emerald-500 text-white"
                       : "bg-white text-gray-700 dark:bg-slate-900 dark:text-gray-200"
@@ -1556,7 +1723,7 @@ export default function GastosPage() {
                 <button
                   type="button"
                   onClick={() => handleChangeForm("type", "gasto")}
-                  className={`px-3 py-1 text-xs ${
+                  className={`px-3 py-1 ${
                     form.type === "gasto"
                       ? "bg-rose-500 text-white"
                       : "bg-white text-gray-700 dark:bg-slate-900 dark:text-gray-200"
@@ -1625,6 +1792,26 @@ export default function GastosPage() {
                 {methods.map((m) => (
                   <option key={m.value} value={m.value}>
                     {m.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Quién generó */}
+            <div>
+              <div className="mb-1 text-xs text-gray-500 dark:text-gray-300">
+                Quién generó
+              </div>
+              <select
+                value={form.spenderLabel}
+                onChange={(e) =>
+                  handleChangeForm("spenderLabel", e.target.value)
+                }
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+              >
+                {SPENDER_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
                   </option>
                 ))}
               </select>
@@ -1715,41 +1902,60 @@ export default function GastosPage() {
             )}
           </div>
 
-          {error && (
-            <p className="mt-1 text-xs text-red-500">{error}</p>
-          )}
+          {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
         </form>
       </section>
 
       {/* Filtros de movimientos */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">Filtros de movimientos</h2>
-          {/* Pills resumen filtros */}
-          <div className="flex flex-wrap gap-1 text-[10px] text-slate-500 dark:text-slate-300">
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
-              Tipo:{" "}
-              {filterType === "todos"
-                ? "Todos"
-                : filterType === "ingreso"
-                ? "Ingresos"
-                : "Gastos"}
+        <h2 className="mb-3 text-sm font-semibold">Filtros de movimientos</h2>
+
+        {/* Cards de totales filtrados */}
+        <div className="mb-2 grid gap-3 sm:grid-cols-3">
+          <div className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/40">
+            <span className="text-[11px] text-slate-500 dark:text-slate-300">
+              Ingresos (filtrados)
             </span>
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
-              Categoría:{" "}
-              {filterCategory === "TODAS" ? "Todas" : filterCategory}
+            <span className="mt-1 text-lg font-semibold text-emerald-600 dark:text-emerald-400">
+              {formatMoney(filteredIngresos)}
             </span>
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
-              Método: {filterMethod === "TODOS" ? "Todos" : filterMethod}
+          </div>
+
+          <div className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/40">
+            <span className="text-[11px] text-slate-500 dark:text-slate-300">
+              Gastos (filtrados)
             </span>
-            {searchText && (
-              <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-700 dark:bg-sky-900/40 dark:text-sky-200">
-                Buscando: “{searchText}”
-              </span>
-            )}
+            <span className="mt-1 text-lg font-semibold text-rose-600 dark:text-rose-400">
+              {formatMoney(filteredGastos)}
+            </span>
+          </div>
+
+          <div className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/40">
+            <span className="text-[11px] text-slate-500 dark:text-slate-300">
+              Flujo filtrado
+            </span>
+            <span
+              className={`mt-1 text-lg font-semibold ${
+                filteredFlujo >= 0
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-rose-600 dark:text-rose-400"
+              }`}
+            >
+              {formatMoney(filteredFlujo)}
+            </span>
           </div>
         </div>
 
+        <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
+          Estos totales se calculan sólo con los{" "}
+          <span className="font-semibold">
+            {filteredTransactions.length}
+          </span>{" "}
+          movimientos que cumplen los filtros actuales. Si cambias los filtros,
+          estas cifras también cambian.
+        </p>
+
+        {/* Controles de filtro */}
         <div className="grid gap-3 text-xs md:grid-cols-4">
           {/* Tipo */}
           <div>
@@ -1888,8 +2094,15 @@ export default function GastosPage() {
             Movimientos de {month}
           </h2>
           <p className="text-[11px] text-slate-500 dark:text-slate-300">
-            Mostrando <span className="font-semibold">{filteredTransactions.length}</span> de{" "}
-            <span className="font-semibold">{transactions.length}</span> movimientos del mes
+            Mostrando{" "}
+            <span className="font-semibold">
+              {filteredTransactions.length}
+            </span>{" "}
+            de{" "}
+            <span className="font-semibold">
+              {transactions.length}
+            </span>{" "}
+            movimientos del mes
           </p>
         </div>
 
@@ -1902,6 +2115,7 @@ export default function GastosPage() {
                 <th className="border-b px-2 py-2">Categoría</th>
                 <th className="border-b px-2 py-2 text-right">Monto</th>
                 <th className="border-b px-2 py-2">Método</th>
+                <th className="border-b px-2 py-2">Generó</th>
                 <th className="border-b px-2 py-2">Notas</th>
                 <th className="border-b px-2 py-2 text-center">Acciones</th>
               </tr>
@@ -1910,49 +2124,111 @@ export default function GastosPage() {
               {loading && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="py-4 text-center text-gray-500"
                   >
                     Cargando movimientos...
                   </td>
                 </tr>
               )}
+
               {!loading && filteredTransactions.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="py-4 text-center text-gray-500"
                   >
                     Sin movimientos registrados con esos filtros.
                   </td>
                 </tr>
               )}
+
               {!loading &&
                 filteredTransactions.map((t) => (
                   <tr
                     key={t.id}
-                    className={`odd:bg-white even:bg-gray-50 dark:odd:bg-slate-800 dark:even:bg-slate-900 ${
-                      t.localOnly ? "opacity-70" : ""
-                    } ${
-                      t.type === "ingreso"
-                        ? "border-l-4 border-l-emerald-400"
-                        : "border-l-4 border-l-rose-400"
-                    }`}
+                    className={`
+                      odd:bg-white even:bg-gray-50 
+                      dark:odd:bg-slate-800 dark:even:bg-slate-900
+                      hover:bg-sky-50 dark:hover:bg-slate-800/80
+                      transition-colors cursor-default
+                      ${t.localOnly ? "opacity-80" : ""}
+                      ${
+                        t.type === "ingreso"
+                          ? "border-l-4 border-l-emerald-400"
+                          : "border-l-4 border-l-rose-400"
+                      }
+                    `}
                   >
                     <td className="border-t px-2 py-1">
                       {formatDateDisplay(t.date)}
                     </td>
+
+                    {/* Tipo con badge */}
                     <td className="border-t px-2 py-1">
-                      {t.type === "ingreso" ? "Ingreso" : "Gasto"}
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                          t.type === "ingreso"
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
+                            : "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
+                        }`}
+                      >
+                        {t.type === "ingreso" ? "Ingreso" : "Gasto"}
+                      </span>
                     </td>
+
                     <td className="border-t px-2 py-1">{t.category}</td>
-                    <td className="border-t px-2 py-1 text-right">
-                      {formatMoney(t.amount)}
+
+                    {/* Monto + badge Offline alineados a la derecha */}
+                    <td className="border-t px-2 py-1">
+                      <div className="flex items-center justify-end gap-1">
+                        <span
+                          className={`font-semibold ${
+                            t.type === "ingreso"
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : "text-rose-600 dark:text-rose-400"
+                          }`}
+                        >
+                          {formatMoney(t.amount)}
+                        </span>
+                        {t.localOnly && (
+                          <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200">
+                            Offline
+                          </span>
+                        )}
+                      </div>
                     </td>
-                    <td className="border-t px-2 py-1">{t.method}</td>
-                    <td className="max-w-xs truncate border-t px-2 py-1">
-                      {t.notes}
+
+                    {/* Método como pill */}
+                    <td className="border-t px-2 py-1">
+                      <span className="inline-flex max-w-[160px] items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                        <span className="truncate">{t.method}</span>
+                      </span>
                     </td>
+
+                    {/* Generó */}
+                    <td className="border-t px-2 py-1">
+                      <span className="text-xs text-slate-600 dark:text-slate-300">
+                        {t.spender_label ??
+                          (t.spender_user_id === user.id ? "Yo" : "Otro")}
+                      </span>
+                    </td>
+
+                    {/* Notas con tooltip */}
+                    <td className="border-t px-2 py-1">
+                      {t.notes ? (
+                        <span
+                          className="block max-w-xs truncate text-xs text-slate-600 dark:text-slate-300"
+                          title={t.notes}
+                        >
+                          {t.notes}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">—</span>
+                      )}
+                    </td>
+
+                    {/* Acciones */}
                     <td className="border-t px-2 py-1 text-center">
                       <button
                         type="button"
