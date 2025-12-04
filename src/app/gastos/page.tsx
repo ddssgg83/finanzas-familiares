@@ -36,7 +36,7 @@ type Tx = {
   card_id?: string | null;
 
   // NUEVO (opcionales, para compatibilidad con datos viejos y offline)
-  owner_user_id?: string | null; // quién paga realmente
+  owner_user_id?: string | null; // quién paga realmente (dueño de la familia)
   spender_user_id?: string | null; // quién lo registró (normalmente user.id)
   spender_label?: string | null; // "Yo", "Esposa", "Hijo", etc.
 
@@ -55,6 +55,14 @@ type FormState = {
 
 type Option = { label: string; value: string };
 type ExportType = "todos" | "ingresos" | "gastos";
+
+type FamilyContext = {
+  familyId: string;
+  familyName: string;
+  ownerUserId: string;
+  memberId: string;
+  role: "owner" | "member";
+};
 
 const DEFAULT_CATEGORIES: Option[] = [
   { label: "Sueldo", value: "SUELDO" },
@@ -188,6 +196,14 @@ export default function GastosPage() {
   const currentTheme = theme === "system" ? systemTheme : theme;
   const isDark = mountedTheme && currentTheme === "dark";
 
+  // 👪 CONTEXTO DE FAMILIA
+  const [familyCtx, setFamilyCtx] = useState<FamilyContext | null>(null);
+  const [familyCtxLoading, setFamilyCtxLoading] = useState(false);
+  const [familyCtxError, setFamilyCtxError] = useState<string | null>(null);
+
+  // Scope de vista: solo yo / toda la familia (si es owner)
+  const [viewScope, setViewScope] = useState<"mine" | "family">("mine");
+
   // --------------------------------------------------
   //   AUTH: usuario actual + listener
   // --------------------------------------------------
@@ -272,10 +288,72 @@ export default function GastosPage() {
       setTransactions([]);
       setBudget(null);
       setBudgetInput("");
+      setFamilyCtx(null);
     } catch (err) {
       console.error("Error cerrando sesión", err);
     }
   };
+
+  // --------------------------------------------------
+  //   Cargar contexto de familia (si pertenece a una)
+  // --------------------------------------------------
+  useEffect(() => {
+    if (!user) {
+      setFamilyCtx(null);
+      return;
+    }
+
+    const loadFamilyCtx = async () => {
+      setFamilyCtxLoading(true);
+      setFamilyCtxError(null);
+      try {
+        // 1) Buscar membresía activa
+        const { data: memberRows, error: memberError } = await supabase
+          .from("family_members")
+          .select("id,family_id,role,status")
+          .eq("user_id", user.id)
+          .eq("status", "active")
+          .limit(1);
+
+        if (memberError) throw memberError;
+
+        if (!memberRows || memberRows.length === 0) {
+          setFamilyCtx(null);
+          return;
+        }
+
+        const member = memberRows[0];
+
+        // 2) Cargar familia
+        const { data: fam, error: famError } = await supabase
+          .from("families")
+          .select("id,name,user_id")
+          .eq("id", member.family_id)
+          .single();
+
+        if (famError) throw famError;
+
+        setFamilyCtx({
+          familyId: fam.id,
+          familyName: fam.name,
+          ownerUserId: fam.user_id,
+          memberId: member.id,
+          role: member.role as "owner" | "member",
+        });
+      } catch (err: any) {
+        console.error("Error cargando contexto de familia:", err);
+        setFamilyCtxError("No se pudo cargar la información de familia.");
+        setFamilyCtx(null);
+      } finally {
+        setFamilyCtxLoading(false);
+      }
+    };
+
+    loadFamilyCtx();
+  }, [user]);
+
+  const isFamilyOwner =
+    !!familyCtx && !!user && familyCtx.ownerUserId === user.id;
 
   // --------------------------------------------------
   //   Cargar listas personalizadas de categorías/métodos
@@ -354,104 +432,113 @@ export default function GastosPage() {
     loadOffline();
   }, []);
 
- // --------------------------------------------------
-//   Cargar transacciones del mes desde Supabase
-// --------------------------------------------------
-useEffect(() => {
-  if (!user) {
-    setTransactions([]);
-    return;
-  }
+  // --------------------------------------------------
+  //   Cargar transacciones del mes desde Supabase
+  // --------------------------------------------------
+  useEffect(() => {
+    if (!user) {
+      setTransactions([]);
+      return;
+    }
 
-  const userId = user.id; // ✅ aquí ya es tipo string, no User | null
+    const userId = user.id;
 
-  async function load() {
-    setLoading(true);
-    setError(null);
+    async function load() {
+      setLoading(true);
+      setError(null);
 
-    try {
-      const [year, monthNumber] = month.split("-");
-      const from = `${month}-01`;
-      const to = `${month}-${new Date(
-        Number(year),
-        Number(monthNumber),
-        0
-      )
-        .getDate()
-        .toString()
-        .padStart(2, "0")}`;
-
-      const { data, error } = await supabase
-        .from("transactions")
-        .select(
-          "id,date,type,category,amount,method,notes,owner_user_id,spender_user_id,spender_label,created_by,card_id"
+      try {
+        const [year, monthNumber] = month.split("-");
+        const from = `${month}-01`;
+        const to = `${month}-${new Date(
+          Number(year),
+          Number(monthNumber),
+          0
         )
-        .or(`created_by.is.null,created_by.eq.${userId}`)  // 👈 aquí el cambio
-  .gte("date", from)
-  .lte("date", to)
-  .order("date", { ascending: false });
+          .getDate()
+          .toString()
+          .padStart(2, "0")}`;
 
-      if (error) throw error;
+        let query = supabase
+          .from("transactions")
+          .select(
+            "id,date,type,category,amount,method,notes,owner_user_id,spender_user_id,spender_label,created_by,card_id"
+          )
+          .gte("date", from)
+          .lte("date", to)
+          .order("date", { ascending: false });
 
-      setTransactions(
-        (data ?? []).map((t: any) => ({
-          id: t.id,
-          date: t.date,
-          type: t.type,
-          category: t.category,
-          amount: Number(t.amount),
-          method: t.method,
-          notes: t.notes,
-          owner_user_id: t.owner_user_id ?? null,
-          spender_user_id: t.spender_user_id ?? null,
-          spender_label: t.spender_label ?? null,
-          created_by: t.created_by ?? null,
-          card_id: t.card_id ?? null,
-        }))
-      );
+        // 🔑 Lógica de quién puede ver qué:
+        // - Siempre tus propios movimientos (created_by = user.id o null para datos viejos)
+        // - Si eres jefe de familia y eliges "familia", ves todos los que tengan owner_user_id = tu id
+        if (isFamilyOwner && viewScope === "family") {
+          query = query.eq("owner_user_id", userId);
+        } else {
+          query = query.or(`created_by.is.null,created_by.eq.${userId}`);
+        }
 
-      if (typeof window !== "undefined") {
-        localStorage.setItem(`ff-cache-${month}`, JSON.stringify(data ?? []));
-      }
-    } catch (err: any) {
-      console.error(err);
-      setError("No se pudieron cargar los movimientos.");
+        const { data, error } = await query;
+        if (error) throw error;
 
-      if (typeof window !== "undefined") {
-        const cache = localStorage.getItem(`ff-cache-${month}`);
-        if (cache) {
-          try {
-            const parsed = JSON.parse(cache);
-            setTransactions(
-              (parsed ?? []).map((t: any) => ({
-                id: t.id,
-                date: t.date,
-                type: t.type,
-                category: t.category,
-                amount: Number(t.amount),
-                method: t.method,
-                notes: t.notes,
-                owner_user_id: t.owner_user_id ?? null,
-                spender_user_id: t.spender_user_id ?? null,
-                spender_label: t.spender_label ?? null,
-                created_by: t.created_by ?? null,
-                card_id: t.card_id ?? null,
-              }))
-            );
-          } catch {
-            // ignoramos error de parseo
+        setTransactions(
+          (data ?? []).map((t: any) => ({
+            id: t.id,
+            date: t.date,
+            type: t.type,
+            category: t.category,
+            amount: Number(t.amount),
+            method: t.method,
+            notes: t.notes,
+            owner_user_id: t.owner_user_id ?? null,
+            spender_user_id: t.spender_user_id ?? null,
+            spender_label: t.spender_label ?? null,
+            created_by: t.created_by ?? null,
+            card_id: t.card_id ?? null,
+          }))
+        );
+
+        if (typeof window !== "undefined") {
+          localStorage.setItem(`ff-cache-${month}`, JSON.stringify(data ?? []));
+        }
+      } catch (err: any) {
+        console.error(err);
+        setError("No se pudieron cargar los movimientos.");
+
+        if (typeof window !== "undefined") {
+          const cache = localStorage.getItem(`ff-cache-${month}`);
+          if (cache) {
+            try {
+              const parsed = JSON.parse(cache);
+              setTransactions(
+                (parsed ?? []).map((t: any) => ({
+                  id: t.id,
+                  date: t.date,
+                  type: t.type,
+                  category: t.category,
+                  amount: Number(t.amount),
+                  method: t.method,
+                  notes: t.notes,
+                  owner_user_id: t.owner_user_id ?? null,
+                  spender_user_id: t.spender_user_id ?? null,
+                  spender_label: t.spender_label ?? null,
+                  created_by: t.created_by ?? null,
+                  card_id: t.card_id ?? null,
+                }))
+              );
+            } catch {
+              // ignoramos error de parseo
+            }
           }
         }
+      } finally {
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
     }
-  }
 
-  if (typeof window !== "undefined") {
-    load();
-  }
-}, [month, user]);
+    if (typeof window !== "undefined") {
+      load();
+    }
+  }, [month, user, isFamilyOwner, viewScope]);
 
   // --------------------------------------------------
   //   Sincronizar cola offline al volver internet
@@ -646,7 +733,6 @@ useEffect(() => {
     };
   }, [filteredTransactions]);
 
-  // Totales solo de los movimientos filtrados (para el resumen debajo de filtros)
   const {
     totalIngresosFiltrados,
     totalGastosFiltrados,
@@ -876,7 +962,7 @@ useEffect(() => {
   };
 
   // --------------------------------------------------
-  //   Etiqueta del mes (se usa también en PDF)
+  //   Etiqueta del mes
   // --------------------------------------------------
   const monthLabel = useMemo(() => {
     const [y, m] = month.split("-");
@@ -994,174 +1080,174 @@ useEffect(() => {
   };
 
   const resetForm = () => {
-  setForm({
-    date: "",
-    type: "gasto",
-    category: categories[0]?.value ?? "",
-    amount: "",
-    method: methods[0]?.value ?? "",
-    notes: "",
-    spenderLabel: SPENDER_OPTIONS[0]?.value ?? "Yo",
-  });
-  setSelectedCardId(null);   // 👈 limpiar tarjeta
-  setEditingId(null);
-};
+    setForm({
+      date: "",
+      type: "gasto",
+      category: categories[0]?.value ?? "",
+      amount: "",
+      method: methods[0]?.value ?? "",
+      notes: "",
+      spenderLabel: SPENDER_OPTIONS[0]?.value ?? "Yo",
+    });
+    setSelectedCardId(null);
+    setEditingId(null);
+  };
 
   // --------------------------------------------------
   //   Guardar / editar / borrar movimiento
   // --------------------------------------------------
   const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setError(null);
+    e.preventDefault();
+    setError(null);
 
-  if (!user) {
-    alert("Debes iniciar sesión para guardar movimientos.");
-    return;
-  }
-
-  const amountNumber = Number(form.amount);
-  if (!form.date) {
-    alert("Selecciona una fecha.");
-    return;
-  }
-  if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
-    alert("Ingresa un monto válido mayor a 0.");
-    return;
-  }
-
-  const spenderLabel = form.spenderLabel || "Yo";
-
-  const basePayload = {
-    date: form.date,
-    type: form.type,
-    category: form.category,
-    amount: amountNumber,
-    method: form.method,
-    notes: form.notes || null,
-    spender_label: spenderLabel,
-  };
-
-  // Por ahora, el dueño financiero y quien genera el gasto eres tú mismo
-  const ownerUserId = user.id;
-  const spenderUserId = user.id;
-
-  setSaving(true);
-
-  try {
-    // 📴 Modo offline
-    if (typeof navigator !== "undefined" && !navigator.onLine) {
-      const id = crypto.randomUUID();
-
-      const localTx: Tx = {
-        id,
-        ...basePayload,
-        owner_user_id: ownerUserId,
-        spender_user_id: spenderUserId,
-        spender_label: spenderLabel,
-        created_by: user.id,
-        card_id: selectedCardId ?? null,
-        localOnly: true,
-      };
-
-      setTransactions((prev) => [localTx, ...prev]);
-
-      try {
-        // Offline en disco: sólo guardamos los campos base clásicos
-        await saveOfflineTx({
-          id: localTx.id,
-          date: localTx.date,
-          type: localTx.type,
-          category: localTx.category,
-          amount: localTx.amount,
-          method: localTx.method,
-          notes: localTx.notes ?? null,
-        });
-      } catch (err) {
-        console.error("Error guardando movimiento offline", err);
-      }
-
-      alert(
-        "Estás sin conexión. El movimiento se guardó sólo en este dispositivo y se enviará cuando vuelva el internet."
-      );
-      resetForm();
+    if (!user) {
+      alert("Debes iniciar sesión para guardar movimientos.");
       return;
     }
 
-    // 🌐 Modo online
-    if (editingId) {
-      const { error } = await supabase
-        .from("transactions")
-        .update({
-          ...basePayload,
-          user_id: user.id,
-          owner_user_id: ownerUserId,
-          spender_user_id: spenderUserId,
-          card_id: selectedCardId ?? null,
-        })
-        .eq("id", editingId);
-
-      if (error) throw error;
-
-      setTransactions((prev) =>
-        prev.map((t) =>
-          t.id === editingId
-            ? {
-                ...t,
-                ...basePayload,
-                owner_user_id: ownerUserId,
-                spender_user_id: spenderUserId,
-                card_id: selectedCardId ?? null,
-              }
-            : t
-        )
-      );
-    } else {
-      const { data, error } = await supabase
-        .from("transactions")
-        .insert({
-          ...basePayload,
-          user_id: user.id,
-          owner_user_id: ownerUserId,
-          spender_user_id: spenderUserId,
-
-          // 🔐 NUEVO
-          created_by: user.id,
-          card_id: selectedCardId ?? null,
-        })
-        .select(
-          "id,date,type,category,amount,method,notes,owner_user_id,spender_user_id,spender_label,created_by,card_id"
-        )
-        .single();
-
-      if (error) throw error;
-
-      const newTx: Tx = {
-        id: data.id,
-        date: data.date,
-        type: data.type,
-        category: data.category,
-        amount: Number(data.amount),
-        method: data.method,
-        notes: data.notes,
-        owner_user_id: data.owner_user_id ?? null,
-        spender_user_id: data.spender_user_id ?? null,
-        spender_label: data.spender_label ?? null,
-        created_by: data.created_by ?? null,
-        card_id: data.card_id ?? null,
-      };
-
-      setTransactions((prev) => [newTx, ...prev]);
+    const amountNumber = Number(form.amount);
+    if (!form.date) {
+      alert("Selecciona una fecha.");
+      return;
+    }
+    if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
+      alert("Ingresa un monto válido mayor a 0.");
+      return;
     }
 
-    resetForm();
-  } catch (err) {
-    console.error("Error en handleSubmit:", err);
-    setError("No se pudo guardar el movimiento.");
-    alert("No se pudo guardar el movimiento.");
-  } finally {
-    setSaving(false);
-  }
-};
+    const spenderLabel = form.spenderLabel || "Yo";
+
+    const basePayload = {
+      date: form.date,
+      type: form.type,
+      category: form.category,
+      amount: amountNumber,
+      method: form.method,
+      notes: form.notes || null,
+      spender_label: spenderLabel,
+    };
+
+    // 🔑 Si pertenece a una familia, el dueño financiero es el owner de la familia
+    const ownerUserId = familyCtx ? familyCtx.ownerUserId : user.id;
+    const spenderUserId = user.id;
+
+    setSaving(true);
+
+    try {
+      // 📴 Modo offline
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        const id = crypto.randomUUID();
+
+        const localTx: Tx = {
+          id,
+          ...basePayload,
+          owner_user_id: ownerUserId,
+          spender_user_id: spenderUserId,
+          spender_label: spenderLabel,
+          created_by: user.id,
+          card_id: selectedCardId ?? null,
+          localOnly: true,
+        };
+
+        setTransactions((prev) => [localTx, ...prev]);
+
+        try {
+          // Offline en disco: sólo guardamos los campos base clásicos
+          await saveOfflineTx({
+            id: localTx.id,
+            date: localTx.date,
+            type: localTx.type,
+            category: localTx.category,
+            amount: localTx.amount,
+            method: localTx.method,
+            notes: localTx.notes ?? null,
+          });
+        } catch (err) {
+          console.error("Error guardando movimiento offline", err);
+        }
+
+        alert(
+          "Estás sin conexión. El movimiento se guardó sólo en este dispositivo y se enviará cuando vuelva el internet."
+        );
+        resetForm();
+        return;
+      }
+
+      // 🌐 Modo online
+      if (editingId) {
+        const { error } = await supabase
+          .from("transactions")
+          .update({
+            ...basePayload,
+            user_id: user.id,
+            owner_user_id: ownerUserId,
+            spender_user_id: spenderUserId,
+            card_id: selectedCardId ?? null,
+            created_by: user.id,
+          })
+          .eq("id", editingId);
+
+        if (error) throw error;
+
+        setTransactions((prev) =>
+          prev.map((t) =>
+            t.id === editingId
+              ? {
+                  ...t,
+                  ...basePayload,
+                  owner_user_id: ownerUserId,
+                  spender_user_id: spenderUserId,
+                  created_by: user.id,
+                  card_id: selectedCardId ?? null,
+                }
+              : t
+          )
+        );
+      } else {
+        const { data, error } = await supabase
+          .from("transactions")
+          .insert({
+            ...basePayload,
+            user_id: user.id,
+            owner_user_id: ownerUserId,
+            spender_user_id: spenderUserId,
+            created_by: user.id,
+            card_id: selectedCardId ?? null,
+          })
+          .select(
+            "id,date,type,category,amount,method,notes,owner_user_id,spender_user_id,spender_label,created_by,card_id"
+          )
+          .single();
+
+        if (error) throw error;
+
+        const newTx: Tx = {
+          id: data.id,
+          date: data.date,
+          type: data.type,
+          category: data.category,
+          amount: Number(data.amount),
+          method: data.method,
+          notes: data.notes,
+          owner_user_id: data.owner_user_id ?? null,
+          spender_user_id: data.spender_user_id ?? null,
+          spender_label: data.spender_label ?? null,
+          created_by: data.created_by ?? null,
+          card_id: data.card_id ?? null,
+        };
+
+        setTransactions((prev) => [newTx, ...prev]);
+      }
+
+      resetForm();
+    } catch (err) {
+      console.error("Error en handleSubmit:", err);
+      setError("No se pudo guardar el movimiento.");
+      alert("No se pudo guardar el movimiento.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleEdit = (tx: Tx) => {
     const inferredSpender =
@@ -1177,7 +1263,7 @@ useEffect(() => {
       notes: tx.notes ?? "",
       spenderLabel: inferredSpender,
     });
-    setSelectedCardId(tx.card_id ?? null); // 💳 cargar tarjeta en edición
+    setSelectedCardId(tx.card_id ?? null);
     setEditingId(tx.id);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -1395,6 +1481,57 @@ useEffect(() => {
               <div className="mt-1 text-xs font-medium text-slate-700 dark:text-slate-200">
                 {monthLabel}
               </div>
+
+              {/* Info de familia */}
+              {familyCtxLoading && !familyCtx && (
+                <p className="mt-2 text-[11px] text-slate-500">
+                  Cargando información de familia...
+                </p>
+              )}
+              {familyCtx && (
+                <div className="mt-2 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                  <div>
+                    Familia:{" "}
+                    <span className="font-semibold">
+                      {familyCtx.familyName}
+                    </span>{" "}
+                    {isFamilyOwner ? "(jefe de familia)" : "(miembro)"}
+                  </div>
+                  {isFamilyOwner && (
+                    <div className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 dark:bg-slate-800">
+                      <button
+                        type="button"
+                        className={
+                          "rounded-full px-2 py-0.5 " +
+                          (viewScope === "mine"
+                            ? "bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-50"
+                            : "text-slate-500")
+                        }
+                        onClick={() => setViewScope("mine")}
+                      >
+                        Solo yo
+                      </button>
+                      <button
+                        type="button"
+                        className={
+                          "rounded-full px-2 py-0.5 " +
+                          (viewScope === "family"
+                            ? "bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-50"
+                            : "text-slate-500")
+                        }
+                        onClick={() => setViewScope("family")}
+                      >
+                        Familia
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+              {familyCtxError && (
+                <p className="mt-2 text-[11px] text-rose-500">
+                  {familyCtxError}
+                </p>
+              )}
             </div>
 
             <div
@@ -1673,7 +1810,7 @@ useEffect(() => {
         </div>
       </section>
 
-            {/* Formulario de movimientos */}
+      {/* Formulario de movimientos */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <h2 className="mb-3 text-sm font-semibold">
           {editingId ? "Editar movimiento" : "Agregar movimiento"}
