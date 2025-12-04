@@ -3,847 +3,685 @@
 import { useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { AppHeader } from "@/components/AppHeader";
 
 export const dynamic = "force-dynamic";
 
-type FamilyRole = "owner" | "member";
-
 type Family = {
   id: string;
   name: string;
-  owner_id: string;
+  user_id: string; // 👈 dueño de la familia (coincide con la tabla Supabase)
+  created_at: string;
 };
 
 type FamilyMember = {
   id: string;
   family_id: string;
-  user_id: string;
-  role: FamilyRole;
+  user_id: string | null;
+  invited_email: string;
+  role: "owner" | "member";
+  status: "active" | "pending" | "left";
+  created_at: string;
 };
 
-type CardWithSharing = {
-  id: string;
-  name: string;
-  sharedWith: string[]; // user_id de miembros
-};
-
-type ActiveTab = "overview" | "members" | "cards";
-
-export default function FamilyPage() {
+export default function FamiliaPage() {
+  // Auth
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
 
+  // Familia
   const [family, setFamily] = useState<Family | null>(null);
   const [members, setMembers] = useState<FamilyMember[]>([]);
-  const [role, setRole] = useState<FamilyRole | null>(null);
+  const [loadingFamily, setLoadingFamily] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>("overview");
+  // Formularios
+  const [newFamilyName, setNewFamilyName] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  // Edición de familia (solo nombre)
+const [editingFamily, setEditingFamily] = useState(false);
+const [editFamilyName, setEditFamilyName] = useState("");
 
-  const [familyName, setFamilyName] = useState("");
-  const [joinFamilyId, setJoinFamilyId] = useState("");
-
-  const [cards, setCards] = useState<CardWithSharing[]>([]);
-  const [savingSharing, setSavingSharing] = useState(false);
-
-  const [message, setMessage] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  // ---------- Helpers UI ----------
-  const showMessage = (msg: string) => {
-    setMessage(msg);
-    setTimeout(() => setMessage(null), 4000);
-  };
-
-  const showError = (msg: string) => {
-    setErrorMsg(msg);
-    setTimeout(() => setErrorMsg(null), 5000);
-  };
-
-  // ---------- Cargar usuario ----------
+  // --------------------------------------------------
+  //   AUTH: usuario actual + listener
+  // --------------------------------------------------
   useEffect(() => {
-    const fetchUser = async () => {
-      const {
-        data: { user },
-        error,
-      } = await supabase.auth.getUser();
+    let ignore = false;
 
-      if (error) {
-        console.error("Error al obtener usuario", error);
-        showError("Hubo un problema al obtener tu sesión.");
+    async function loadUser() {
+      setAuthLoading(true);
+      setAuthError(null);
+      try {
+        const { data, error } = await supabase.auth.getUser();
+        if (error && (error as any).name !== "AuthSessionMissingError") {
+          console.error("Error obteniendo usuario actual", error);
+        }
+        if (!ignore) {
+          setUser(data?.user ?? null);
+        }
+      } finally {
+        if (!ignore) setAuthLoading(false);
       }
+    }
 
-      setUser(user ?? null);
+    loadUser();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      ignore = true;
+      subscription.unsubscribe();
     };
-
-    fetchUser();
   }, []);
 
-  // ---------- Cargar familia + miembros + tarjetas ----------
+  const handleSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: authEmail.trim(),
+        password: authPassword,
+      });
+      if (error) {
+        console.error("Error en login", error);
+        setAuthError(error.message);
+        return;
+      }
+      setAuthEmail("");
+      setAuthPassword("");
+    } catch {
+      setAuthError("No se pudo iniciar sesión.");
+    }
+  };
+
+  const handleSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    try {
+      const { error } = await supabase.auth.signUp({
+        email: authEmail.trim(),
+        password: authPassword,
+      });
+      if (error) {
+        setAuthError(error.message);
+        return;
+      }
+      alert("Cuenta creada. Revisa tu correo si tienes verificación activada.");
+      setAuthMode("login");
+      setAuthPassword("");
+    } catch {
+      setAuthError("No se pudo crear la cuenta.");
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await supabase.auth.signOut();
+      setUser(null);
+      setFamily(null);
+      setMembers([]);
+    } catch (err) {
+      console.error("Error cerrando sesión", err);
+    }
+  };
+
+  // --------------------------------------------------
+  //   Cargar familia del usuario (si ya pertenece a una)
+  // --------------------------------------------------
   useEffect(() => {
     if (!user) {
-      setLoading(false);
+      setFamily(null);
+      setMembers([]);
       return;
     }
 
-    const loadFamilyData = async () => {
-      setLoading(true);
+    const loadFamily = async () => {
+      setLoadingFamily(true);
+      setError(null);
 
-      // 1. Ver si este usuario ya pertenece a alguna familia
-      const { data: membershipRows, error: membershipError } = await supabase
-        .from("family_members")
-        .select("id, family_id, user_id, role")
-        .eq("user_id", user.id);
+      try {
+        const email = (user.email ?? "").toLowerCase();
 
-      if (membershipError) {
+        // 1) Buscar si el usuario ya es miembro de alguna familia
+        const { data: memberRows, error: memberError } = await supabase
+          .from("family_members")
+          .select(
+            "id,family_id,role,status,invited_email,user_id,created_at"
+          )
+          .or(`user_id.eq.${user.id},invited_email.eq.${email}`)
+          .eq("status", "active")
+          .limit(1);
+
+        if (memberError) {
+          console.error("Error buscando membresía de familia:", memberError);
+          throw memberError;
+        }
+
+        if (!memberRows || memberRows.length === 0) {
+          setFamily(null);
+          setMembers([]);
+          return;
+        }
+
+        const member = memberRows[0];
+
+        // 2) Cargar la familia
+        const { data: familyRow, error: familyError } = await supabase
+          .from("families")
+          .select("id,name,user_id,created_at") // 👈 user_id, no owner_id
+          .eq("id", member.family_id)
+          .single();
+
+        if (familyError) {
+          console.error("Error cargando familia:", familyError);
+          throw familyError;
+        }
+
+        setFamily(familyRow as Family);
+setEditFamilyName((familyRow as Family).name);
+
+
+        // 3) Cargar miembros de esa familia
+        const { data: allMembers, error: membersError } = await supabase
+          .from("family_members")
+          .select(
+            "id,family_id,role,status,invited_email,user_id,created_at"
+          )
+          .eq("family_id", familyRow.id)
+          .order("created_at", { ascending: true });
+
+        if (membersError) {
+          console.error("Error cargando miembros de familia:", membersError);
+          throw membersError;
+        }
+
+        setMembers((allMembers ?? []) as FamilyMember[]);
+      } catch (err: any) {
         console.error(
-          "Supabase error al obtener membership:",
-          (membershipError as any).message || membershipError
+          "Error cargando familia (detalle):",
+          err?.message ?? err
         );
-        // En caso de error, tratamos como que no tiene familia
-        setFamily(null);
-        setMembers([]);
-        setRole(null);
-        setCards([]);
-        setLoading(false);
-        return;
+        setError("No se pudo cargar la información de familia.");
+      } finally {
+        setLoadingFamily(false);
       }
-
-      const membership =
-        membershipRows && membershipRows.length > 0
-          ? (membershipRows[0] as FamilyMember)
-          : null;
-
-      if (!membership) {
-        // No tiene familia todavía
-        setFamily(null);
-        setMembers([]);
-        setRole(null);
-        setCards([]);
-        setLoading(false);
-        return;
-      }
-
-      setRole(membership.role as FamilyRole);
-
-      // 2. Cargar familia
-      const { data: familyRow, error: familyError } = await supabase
-        .from("families")
-        .select("id, name, owner_id")
-        .eq("id", membership.family_id)
-        .single();
-
-      if (familyError || !familyRow) {
-        console.error(
-          "Error al obtener familia:",
-          (familyError as any)?.message || familyError
-        );
-        showError("No se pudo cargar la información de la familia.");
-        setFamily(null);
-        setMembers([]);
-        setRole(null);
-        setCards([]);
-        setLoading(false);
-        return;
-      }
-
-      const currentFamily = familyRow as Family;
-      setFamily(currentFamily);
-
-      // 3. Cargar miembros de la familia
-      const { data: membersRows, error: membersError } = await supabase
-        .from("family_members")
-        .select("id, family_id, user_id, role")
-        .eq("family_id", currentFamily.id);
-
-      if (membersError) {
-        console.error(
-          "Error al obtener miembros:",
-          (membersError as any).message || membersError
-        );
-        showError("No se pudo cargar la lista de miembros.");
-        setMembers([]);
-      } else {
-        setMembers((membersRows ?? []) as FamilyMember[]);
-      }
-
-      // 4. Cargar tarjetas según rol
-      if (membership.role === "owner") {
-        await loadOwnerCardsWithSharing(user.id);
-      } else {
-        await loadMemberCards(user.id);
-      }
-
-      setLoading(false);
     };
 
-    loadFamilyData();
+    loadFamily();
   }, [user]);
 
-  // ---------- Cargar tarjetas (dueño) ----------
-  const loadOwnerCardsWithSharing = async (ownerId: string) => {
-    const { data: cardRows, error: cardsError } = await supabase
-      .from("cards")
-      .select("id, name")
-      .eq("owner_id", ownerId);
+  // jefe de familia = el que creó el registro (user_id)
+  const isOwner = !!(family && user && family.user_id === user.id);
 
-    if (cardsError) {
-      console.error(
-        "Error al obtener tarjetas:",
-        (cardsError as any).message || cardsError
-      );
-      showError("No se pudieron cargar tus tarjetas.");
-      setCards([]);
+  // --------------------------------------------------
+  //   Crear nueva familia
+  // --------------------------------------------------
+  const handleCreateFamily = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+
+    const name = newFamilyName.trim();
+    if (!name) {
+      alert("Ingresa un nombre para la familia.");
       return;
     }
 
-    const rows = cardRows ?? [];
-    const cardsWith: CardWithSharing[] = [];
+    try {
+      setLoadingFamily(true);
+      setError(null);
 
-    for (const card of rows as { id: string; name: string }[]) {
-      const { data: cuRows, error: cuError } = await supabase
-        .from("card_users")
-        .select("user_id")
-        .eq("card_id", card.id);
+      // 1) Crear familia (usa user_id, que es la columna real de la tabla)
+      const { data: fam, error: famError } = await supabase
+        .from("families")
+        .insert({
+          name,
+          user_id: user.id,
+        })
+        .select("id,name,user_id,created_at")
+        .single();
 
-      if (cuError) {
-        console.error(
-          "Error al obtener card_users:",
-          (cuError as any).message || cuError
-        );
-        cardsWith.push({
-          id: card.id,
-          name: card.name,
-          sharedWith: [],
-        });
-      } else {
-        cardsWith.push({
-          id: card.id,
-          name: card.name,
-          sharedWith: (cuRows ?? []).map((r: any) => r.user_id as string),
-        });
+      if (famError) {
+        console.error("Error creando familia en Supabase:", famError);
+        throw famError;
       }
-    }
 
-    setCards(cardsWith);
+      // 2) Agregarme como miembro owner
+      const email = (user.email ?? "").toLowerCase();
+
+      const { data: memberRow, error: memberError } = await supabase
+        .from("family_members")
+        .insert({
+          family_id: fam.id,
+          user_id: user.id,
+          invited_email: email,
+          role: "owner",
+          status: "active",
+        })
+        .select(
+          "id,family_id,role,status,invited_email,user_id,created_at"
+        )
+        .single();
+
+      if (memberError) {
+        console.error("Error insertando en family_members:", memberError);
+        throw memberError;
+      }
+
+      setFamily(fam as Family);
+      setEditFamilyName(name);        // 👈 rellenamos el input de edición
+      setMembers([memberRow as FamilyMember]);
+      setNewFamilyName("");
+    } catch (err: any) {
+      console.error("Error creando familia:", err?.message ?? err);
+      setError("No se pudo crear la familia.");
+    } finally {
+      setLoadingFamily(false);
+    }
   };
+// --------------------------------------------------
+//   Renombrar familia (solo jefe de familia)
+// --------------------------------------------------
+const handleRenameFamily = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!user || !family || !isOwner) return;
 
-  // ---------- Cargar tarjetas (miembro) ----------
-  const loadMemberCards = async (memberUserId: string) => {
-    const { data: cuRows, error: cuError } = await supabase
-      .from("card_users")
-      .select("card_id")
-      .eq("user_id", memberUserId);
+  const name = editFamilyName.trim();
+  if (!name) {
+    alert("Ingresa un nombre válido.");
+    return;
+  }
 
-    if (cuError) {
-      console.error(
-        "Error al obtener card_users para miembro:",
-        (cuError as any).message || cuError
-      );
-      setCards([]);
-      return;
-    }
+  try {
+    setLoadingFamily(true);
+    setError(null);
 
-    const cardIds = (cuRows ?? []).map((r: any) => r.card_id as string);
-    if (cardIds.length === 0) {
-      setCards([]);
-      return;
-    }
-
-    const { data: cardsRows, error: cardsError } = await supabase
-      .from("cards")
-      .select("id, name")
-      .in("id", cardIds);
-
-    if (cardsError) {
-      console.error(
-        "Error al obtener tarjetas para miembro:",
-        (cardsError as any).message || cardsError
-      );
-      setCards([]);
-      return;
-    }
-
-    setCards(
-      (cardsRows ?? []).map((c: any) => ({
-        id: c.id as string,
-        name: c.name as string,
-        sharedWith: [memberUserId],
-      }))
-    );
-  };
-
-  // ---------- Crear familia ----------
-  const handleCreateFamily = async () => {
-    if (!user) {
-      showError("Debes iniciar sesión para crear una familia.");
-      return;
-    }
-    if (!familyName.trim()) {
-      showError("Escribe un nombre para tu familia.");
-      return;
-    }
-
-    setLoading(true);
-
-    const { data: famRows, error: famError } = await supabase
+    const { data, error } = await supabase
       .from("families")
-      .insert({
-        name: familyName.trim(),
-        owner_id: user.id,
-      })
-      .select("id, name, owner_id")
+      .update({ name })
+      .eq("id", family.id)
+      .eq("user_id", user.id) // 👈 importante: usamos user_id, no owner_id
+      .select("id,name,user_id,created_at")
       .single();
 
-    if (famError || !famRows) {
-      console.error(
-        "Error al crear familia:",
-        (famError as any)?.message || famError
-      );
-      showError("No se pudo crear la familia.");
-      setLoading(false);
+    if (error) {
+      console.error("Error renombrando familia:", error);
+      throw error;
+    }
+
+    setFamily(data as Family);
+    setEditingFamily(false);
+  } catch (err: any) {
+    console.error("Error renombrando familia:", err?.message ?? err);
+    setError("No se pudo actualizar el nombre de la familia.");
+  } finally {
+    setLoadingFamily(false);
+  }
+};
+  // --------------------------------------------------
+  //   Invitar miembro por correo
+  // --------------------------------------------------
+  const handleInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !family || !isOwner) return;
+
+    const email = inviteEmail.trim().toLowerCase();
+    if (!email) {
+      alert("Ingresa un correo a invitar.");
       return;
     }
 
-    const newFamily = famRows as Family;
+    try {
+      setLoadingFamily(true);
+      setError(null);
 
-    const { error: memberError } = await supabase.from("family_members").insert({
-      family_id: newFamily.id,
-      user_id: user.id,
-      role: "owner",
-    });
+      const { data, error: inviteError } = await supabase
+        .from("family_members")
+        .insert({
+          family_id: family.id,
+          invited_email: email,
+          user_id: null,
+          role: "member",
+          status: "pending",
+        })
+        .select(
+          "id,family_id,role,status,invited_email,user_id,created_at"
+        )
+        .single();
 
-    if (memberError) {
-      console.error(
-        "Error al crear membership owner:",
-        (memberError as any).message || memberError
-      );
-      showError(
-        "La familia se creó pero hubo un problema al asignarte como jefe."
-      );
-      setLoading(false);
-      return;
-    }
-
-    showMessage("Familia creada correctamente. Eres el jefe de familia.");
-    setFamilyName("");
-
-    await loadOwnerCardsWithSharing(user.id);
-
-    setFamily(newFamily);
-    setRole("owner");
-    setMembers([
-      {
-        id: "self-temp",
-        family_id: newFamily.id,
-        user_id: user.id,
-        role: "owner",
-      },
-    ]);
-
-    setLoading(false);
-  };
-
-  // ---------- Unirse a una familia existente ----------
-  const handleJoinFamily = async () => {
-    if (!user) {
-      showError("Debes iniciar sesión para unirte a una familia.");
-      return;
-    }
-    if (!joinFamilyId.trim()) {
-      showError("Escribe un código de familia.");
-      return;
-    }
-
-    setLoading(true);
-
-    const { data: famRow, error: famError } = await supabase
-      .from("families")
-      .select("id, name, owner_id")
-      .eq("id", joinFamilyId.trim())
-      .single();
-
-    if (famError || !famRow) {
-      console.error(
-        "Error al buscar familia:",
-        (famError as any)?.message || famError
-      );
-      showError("No se encontró una familia con ese código.");
-      setLoading(false);
-      return;
-    }
-
-    const { error: memberError } = await supabase.from("family_members").insert({
-      family_id: famRow.id,
-      user_id: user.id,
-      role: "member",
-    });
-
-    if (memberError) {
-      console.error(
-        "Error al unirse a familia:",
-        (memberError as any).message || memberError
-      );
-      showError(
-        "No pudiste unirte a la familia. Verifica que no estés ya en un grupo."
-      );
-      setLoading(false);
-      return;
-    }
-
-    showMessage("Te uniste a la familia correctamente.");
-    setJoinFamilyId("");
-
-    setFamily(famRow as Family);
-    setRole("member");
-
-    setLoading(false);
-  };
-
-  // ---------- Toggle sharing de tarjeta con miembro ----------
-  const handleToggleCardSharing = async (cardId: string, memberUserId: string) => {
-    if (!family || role !== "owner") return;
-
-    setSavingSharing(true);
-
-    const card = cards.find((c) => c.id === cardId);
-    if (!card) {
-      setSavingSharing(false);
-      return;
-    }
-
-    const alreadyShared = card.sharedWith.includes(memberUserId);
-
-    if (alreadyShared) {
-      const { error: delError } = await supabase
-        .from("card_users")
-        .delete()
-        .eq("card_id", cardId)
-        .eq("user_id", memberUserId);
-
-      if (delError) {
-        console.error(
-          "Error al quitar acceso a la tarjeta:",
-          (delError as any).message || delError
-        );
-        showError("No se pudo quitar el acceso a la tarjeta.");
-        setSavingSharing(false);
-        return;
+      if (inviteError) {
+        console.error("Error invitando miembro:", inviteError);
+        throw inviteError;
       }
 
-      setCards((prev) =>
-        prev.map((c) =>
-          c.id === cardId
-            ? {
-                ...c,
-                sharedWith: c.sharedWith.filter((id) => id !== memberUserId),
-              }
-            : c
-        )
-      );
-      showMessage("Acceso a tarjeta actualizado.");
-    } else {
-      const { error: addError } = await supabase
-        .from("card_users")
-        .insert({ card_id: cardId, user_id: memberUserId });
+      setMembers((prev) => [...prev, data as FamilyMember]);
+      setInviteEmail("");
 
-      if (addError) {
-        console.error(
-          "Error al compartir tarjeta:",
-          (addError as any).message || addError
-        );
-        showError("No se pudo compartir la tarjeta con este miembro.");
-        setSavingSharing(false);
-        return;
-      }
-
-      setCards((prev) =>
-        prev.map((c) =>
-          c.id === cardId
-            ? { ...c, sharedWith: [...c.sharedWith, memberUserId] }
-            : c
-        )
+      alert(
+        "Miembro agregado como pendiente. Más adelante podemos conectar esta invitación con su cuenta cuando se registre."
       );
-      showMessage("Tarjeta compartida con el miembro.");
+    } catch (err: any) {
+      console.error("Error agregando miembro:", err?.message ?? err);
+      setError("No se pudo agregar el miembro.");
+    } finally {
+      setLoadingFamily(false);
     }
-
-    setSavingSharing(false);
   };
 
-  // ---------- Render helpers ----------
-  const renderNoFamily = () => {
-    if (!user) {
-      return (
-        <div className="mt-6 rounded-xl border p-4 text-sm text-muted-foreground">
-          Inicia sesión para crear o administrar un grupo familiar.
-        </div>
-      );
-    }
-
+  // --------------------------------------------------
+  //   Auth screen
+  // --------------------------------------------------
+  if (authLoading) {
     return (
-      <div className="mt-6 grid gap-6 md:grid-cols-2">
-        <div className="rounded-xl border p-4">
-          <h2 className="mb-2 text-lg font-semibold">Crear familia</h2>
-          <p className="mb-4 text-sm text-muted-foreground">
-            Serás el <strong>Jefe de familia</strong> y podrás invitar miembros y
-            asignar tarjetas compartidas.
-          </p>
-          <label className="mb-2 block text-sm font-medium">
-            Nombre de la familia
-          </label>
-          <input
-            type="text"
-            value={familyName}
-            onChange={(e) => setFamilyName(e.target.value)}
-            className="mb-3 w-full rounded-lg border px-3 py-2 text-sm"
-            placeholder="Ej. Familia Garza Sloane"
-          />
-          <button
-            onClick={handleCreateFamily}
-            className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-            disabled={loading}
-          >
-            {loading ? "Creando..." : "Crear familia"}
-          </button>
-        </div>
-
-        <div className="rounded-xl border p-4">
-          <h2 className="mb-2 text-lg font-semibold">Unirme a familia</h2>
-          <p className="mb-4 text-sm text-muted-foreground">
-            Escribe el <strong>código de familia</strong> que te comparta el
-            jefe (es el ID de la familia).
-          </p>
-          <label className="mb-2 block text-sm font-medium">
-            Código de familia
-          </label>
-          <input
-            type="text"
-            value={joinFamilyId}
-            onChange={(e) => setJoinFamilyId(e.target.value)}
-            className="mb-3 w-full rounded-lg border px-3 py-2 text-sm"
-            placeholder="Ej. 0b9c9b1a-..."
-          />
-          <button
-            onClick={handleJoinFamily}
-            className="inline-flex items-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-            disabled={loading}
-          >
-            {loading ? "Uniéndome..." : "Unirme a la familia"}
-          </button>
-        </div>
+      <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
+        Cargando sesión...
       </div>
     );
-  };
+  }
 
-  const renderTabs = () => {
-    if (!family) return null;
-
+  if (!user) {
     return (
-      <div className="mt-2 flex gap-2 border-b pb-2 text-sm">
-        <button
-          onClick={() => setActiveTab("overview")}
-          className={`rounded-lg px-3 py-1 ${
-            activeTab === "overview"
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:bg-muted"
-          }`}
-        >
-          Resumen
-        </button>
-        <button
-          onClick={() => setActiveTab("members")}
-          className={`rounded-lg px-3 py-1 ${
-            activeTab === "members"
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:bg-muted"
-          }`}
-        >
-          Miembros
-        </button>
-        <button
-          onClick={() => setActiveTab("cards")}
-          className={`rounded-lg px-3 py-1 ${
-            activeTab === "cards"
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:bg-muted"
-          }`}
-        >
-          Tarjetas compartidas
-        </button>
-      </div>
-    );
-  };
-
-  const renderOverview = () => {
-    if (!family) return null;
-
-    const isOwner = role === "owner";
-
-    return (
-      <div className="mt-4 space-y-4">
-        <div className="rounded-xl border p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-1 items-center justify-center">
+        <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold">{family.name}</h2>
-              <p className="text-sm text-muted-foreground">
-                Tu rol en esta familia:{" "}
-                <span className="font-medium">
-                  {role === "owner" ? "Jefe de familia" : "Miembro"}
-                </span>
+              <h1 className="text-lg font-semibold">Finanzas familiares</h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Crea tu cuenta para configurar tu grupo familiar.
               </p>
             </div>
-            {isOwner && (
-              <div className="rounded-lg bg-muted px-3 py-2 text-xs">
-                <p className="font-semibold uppercase tracking-wide text-muted-foreground">
-                  Código de invitación
-                </p>
-                <p className="font-mono text-[11px] break-all">{family.id}</p>
-              </div>
+            <ThemeToggle />
+          </div>
+
+          <h2 className="text-sm font-medium">
+            {authMode === "login" ? "Inicia sesión" : "Crea tu cuenta"}
+          </h2>
+
+          <form
+            onSubmit={authMode === "login" ? handleSignIn : handleSignUp}
+            className="space-y-3 text-sm"
+          >
+            <div>
+              <label className="mb-1 block text-xs text-gray-600 dark:text-gray-300">
+                Correo electrónico
+              </label>
+              <input
+                type="email"
+                required
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="tucorreo@ejemplo.com"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs text-gray-600 dark:text-gray-300">
+                Contraseña
+              </label>
+              <input
+                type="password"
+                required
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="Mínimo 6 caracteres"
+              />
+            </div>
+
+            {authError && (
+              <p className="text-xs text-red-500">{authError}</p>
+            )}
+
+            <button
+              type="submit"
+              className="w-full rounded-lg bg-sky-500 py-2 text-sm font-medium text-white transition hover:bg-sky-600"
+            >
+              {authMode === "login" ? "Entrar" : "Crear cuenta"}
+            </button>
+          </form>
+
+          <div className="text-center text-xs text-gray-600 dark:text-gray-300">
+            {authMode === "login" ? (
+              <>
+                ¿No tienes cuenta?{" "}
+                <button
+                  className="text-sky-600 underline"
+                  onClick={() => {
+                    setAuthMode("signup");
+                    setAuthError(null);
+                  }}
+                >
+                  Crear una nueva
+                </button>
+              </>
+            ) : (
+              <>
+                ¿Ya tienes cuenta?{" "}
+                <button
+                  className="text-sky-600 underline"
+                  onClick={() => {
+                    setAuthMode("login");
+                    setAuthError(null);
+                  }}
+                >
+                  Inicia sesión
+                </button>
+              </>
             )}
           </div>
         </div>
-
-        <div className="grid gap-4 md:grid-cols-3">
-          <div className="rounded-xl border p-4">
-            <p className="text-xs font-semibold uppercase text-muted-foreground">
-              Miembros
-            </p>
-            <p className="mt-2 text-2xl font-bold">{members.length}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Incluye al jefe y todos los miembros registrados.
-            </p>
-          </div>
-
-          <div className="rounded-xl border p-4">
-            <p className="text-xs font-semibold uppercase text-muted-foreground">
-              Tarjetas visibles
-            </p>
-            <p className="mt-2 text-2xl font-bold">{cards.length}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {isOwner
-                ? "Tarjetas que puedes compartir con tu familia."
-                : "Tarjetas que tu jefe te compartió."}
-            </p>
-          </div>
-
-          <div className="rounded-xl border p-4">
-            <p className="text-xs font-semibold uppercase text-muted-foreground">
-              Próximo paso
-            </p>
-            <p className="mt-2 text-sm">
-              {isOwner
-                ? "Comparte el código de familia con tu pareja/hijos y asigna tarjetas."
-                : "Pide a tu jefe de familia que te comparta las tarjetas que usarás."}
-            </p>
-          </div>
-        </div>
       </div>
     );
-  };
+  }
 
-  const renderMembers = () => {
-    if (!family) return null;
+  // --------------------------------------------------
+  //   Render app logueada
+  // --------------------------------------------------
+  return (
+    <main className="flex flex-1 flex-col gap-4">
+      <AppHeader
+        title="Familia"
+        subtitle="Configura tu grupo familiar para ver gastos y patrimonio consolidado."
+        activeTab="familia"
+        userEmail={user.email}
+        onSignOut={handleSignOut}
+      />
 
-    if (members.length === 0) {
-      return (
-        <div className="mt-4 rounded-xl border p-4 text-sm text-muted-foreground">
-          No hay miembros todavía. Si eres jefe, comparte el código de familia
-          para que se unan.
-        </div>
-      );
-    }
-
-    return (
-      <div className="mt-4 rounded-xl border p-4">
-        <h2 className="mb-3 text-lg font-semibold">Miembros de la familia</h2>
-        <p className="mb-4 text-xs text-muted-foreground">
-          *Por ahora se muestran los IDs internos de usuario. Más adelante
-          podemos conectar con la tabla de perfiles para ver nombres y correos.
+      <section className="space-y-4">
+        {/* Estado de familia */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          {loadingFamily ? (
+  <p className="text-sm text-slate-600 dark:text-slate-300">
+    Cargando información de tu familia...
+  </p>
+) : family ? (
+  <>
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h2 className="text-sm font-semibold mb-1">
+          Tu familia: {family.name}
+        </h2>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          {isOwner
+            ? "Eres el jefe de familia. Más adelante podrás ver aquí el resumen consolidado de gastos y patrimonio de todos."
+            : "Perteneces a este grupo familiar. Más adelante podrás ver aquí el resumen consolidado que ve el jefe de familia."}
         </p>
-        <div className="space-y-2 text-sm">
-          {members.map((m) => (
-            <div
-              key={m.id + m.user_id}
-              className="flex items-center justify-between rounded-lg bg-muted px-3 py-2"
-            >
-              <div>
-                <p className="font-medium truncate max-w-xs">
-                  Usuario:{" "}
-                  <span className="font-mono text-[11px]">
-                    {m.user_id.slice(0, 8)}...
-                  </span>
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Rol: {m.role === "owner" ? "Jefe de familia" : "Miembro"}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
-    );
-  };
 
-  const renderCards = () => {
-    if (!family) return null;
+      {isOwner && !editingFamily && (
+        <button
+          type="button"
+          onClick={() => {
+            setEditingFamily(true);
+            setEditFamilyName(family.name);
+          }}
+          className="mt-2 inline-flex items-center rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+        >
+          Editar nombre
+        </button>
+      )}
+    </div>
 
-    const isOwner = role === "owner";
-
-    if (!isOwner) {
-      return (
-        <div className="mt-4 rounded-xl border p-4">
-          <h2 className="mb-3 text-lg font-semibold">Tarjetas asignadas</h2>
-          {cards.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Aún no tienes tarjetas compartidas. Pídele al jefe de familia que
-              te asigne alguna de sus tarjetas.
-            </p>
-          ) : (
-            <ul className="space-y-2 text-sm">
-              {cards.map((c) => (
-                <li
-                  key={c.id}
-                  className="flex items-center justify-between rounded-lg bg-muted px-3 py-2"
+    {isOwner && editingFamily && (
+      <form
+        onSubmit={handleRenameFamily}
+        className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center"
+      >
+        <input
+          type="text"
+          value={editFamilyName}
+          onChange={(e) => setEditFamilyName(e.target.value)}
+          className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+          placeholder="Nombre de la familia"
+        />
+        <div className="flex gap-2">
+          <button
+            type="submit"
+            className="rounded-lg bg-sky-500 px-3 py-2 text-xs font-medium text-white hover:bg-sky-600"
+          >
+            Guardar
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setEditingFamily(false);
+              setEditFamilyName(family.name);
+            }}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            Cancelar
+          </button>
+        </div>
+      </form>
+    )}
+  </>
+) : (
+            <>
+              <h2 className="text-sm font-semibold mb-2">
+                Aún no tienes familia configurada
+              </h2>
+              <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+                Crea una familia para agrupar a tu pareja, hijos u otros
+                miembros. Después podremos conectar sus gastos y patrimonio.
+              </p>
+              <form
+                onSubmit={handleCreateFamily}
+                className="flex flex-col gap-2 sm:flex-row"
+              >
+                <input
+                  type="text"
+                  value={newFamilyName}
+                  onChange={(e) => setNewFamilyName(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                  placeholder="Ej. Familia Garza Sloane"
+                />
+                <button
+                  type="submit"
+                  className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-600"
                 >
-                  <span className="font-medium">{c.name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    Tarjeta compartida contigo
-                  </span>
-                </li>
-              ))}
-            </ul>
+                  Crear familia
+                </button>
+              </form>
+            </>
+          )}
+
+          {error && (
+            <p className="mt-2 text-xs text-red-500">
+              {error}
+            </p>
           )}
         </div>
-      );
-    }
 
-    return (
-      <div className="mt-4 rounded-xl border p-4">
-        <div className="mb-4 flex items-center justify-between gap-2">
-          <div>
-            <h2 className="text-lg font-semibold">Tarjetas compartidas</h2>
-            <p className="text-sm text-muted-foreground">
-              Asigna qué miembros pueden usar cada una de tus tarjetas. Los
-              movimientos que ellos registren con esas tarjetas se agruparán en
-              tu vista general de gastos.
-            </p>
-          </div>
-        </div>
+        {/* Miembros */}
+        {family && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <h2 className="mb-2 text-sm font-semibold">Miembros de la familia</h2>
 
-        {cards.length === 0 ? (
-          <p className="mt-2 text-sm text-muted-foreground">
-            No tienes tarjetas registradas a tu nombre. Crea tarjetas primero en
-            el módulo de gastos/tarjetas.
-          </p>
-        ) : members.length === 0 ? (
-          <p className="mt-2 text-sm text-muted-foreground">
-            Aún no hay miembros en la familia. Comparte el código para que se
-            unan y puedas asignarles tarjetas.
-          </p>
-        ) : (
-          <div className="mt-4 space-y-4">
-            {cards.map((card) => (
-              <div
-                key={card.id}
-                className="rounded-lg border bg-card p-3 text-sm"
-              >
-                <div className="mb-2 flex items-center justify-between">
-                  <p className="font-semibold">{card.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {card.sharedWith.length} miembro(s) con acceso
-                  </p>
-                </div>
-
-                <div className="space-y-1">
-                  {members.map((m) => (
-                    <label
-                      key={m.id + m.user_id}
-                      className="flex items-center justify-between rounded-md bg-muted px-2 py-1"
-                    >
-                      <div className="flex flex-col">
-                        <span className="text-xs font-medium">
-                          {m.role === "owner"
-                            ? "Tú (jefe de familia)"
-                            : "Miembro"}
-                        </span>
-                        <span className="font-mono text-[10px] text-muted-foreground">
-                          {m.user_id.slice(0, 8)}...
-                        </span>
-                      </div>
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4"
-                        disabled={m.role === "owner" || savingSharing}
-                        checked={
-                          m.role === "owner"
-                            ? true
-                            : card.sharedWith.includes(m.user_id)
-                        }
-                        onChange={() =>
-                          m.role === "owner"
-                            ? undefined
-                            : handleToggleCardSharing(card.id, m.user_id)
-                        }
-                      />
-                    </label>
-                  ))}
-                </div>
+            {members.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                Aún no hay miembros registrados.
+              </p>
+            ) : (
+              <div className="overflow-x-auto text-sm">
+                <table className="min-w-full border border-slate-200 text-left text-xs dark:border-slate-700 md:text-sm">
+                  <thead className="bg-slate-50 dark:bg-slate-900">
+                    <tr>
+                      <th className="border-b px-2 py-2">Correo</th>
+                      <th className="border-b px-2 py-2">Rol</th>
+                      <th className="border-b px-2 py-2">Estado</th>
+                      <th className="border-b px-2 py-2">Vinculado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {members.map((m) => (
+                      <tr
+                        key={m.id}
+                        className="odd:bg-white even:bg-slate-50 dark:odd:bg-slate-800 dark:even:bg-slate-900"
+                      >
+                        <td className="border-t px-2 py-1">
+                          {m.invited_email}
+                        </td>
+                        <td className="border-t px-2 py-1">
+                          {m.role === "owner" ? "Jefe de familia" : "Miembro"}
+                        </td>
+                        <td className="border-t px-2 py-1">
+                          {m.status === "active"
+                            ? "Activo"
+                            : m.status === "pending"
+                            ? "Pendiente"
+                            : "Inactivo"}
+                        </td>
+                        <td className="border-t px-2 py-1">
+                          {m.user_id ? "Sí" : "No todavía"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            ))}
+            )}
+
+            {isOwner && (
+              <div className="mt-4 border-t border-slate-200 pt-3 text-xs dark:border-slate-700">
+                <h3 className="mb-2 text-sm font-semibold">
+                  Invitar nuevo miembro
+                </h3>
+                <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
+                  Por ahora sólo registramos el correo y el estado. Más adelante
+                  podemos automatizar las invitaciones y el enlace con su cuenta.
+                </p>
+                <form
+                  onSubmit={handleInvite}
+                  className="flex flex-col gap-2 sm:flex-row"
+                >
+                  <input
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                    placeholder="correo@ejemplo.com"
+                  />
+                  <button
+                    type="submit"
+                    className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600"
+                  >
+                    Agregar miembro
+                  </button>
+                </form>
+              </div>
+            )}
           </div>
         )}
-
-        {savingSharing && (
-          <p className="mt-3 text-xs text-muted-foreground">
-            Guardando cambios en tarjetas...
-          </p>
-        )}
-      </div>
-    );
-  };
-
-  // ---------- Render principal ----------
-  return (
-  <div className="min-h-screen bg-background text-foreground">
-    <AppHeader
-  title="Familia"
-  subtitle="Administra tu grupo familiar y las tarjetas compartidas."
-  activeTab="familia"
-  userEmail={user?.email ?? ""}
-  onSignOut={async () => {
-    await supabase.auth.signOut();
-    window.location.href = "/login";
-  }}
-/>
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 pb-8 pt-4">
-      {/* Ya no necesitamos el h1 aquí porque lo muestra AppHeader */}
-       {message && (
-          <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-200">
-            {message}
-          </div>
-        )}
-
-        {errorMsg && (
-          <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/60 dark:text-red-200">
-            {errorMsg}
-          </div>
-        )}
-
-        {loading && (
-          <p className="text-sm text-muted-foreground">Cargando...</p>
-        )}
-
-        {!loading && !family && renderNoFamily()}
-
-        {!loading && family && (
-          <>
-            {renderTabs()}
-            {activeTab === "overview" && renderOverview()}
-            {activeTab === "members" && renderMembers()}
-            {activeTab === "cards" && renderCards()}
-          </>
-        )}
-      </main>
-    </div>
+      </section>
+    </main>
   );
 }
