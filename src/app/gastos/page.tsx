@@ -2258,7 +2258,11 @@ export default function GastosPage() {
                   </option>
                 ))}
               </select>
-            </div>
+                <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+    Si eliges una tarjeta compartida, este movimiento se sumará al resumen
+    del jefe de familia.
+  </p>
+</div>
 
             {/* Tipo */}
             <div>
@@ -2709,18 +2713,19 @@ export default function GastosPage() {
 
         <div className="overflow-x-auto text-sm">
           <table className="min-w-full border border-gray-200 text-left text-xs dark:border-slate-700 md:text-sm">
-            <thead className="bg-gray-50 dark:bg-slate-900">
-              <tr>
-                <th className="border-b px-2 py-2">Fecha</th>
-                <th className="border-b px-2 py-2">Tipo</th>
-                <th className="border-b px-2 py-2">Categoría</th>
-                <th className="border-b px-2 py-2 text-right">Monto</th>
-                <th className="border-b px-2 py-2">Método</th>
-                <th className="border-b px-2 py-2">Generó</th>
-                <th className="border-b px-2 py-2">Notas</th>
-                <th className="border-b px-2 py-2 text-center">Acciones</th>
-              </tr>
-            </thead>
+<thead className="bg-gray-50 dark:bg-slate-900">
+  <tr>
+    <th className="border-b px-2 py-2">Fecha</th>
+    <th className="border-b px-2 py-2">Tipo</th>
+    <th className="border-b px-2 py-2">Categoría</th>
+    <th className="border-b px-2 py-2 text-right">Monto</th>
+    <th className="border-b px-2 py-2">Método</th>
+    <th className="border-b px-2 py-2">Tarjeta</th>
+    <th className="border-b px-2 py-2">Generó</th>
+    <th className="border-b px-2 py-2">Notas</th>
+    <th className="border-b px-2 py-2 text-center">Acciones</th>
+  </tr>
+</thead>
             <tbody>
               {loading && (
                 <tr>
@@ -2781,39 +2786,53 @@ export default function GastosPage() {
                     <td className="border-t px-2 py-1">{t.category}</td>
 
                     {/* Monto + badge Offline alineados a la derecha */}
-                    <td className="border-t px-2 py-1">
-                      <div className="flex items-center justify-end gap-1">
-                        <span
-                          className={`font-semibold ${
-                            t.type === "ingreso"
-                              ? "text-emerald-600 dark:text-emerald-400"
-                              : "text-rose-600 dark:text-rose-400"
-                          }`}
-                        >
-                          {formatMoney(t.amount)}
-                        </span>
-                        {t.localOnly && (
-                          <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200">
-                            Offline
-                          </span>
-                        )}
-                      </div>
-                    </td>
+                    {/* Monto + badge Offline alineados a la derecha */}
+<td className="border-t px-2 py-1">
+  <div className="flex items-center justify-end gap-1">
+    <span
+      className={`font-semibold ${
+        t.type === "ingreso"
+          ? "text-emerald-600 dark:text-emerald-400"
+          : "text-rose-600 dark:text-rose-400"
+      }`}
+    >
+      {formatMoney(t.amount)}
+    </span>
+    {t.localOnly && (
+      <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200">
+        Offline
+      </span>
+    )}
+  </div>
+</td>
 
-                    {/* Método como pill */}
-                    <td className="border-t px-2 py-1">
-                      <span className="inline-flex max-w-[160px] items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                        <span className="truncate">{t.method}</span>
-                      </span>
-                    </td>
+{/* Método como pill */}
+<td className="border-t px-2 py-1">
+  <span className="inline-flex max-w-[160px] items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+    <span className="truncate">{t.method}</span>
+  </span>
+</td>
 
-                    {/* Generó */}
-                    <td className="border-t px-2 py-1">
-                      <span className="text-xs text-slate-600 dark:text-slate-300">
-                        {t.spender_label ??
-                          (t.spender_user_id === user.id ? "Yo" : "Otro")}
-                      </span>
-                    </td>
+{/* Tarjeta */}
+<td className="border-t px-2 py-1">
+  {cards.find((c) => c.id === t.card_id)?.name ? (
+    <span className="inline-flex max-w-[160px] items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
+      <span className="truncate">
+        {cards.find((c) => c.id === t.card_id)?.name}
+      </span>
+    </span>
+  ) : (
+    <span className="text-[11px] text-slate-400">—</span>
+  )}
+</td>
+
+{/* Generó */}
+<td className="border-t px-2 py-1">
+  <span className="text-xs text-slate-600 dark:text-slate-300">
+    {t.spender_label ??
+      (t.spender_user_id === user.id ? "Yo" : "Otro")}
+  </span>
+</td>
 
                     {/* Notas con tooltip */}
                     <td className="border-t px-2 py-1">
