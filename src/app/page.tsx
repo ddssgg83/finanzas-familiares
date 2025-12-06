@@ -93,8 +93,11 @@ export default function HomeDashboardPage() {
   const [loadingPatrimonio, setLoadingPatrimonio] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Presupuesto (por ahora localStorage)
+  // Presupuesto (localStorage)
   const [budget, setBudget] = useState<number | null>(null);
+
+  // Saber si el usuario es jefe de familia
+  const [isFamilyOwner, setIsFamilyOwner] = useState(false);
 
   // Tema (para gráficas)
   const { theme, systemTheme } = useTheme();
@@ -103,9 +106,7 @@ export default function HomeDashboardPage() {
   const currentTheme = theme === "system" ? systemTheme : theme;
   const isDark = mountedTheme && currentTheme === "dark";
 
-  // =========================================================
-  //  AUTH EFFECT
-  // =========================================================
+  // ---------- AUTH ----------
   useEffect(() => {
     let ignore = false;
 
@@ -187,14 +188,52 @@ export default function HomeDashboardPage() {
       setAssets([]);
       setDebts([]);
       setBudget(null);
+      setIsFamilyOwner(false);
     } catch (err) {
       console.error("Error cerrando sesión", err);
     }
   };
 
-  // =========================================================
-  //  CARGAR TRANSACCIONES DEL MES
-  // =========================================================
+  // ---------- Detectar si es jefe de familia ----------
+  useEffect(() => {
+    if (!user) {
+      setIsFamilyOwner(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const checkOwner = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("families")
+          .select("id")
+          .eq("user_id", user.id)
+          .limit(1);
+
+        if (error) {
+          console.error("Error revisando si es jefe de familia", error);
+          if (!cancelled) setIsFamilyOwner(false);
+          return;
+        }
+
+        if (!cancelled) {
+          setIsFamilyOwner((data ?? []).length > 0);
+        }
+      } catch (err) {
+        console.error("Error revisando si es jefe de familia", err);
+        if (!cancelled) setIsFamilyOwner(false);
+      }
+    };
+
+    checkOwner();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  // ---------- Cargar movimientos del mes ----------
   useEffect(() => {
     if (!user) {
       setTransactions([]);
@@ -219,13 +258,23 @@ export default function HomeDashboardPage() {
           .toString()
           .padStart(2, "0")}`;
 
-        const { data, error } = await supabase
+        let query = supabase
           .from("transactions")
           .select("*")
-          .eq("user_id", userId)
           .gte("date", from)
           .lte("date", to)
           .order("date", { ascending: false });
+
+        // 👇 Si es jefe de familia, incluye también movimientos donde él es el dueño
+        if (isFamilyOwner) {
+          query = query.or(
+            `user_id.eq.${userId},owner_user_id.eq.${userId}`
+          );
+        } else {
+          query = query.eq("user_id", userId);
+        }
+
+        const { data, error } = await query;
 
         if (error) throw error;
 
@@ -249,11 +298,9 @@ export default function HomeDashboardPage() {
     }
 
     load();
-  }, [month, user]);
+  }, [month, user, isFamilyOwner]);
 
-  // =========================================================
-  //  CARGAR PATRIMONIO (ACTIVOS + DEUDAS)
-  // =========================================================
+  // ---------- Cargar patrimonio (activos + deudas) ----------
   useEffect(() => {
     if (!user) {
       setAssets([]);
@@ -302,9 +349,7 @@ export default function HomeDashboardPage() {
     loadPatrimonio();
   }, [user]);
 
-  // =========================================================
-  //  PRESUPUESTO DEL MES (LOCALSTORAGE)
-  // =========================================================
+  // ---------- Presupuesto del mes (localStorage) ----------
   useEffect(() => {
     const key = `ff-budget-${month}`;
     const raw =
@@ -317,9 +362,7 @@ export default function HomeDashboardPage() {
     }
   }, [month]);
 
-  // =========================================================
-  //  CÁLCULOS
-  // =========================================================
+  // ---------- Cálculos ----------
   const { totalIngresos, totalGastos } = useMemo(() => {
     let ingresos = 0;
     let gastos = 0;
@@ -331,13 +374,10 @@ export default function HomeDashboardPage() {
   }, [transactions]);
 
   const flujo = totalIngresos - totalGastos;
-  const disponible = budget != null ? budget - totalGastos : null;
-
   const totalActivos = useMemo(
     () => assets.reduce((sum, a) => sum + (a.current_value ?? 0), 0),
     [assets]
   );
-
   const totalDeudas = useMemo(
     () =>
       debts.reduce(
@@ -347,7 +387,6 @@ export default function HomeDashboardPage() {
       ),
     [debts]
   );
-
   const patrimonioNeto = totalActivos - totalDeudas;
 
   const gastosPorCategoria = useMemo(() => {
@@ -415,9 +454,7 @@ export default function HomeDashboardPage() {
     return raw.charAt(0).toUpperCase() + raw.slice(1);
   }, [month]);
 
-  // =========================================================
-  //  UI: AUTH
-  // =========================================================
+  // ---------- UI AUTH ----------
   if (authLoading) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
@@ -522,9 +559,7 @@ export default function HomeDashboardPage() {
     );
   }
 
-  // =========================================================
-  //  UI: DASHBOARD PRINCIPAL
-  // =========================================================
+  // ---------- UI DASHBOARD ----------
   return (
     <main className="flex flex-1 flex-col gap-4">
       <AppHeader
@@ -535,7 +570,7 @@ export default function HomeDashboardPage() {
         onSignOut={handleSignOut}
       />
 
-      {/* Selector de mes + navegación rápida */}
+      {/* Mes / selector */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
@@ -548,45 +583,43 @@ export default function HomeDashboardPage() {
                 value={month}
                 onChange={(e) => setMonth(e.target.value)}
                 className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                aria-label={`Mes: ${monthLabel}`}
               />
-              <span className="text-xs font-medium text-slate-700 dark:text-slate-200">
-                {monthLabel}
-              </span>
             </div>
           </div>
 
-          {/* Navegación rápida (mobile: botones full-width) */}
-          <div className="flex w-full flex-col gap-2 text-[11px] sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
+          <div className="flex flex-wrap gap-2 text-[11px]">
             <Link
               href="/gastos"
-              className="w-full rounded-full bg-sky-500 px-3 py-1 text-center font-medium text-white hover:bg-sky-600 sm:w-auto"
+              className="rounded-full bg-sky-500 px-3 py-1 font-medium text-white hover:bg-sky-600"
             >
               Capturar gastos / ingresos
             </Link>
             <Link
               href="/patrimonio"
-              className="w-full rounded-full bg-emerald-500 px-3 py-1 text-center font-medium text-white hover:bg-emerald-600 sm:w-auto"
+              className="rounded-full bg-emerald-500 px-3 py-1 font-medium text-white hover:bg-emerald-600"
             >
               Ver / editar patrimonio
             </Link>
             <Link
               href="/aprende"
-              className="w-full rounded-full bg-amber-500 px-3 py-1 text-center font-medium text-white hover:bg-amber-600 sm:w-auto"
+              className="rounded-full bg-amber-500 px-3 py-1 font-medium text-white hover:bg-amber-600"
             >
               Aprender finanzas
             </Link>
             <Link
               href="/familia"
-              className="w-full rounded-full bg-indigo-500 px-3 py-1 text-center font-medium text-white hover:bg-indigo-600 sm:w-auto"
+              className="rounded-full bg-indigo-500 px-3 py-1 font-medium text-white hover:bg-indigo-600"
             >
               Gestionar familia
             </Link>
-            <Link
-              href="/familia/dashboard"
-              className="w-full rounded-full bg-slate-900 px-3 py-1 text-center font-medium text-white hover:bg-black dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white sm:w-auto"
-            >
-              Dashboard familiar
-            </Link>
+            {isFamilyOwner && (
+              <Link href="/familia/dashboard">
+                <button className="rounded-full bg-indigo-500 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-600">
+                  Dashboard familiar
+                </button>
+              </Link>
+            )}
           </div>
         </div>
       </section>
@@ -655,7 +688,7 @@ export default function HomeDashboardPage() {
         </div>
       </section>
 
-      {/* Gráficas principales */}
+      {/* Gráficas */}
       <section className="grid gap-4 md:grid-cols-2">
         <div className="h-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <h3 className="mb-2 text-xs font-semibold">
@@ -749,7 +782,7 @@ export default function HomeDashboardPage() {
         </div>
       </section>
 
-      {/* Últimos movimientos + mini resumen patrimonio */}
+      {/* Últimos movimientos + mini patrimonio */}
       <section className="grid gap-4 md:grid-cols-2">
         {/* Últimos movimientos */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
