@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
@@ -531,6 +532,24 @@ export default function FamiliaPage() {
         userEmail={user.email}
         onSignOut={handleSignOut}
       />
+    {/* Encabezado Familia + acceso al dashboard familiar */}
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="text-lg font-semibold">Familia</h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Configura tu grupo familiar para ver un resumen consolidado de
+            gastos y patrimonio entre todos.
+          </p>
+        </div>
+
+        <Link href="/familia/dashboard">
+          <button className="rounded-full bg-sky-500 px-4 py-2 text-xs font-medium text-white hover:bg-sky-600">
+            Ver dashboard familiar
+          </button>
+        </Link>
+      </div>
+    </section>
 
       {/* Estado de familia */}
       <section className="space-y-4">

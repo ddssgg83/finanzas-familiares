@@ -17,8 +17,6 @@ type Asset = {
   notes: string | null;
   family_member_id: string | null;
   created_at?: string;
-  owner_user_id?: string | null;
-  created_by?: string | null;
 };
 
 type Debt = {
@@ -35,8 +33,6 @@ type Debt = {
   current_balance: number | null;
   family_member_id: string | null;
   created_at?: string;
-  owner_user_id?: string | null;
-  created_by?: string | null;
 };
 
 // ---- Familia (para modo familiar) ----
@@ -329,7 +325,6 @@ export default function PatrimonioPage() {
     }
 
     const userId = currentUser.id;
-    const ownerUserId = family?.user_id ?? userId;
     let cancelled = false;
 
     async function loadPatrimonio() {
@@ -337,36 +332,35 @@ export default function PatrimonioPage() {
       setError(null);
 
       try {
-        // Activos
-        let assetsQuery = supabase
-          .from("assets")
-          .select(
-            "id,name,category,current_value,owner,notes,family_member_id,created_at,owner_user_id,created_by"
-          )
-          .order("created_at", { ascending: false });
+        // Por defecto sólo mis datos
+        let userIds: string[] = [userId];
 
-        // Deudas
-        let debtsQuery = supabase
-          .from("debts")
-          .select(
-            "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at,owner_user_id,created_by"
-          )
-          .order("created_at", { ascending: false });
-
-        // Lógica de alcance:
-        // - Si soy jefe y estoy en modo familia: todo lo que tenga owner_user_id = mi id.
-        // - En cualquier otro caso: sólo lo que yo creé (created_by = mi id).
+        // Si estamos en modo familia y soy owner, incluimos a todos los miembros con user_id
         if (viewMode === "family" && family && isFamilyOwner) {
-          assetsQuery = assetsQuery.eq("owner_user_id", ownerUserId);
-          debtsQuery = debtsQuery.eq("owner_user_id", ownerUserId);
-        } else {
-          assetsQuery = assetsQuery.eq("created_by", userId);
-          debtsQuery = debtsQuery.eq("created_by", userId);
+          const memberUserIds = familyMembers
+            .map((m) => m.user_id)
+            .filter((id): id is string => !!id);
+
+          if (memberUserIds.length) {
+            userIds = Array.from(new Set([...memberUserIds, userId]));
+          }
         }
 
         const [assetsRes, debtsRes] = await Promise.all([
-          assetsQuery,
-          debtsQuery,
+          supabase
+            .from("assets")
+            .select(
+              "id,name,category,current_value,owner,notes,family_member_id,created_at,user_id"
+            )
+            .in("user_id", userIds)
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("debts")
+            .select(
+              "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at,user_id"
+            )
+            .in("user_id", userIds)
+            .order("created_at", { ascending: false }),
         ]);
 
         if (assetsRes.error) {
@@ -578,17 +572,16 @@ export default function PatrimonioPage() {
       family_member_id: null as string | null,
     };
 
-    const ownerUserId = family?.user_id ?? user.id;
-
     try {
       if (editingAssetId) {
-        // UPDATE (no tocamos owner_user_id ni created_by)
+        // UPDATE
         const { data, error } = await supabase
           .from("assets")
           .update(payload)
           .eq("id", editingAssetId)
+          .eq("user_id", user.id)
           .select(
-            "id,name,category,current_value,owner,notes,family_member_id,created_at,owner_user_id,created_by"
+            "id,name,category,current_value,owner,notes,family_member_id,created_at"
           )
           .single();
 
@@ -603,14 +596,11 @@ export default function PatrimonioPage() {
         const { data, error } = await supabase
           .from("assets")
           .insert({
-            ...payload,
-            owner_user_id: ownerUserId,
-            created_by: user.id,
-            // opcional: mantener user_id para compatibilidad vieja
             user_id: user.id,
+            ...payload,
           })
           .select(
-            "id,name,category,current_value,owner,notes,family_member_id,created_at,owner_user_id,created_by"
+            "id,name,category,current_value,owner,notes,family_member_id,created_at"
           )
           .single();
 
@@ -673,17 +663,16 @@ export default function PatrimonioPage() {
       family_member_id: null as string | null,
     };
 
-    const ownerUserId = family?.user_id ?? user.id;
-
     try {
       if (editingDebtId) {
-        // UPDATE (no tocamos owner_user_id ni created_by)
+        // UPDATE
         const { data, error } = await supabase
           .from("debts")
           .update(payload)
           .eq("id", editingDebtId)
+          .eq("user_id", user.id)
           .select(
-            "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at,owner_user_id,created_by"
+            "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at"
           )
           .single();
 
@@ -698,14 +687,11 @@ export default function PatrimonioPage() {
         const { data, error } = await supabase
           .from("debts")
           .insert({
-            ...payload,
-            owner_user_id: ownerUserId,
-            created_by: user.id,
-            // opcional compatibilidad
             user_id: user.id,
+            ...payload,
           })
           .select(
-            "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at,owner_user_id,created_by"
+            "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at"
           )
           .single();
 
@@ -715,7 +701,7 @@ export default function PatrimonioPage() {
         resetDebtForm();
       }
     } catch (err) {
-      console.error("Error guardando deuda", JSON.stringify(err, null, 2));
+      console.error("Error guardando deuda", err);
       alert("No se pudo guardar la deuda.");
     } finally {
       setSavingDebt(false);
@@ -733,7 +719,8 @@ export default function PatrimonioPage() {
       const { error } = await supabase
         .from("assets")
         .delete()
-        .eq("id", asset.id);
+        .eq("id", asset.id)
+        .eq("user_id", user.id);
 
       if (error) throw error;
 
@@ -758,7 +745,8 @@ export default function PatrimonioPage() {
       const { error } = await supabase
         .from("debts")
         .delete()
-        .eq("id", debt.id);
+        .eq("id", debt.id)
+        .eq("user_id", user.id);
 
       if (error) throw error;
 
@@ -1117,8 +1105,8 @@ export default function PatrimonioPage() {
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <h2 className="mb-2 text-sm font-semibold">Activos</h2>
           <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
-            Registra todo lo que tienes a tu nombre o de tu familia: propiedades,
-            autos, cuentas, inversiones, etc.
+            Registra todo lo que tienes a tu nombre o de tu familia:
+            propiedades, autos, cuentas, inversiones, etc.
           </p>
 
           <form

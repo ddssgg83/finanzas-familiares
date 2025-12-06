@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
-import { useTheme } from "next-themes";
+import Link from "next/link";
 import {
   BarChart,
   Bar,
@@ -14,44 +14,42 @@ import {
   ResponsiveContainer,
   CartesianGrid,
   Legend,
+  LineChart,
+  Line,
 } from "recharts";
+import { useTheme } from "next-themes";
 
 export const dynamic = "force-dynamic";
+
+type TxType = "ingreso" | "gasto";
+
+type Tx = {
+  id: string;
+  date: string;
+  type: TxType;
+  category: string;
+  amount: number;
+  method: string;
+  notes?: string | null;
+  owner_user_id?: string | null;
+  spender_user_id?: string | null;
+  spender_label?: string | null;
+};
 
 type FamilyContext = {
   familyId: string;
   familyName: string;
   ownerUserId: string;
-  memberId: string;
-  role: "owner" | "member";
+  activeMembers: number;
 };
 
-type TxRow = {
-  id: string;
-  date: string;
-  type: "ingreso" | "gasto";
-  amount: number;
-  category: string | null;
-  method: string | null;
-  spender_label: string | null;
-  owner_user_id: string | null;
-};
+type AuthMode = "login" | "signup";
 
-type Asset = {
-  id: string;
-  current_value: number | null;
-  owner: string | null;
-  category: string | null;
-};
-
-type Debt = {
-  id: string;
-  total_amount: number | null;
-  current_balance: number | null;
-  monthly_payment: number | null;
-  owner: string | null;
-  category: string | null;
-};
+function getCurrentMonthKey(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
 
 function formatMoney(num: number) {
   return num.toLocaleString("es-MX", {
@@ -61,57 +59,43 @@ function formatMoney(num: number) {
   });
 }
 
-function getCurrentMonthKey(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
+function formatDateDisplay(ymd: string) {
+  const s = (ymd ?? "").slice(0, 10);
+  const [y, m, d] = s.split("-");
+  if (!y || !m || !d) return ymd;
+  return `${d}/${m}/${y}`;
 }
 
 export default function FamilyDashboardPage() {
-  // -------- AUTH --------
+  // ---------- AUTH ----------
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
 
-  // -------- FAMILY CONTEXT --------
+  // ---------- FAMILY CONTEXT ----------
   const [familyCtx, setFamilyCtx] = useState<FamilyContext | null>(null);
-  const [familyCtxLoading, setFamilyCtxLoading] = useState(false);
-  const [familyCtxError, setFamilyCtxError] = useState<string | null>(null);
+  const [familyLoading, setFamilyLoading] = useState(false);
+  const [familyError, setFamilyError] = useState<string | null>(null);
 
-  // -------- THEME (para gráficas) --------
+  // ---------- DATA ----------
+  const [month, setMonth] = useState<string>(() => getCurrentMonthKey());
+  const [transactions, setTransactions] = useState<Tx[]>([]);
+  const [loadingTx, setLoadingTx] = useState(false);
+  const [txError, setTxError] = useState<string | null>(null);
+
+  // ---------- THEME ----------
   const { theme, systemTheme } = useTheme();
   const [mountedTheme, setMountedTheme] = useState(false);
-
-  useEffect(() => {
-    setMountedTheme(true);
-  }, []);
-
+  useEffect(() => setMountedTheme(true), []);
   const currentTheme = theme === "system" ? systemTheme : theme;
   const isDark = mountedTheme && currentTheme === "dark";
 
-  // -------- MES SELECCIONADO --------
-  const [month, setMonth] = useState<string>(() => getCurrentMonthKey());
-  const monthLabel = useMemo(() => {
-    const [y, m] = month.split("-");
-    const date = new Date(Number(y), Number(m) - 1, 1);
-    const raw = date.toLocaleDateString("es-MX", {
-      year: "numeric",
-      month: "long",
-    });
-    return raw.charAt(0).toUpperCase() + raw.slice(1);
-  }, [month]);
-
-  // -------- DATA DASHBOARD --------
-  const [loadingDashboard, setLoadingDashboard] = useState(false);
-  const [dashError, setDashError] = useState<string | null>(null);
-
-  const [transactions, setTransactions] = useState<TxRow[]>([]);
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [debts, setDebts] = useState<Debt[]>([]);
-
-  // ==================================================
-  //  AUTH
-  // ==================================================
+  // =========================================================
+  //  1. AUTH
+  // =========================================================
   useEffect(() => {
     let ignore = false;
 
@@ -120,12 +104,12 @@ export default function FamilyDashboardPage() {
       setAuthError(null);
       try {
         const { data, error } = await supabase.auth.getUser();
-
         if (error && (error as any).name !== "AuthSessionMissingError") {
           console.error("Error obteniendo usuario actual", error);
-          if (!ignore) setAuthError("Hubo un problema al cargar tu sesión.");
+          if (!ignore) {
+            setAuthError("Hubo un problema al cargar tu sesión.");
+          }
         }
-
         if (!ignore) {
           setUser(data?.user ?? null);
         }
@@ -148,45 +132,91 @@ export default function FamilyDashboardPage() {
     };
   }, []);
 
+  const handleSignIn = async (e: FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: authEmail.trim(),
+        password: authPassword,
+      });
+      if (error) {
+        setAuthError(error.message);
+        return;
+      }
+      setAuthEmail("");
+      setAuthPassword("");
+    } catch (err) {
+      console.error(err);
+      setAuthError("No se pudo iniciar sesión.");
+    }
+  };
+
+  const handleSignUp = async (e: FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    try {
+      const { error } = await supabase.auth.signUp({
+        email: authEmail.trim(),
+        password: authPassword,
+      });
+      if (error) {
+        setAuthError(error.message);
+        return;
+      }
+      alert("Cuenta creada. Revisa tu correo si tienes verificación activada.");
+      setAuthMode("login");
+      setAuthPassword("");
+    } catch (err) {
+      console.error(err);
+      setAuthError("No se pudo crear la cuenta.");
+    }
+  };
+
   const handleSignOut = async () => {
     try {
       await supabase.auth.signOut();
       setUser(null);
       setFamilyCtx(null);
       setTransactions([]);
-      setAssets([]);
-      setDebts([]);
     } catch (err) {
       console.error("Error cerrando sesión", err);
     }
   };
 
-  // ==================================================
-  //  FAMILY CONTEXT (families + family_members)
-  // ==================================================
+  // =========================================================
+  //  2. Cargar contexto de familia del usuario
+  // =========================================================
   useEffect(() => {
-    if (!user) {
+    const currentUser = user;
+    if (!currentUser) {
       setFamilyCtx(null);
+      setFamilyError(null);
+      setFamilyLoading(false);
       return;
     }
 
-    const loadFamilyCtx = async () => {
-      setFamilyCtxLoading(true);
-      setFamilyCtxError(null);
+    const userId = currentUser.id;
+    const email = (currentUser.email ?? "").toLowerCase();
+    let cancelled = false;
 
+    const loadFamily = async () => {
+      setFamilyLoading(true);
+      setFamilyError(null);
       try {
         const { data: memberRows, error: memberError } = await supabase
           .from("family_members")
-          .select("id,family_id,role,status")
-          .eq("user_id", user.id)
+          .select("id,family_id,status,user_id,invited_email")
+          .or(`user_id.eq.${userId},invited_email.eq.${email}`)
           .eq("status", "active")
           .limit(1);
 
         if (memberError) throw memberError;
 
         if (!memberRows || memberRows.length === 0) {
-          // No pertenece a ninguna familia -> dashboard funciona pero sólo con sus datos
-          setFamilyCtx(null);
+          if (!cancelled) {
+            setFamilyCtx(null);
+          }
           return;
         }
 
@@ -200,47 +230,63 @@ export default function FamilyDashboardPage() {
 
         if (famError) throw famError;
 
-        setFamilyCtx({
-          familyId: fam.id,
-          familyName: fam.name,
-          ownerUserId: fam.user_id,
-          memberId: member.id,
-          role: member.role as "owner" | "member",
-        });
-      } catch (err: any) {
-        console.error("Error cargando contexto de familia", err);
-        setFamilyCtxError("No se pudo cargar la información de familia.");
-        setFamilyCtx(null);
+        const { data: activeMembers, error: membersError } = await supabase
+          .from("family_members")
+          .select("id,status")
+          .eq("family_id", fam.id)
+          .eq("status", "active");
+
+        if (membersError) throw membersError;
+
+        if (!cancelled) {
+          const activeCount = activeMembers?.length ?? 0;
+
+          setFamilyCtx({
+            familyId: fam.id,
+            familyName: fam.name,
+            ownerUserId: fam.user_id,
+            activeMembers: activeCount,
+          });
+        }
+      } catch (err) {
+        console.error("Error cargando familia para dashboard:", err);
+        if (!cancelled) {
+          setFamilyError(
+            "No se pudo cargar la información de tu familia. Revisa la sección Familia."
+          );
+          setFamilyCtx(null);
+        }
       } finally {
-        setFamilyCtxLoading(false);
+        if (!cancelled) setFamilyLoading(false);
       }
     };
 
-    loadFamilyCtx();
+    loadFamily();
+
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
-  const isFamilyOwner =
+  const isOwner =
     !!familyCtx && !!user && familyCtx.ownerUserId === user.id;
 
-  // ==================================================
-  //  CARGAR DATOS DEL DASHBOARD
-  // ==================================================
+  // =========================================================
+  //  3. Cargar transacciones familiares del mes
+  // =========================================================
   useEffect(() => {
-    if (!user) {
+    if (!user || !familyCtx) {
       setTransactions([]);
-      setAssets([]);
-      setDebts([]);
       return;
     }
 
-    const loadDashboard = async () => {
-      setLoadingDashboard(true);
-      setDashError(null);
+    const ownerId = familyCtx.ownerUserId;
+
+    async function loadTx() {
+      setLoadingTx(true);
+      setTxError(null);
 
       try {
-        const ownerUserId = familyCtx?.ownerUserId ?? user.id;
-
-        // Rango de fechas del mes
         const [year, monthNumber] = month.split("-");
         const from = `${month}-01`;
         const to = `${month}-${new Date(
@@ -252,268 +298,243 @@ export default function FamilyDashboardPage() {
           .toString()
           .padStart(2, "0")}`;
 
-        // 1) Movimientos de la familia (todos los que tengan owner_user_id = ownerUserId)
-        const { data: txData, error: txError } = await supabase
+        const { data, error } = await supabase
           .from("transactions")
           .select(
-            "id,date,type,amount,category,method,spender_label,owner_user_id"
+            "id,date,type,category,amount,method,notes,owner_user_id,spender_user_id,spender_label"
           )
+          .eq("owner_user_id", ownerId)
           .gte("date", from)
           .lte("date", to)
-          .eq("owner_user_id", ownerUserId)
-          .order("date", { ascending: false });
+          .order("date", { ascending: true });
 
-        if (txError) throw txError;
+        if (error) throw error;
 
         setTransactions(
-          (txData ?? []).map((t: any) => ({
+          (data ?? []).map((t: any) => ({
             id: t.id,
             date: t.date,
             type: t.type,
-            amount: Number(t.amount),
             category: t.category,
+            amount: Number(t.amount),
             method: t.method,
-            spender_label: t.spender_label,
-            owner_user_id: t.owner_user_id,
+            notes: t.notes ?? null,
+            owner_user_id: t.owner_user_id ?? null,
+            spender_user_id: t.spender_user_id ?? null,
+            spender_label: t.spender_label ?? null,
           }))
         );
-
-        // 2) Activos y deudas del owner (por ahora patrimonio se captura desde el dueño)
-        const { data: assetsData, error: assetsError } = await supabase
-          .from("assets")
-          .select("id,current_value,owner,category")
-          .eq("user_id", ownerUserId);
-
-        if (assetsError) throw assetsError;
-
-        const { data: debtsData, error: debtsError } = await supabase
-          .from("debts")
-          .select("id,total_amount,current_balance,monthly_payment,owner,category")
-          .eq("user_id", ownerUserId);
-
-        if (debtsError) throw debtsError;
-
-        setAssets((assetsData ?? []) as Asset[]);
-        setDebts((debtsData ?? []) as Debt[]);
-      } catch (err: any) {
-        console.error("Error cargando dashboard familiar:", err);
-        setDashError("No se pudo cargar el dashboard familiar.");
+      } catch (err) {
+        console.error("Error cargando movimientos familiares:", err);
+        setTxError("No se pudieron cargar los movimientos familiares.");
       } finally {
-        setLoadingDashboard(false);
-      }
-    };
-
-    // Sólo cargamos cuando haya user (y no necesitamos esperar a familyCtx)
-    loadDashboard();
-  }, [user, familyCtx, month]);
-
-  // ==================================================
-  //  MÉTRICAS CALCULADAS
-  // ==================================================
-  const {
-    totalIngresos,
-    totalGastos,
-    gastosPorPersona,
-    gastosPorCategoria,
-  } = useMemo(() => {
-    let ingresos = 0;
-    let gastos = 0;
-
-    const personaMap = new Map<string, number>();
-    const catMap = new Map<string, number>();
-
-    for (const t of transactions) {
-      if (t.type === "ingreso") {
-        ingresos += t.amount;
-      } else {
-        gastos += t.amount;
-
-        // Por persona
-        const persona = t.spender_label || "Sin etiqueta";
-        personaMap.set(persona, (personaMap.get(persona) ?? 0) + t.amount);
-
-        // Por categoría
-        const cat = t.category || "SIN_CATEGORIA";
-        catMap.set(cat, (catMap.get(cat) ?? 0) + t.amount);
+        setLoadingTx(false);
       }
     }
 
-    const personaArr = Array.from(personaMap.entries()).map(
-      ([label, total]) => ({ label, total })
-    );
-    personaArr.sort((a, b) => b.total - a.total);
+    loadTx();
+  }, [user, familyCtx, month]);
 
-    const catArr = Array.from(catMap.entries()).map(([category, total]) => ({
+  // =========================================================
+  //  4. Cálculos agregados
+  // =========================================================
+  const { ingresosFamilia, gastosFamilia } = useMemo(() => {
+    let ingresos = 0;
+    let gastos = 0;
+    for (const t of transactions) {
+      if (t.type === "ingreso") ingresos += t.amount;
+      else gastos += t.amount;
+    }
+    return { ingresosFamilia: ingresos, gastosFamilia: gastos };
+  }, [transactions]);
+
+  const flujoFamiliar = ingresosFamilia - gastosFamilia;
+
+  const gastosPorCategoria = useMemo(() => {
+    const map = new Map<string, number>();
+
+    for (const t of transactions) {
+      if (t.type !== "gasto") continue;
+      const key = t.category || "SIN_CATEGORIA";
+      map.set(key, (map.get(key) ?? 0) + t.amount);
+    }
+
+    const entries = Array.from(map.entries()).map(([category, total]) => ({
       category,
       total,
     }));
-    catArr.sort((a, b) => b.total - a.total);
 
-    const totalGastosMes = gastos || 0;
+    entries.sort((a, b) => b.total - a.total);
+    const totalGastos = entries.reduce((sum, e) => sum + e.total, 0);
 
-    const personaWithPercent = personaArr.map((p) => ({
-      ...p,
-      percent: totalGastosMes
-        ? Number(((p.total * 100) / totalGastosMes).toFixed(1))
-        : 0,
+    return entries.map((e) => ({
+      ...e,
+      percent: totalGastos ? (e.total * 100) / totalGastos : 0,
     }));
-
-    const catWithPercent = catArr.map((c) => ({
-      ...c,
-      percent: totalGastosMes
-        ? Number(((c.total * 100) / totalGastosMes).toFixed(1))
-        : 0,
-    }));
-
-    return {
-      totalIngresos: ingresos,
-      totalGastos: gastos,
-      gastosPorPersona: personaWithPercent,
-      gastosPorCategoria: catWithPercent,
-    };
   }, [transactions]);
 
-  const flujoMes = totalIngresos - totalGastos;
+  const gastosPorPersona = useMemo(() => {
+    const map = new Map<string, number>();
 
-  const {
-    totalActivos,
-    totalDeudas,
-    patrimonioNeto,
-    pagoMensualDeudas,
-  } = useMemo(() => {
-    const activos = assets.reduce(
-      (sum, a) => sum + Number(a.current_value ?? 0),
-      0
-    );
+    for (const t of transactions) {
+      if (t.type !== "gasto") continue;
 
-    const deudas = debts.reduce(
-      (sum, d) => sum + Number(d.current_balance ?? d.total_amount ?? 0),
-      0
-    );
+      const label = t.spender_label || "Sin etiqueta";
+      map.set(label, (map.get(label) ?? 0) + t.amount);
+    }
 
-    const pagoMensual = debts.reduce(
-      (sum, d) => sum + Number(d.monthly_payment ?? 0),
-      0
-    );
+    const arr = Array.from(map.entries()).map(([label, total]) => ({
+      label,
+      total,
+    }));
 
-    return {
-      totalActivos: activos,
-      totalDeudas: deudas,
-      patrimonioNeto: activos - deudas,
-      pagoMensualDeudas: pagoMensual,
-    };
-  }, [assets, debts]);
+    const total = arr.reduce((s, x) => s + x.total, 0);
 
-  const chartDataPersonas = useMemo(
-    () =>
-      gastosPorPersona.map((p) => ({
-        persona: p.label,
-        total: p.total,
-      })),
-    [gastosPorPersona]
-  );
+    return arr
+      .map((x) => ({
+        ...x,
+        percent: total ? (x.total * 100) / total : 0,
+      }))
+      .sort((a, b) => b.total - a.total);
+  }, [transactions]);
 
   const chartDataCategorias = useMemo(
     () =>
-      gastosPorCategoria.map((c) => ({
-        category: c.category,
-        total: c.total,
+      gastosPorCategoria.map((g) => ({
+        category: g.category,
+        total: g.total,
       })),
     [gastosPorCategoria]
   );
 
+  const chartDataLinea = useMemo(() => {
+    const map = new Map<
+      string,
+      { date: string; ingresos: number; gastos: number }
+    >();
+
+    for (const t of transactions) {
+      const key = (t.date ?? "").slice(0, 10);
+      if (!map.has(key)) {
+        map.set(key, { date: key, ingresos: 0, gastos: 0 });
+      }
+      const item = map.get(key)!;
+      if (t.type === "ingreso") item.ingresos += t.amount;
+      else item.gastos += t.amount;
+    }
+
+    const arr = Array.from(map.values()).sort((a, b) =>
+      a.date < b.date ? -1 : 1
+    );
+
+    return arr.map((d) => ({
+      ...d,
+      dateLabel: formatDateDisplay(d.date),
+    }));
+  }, [transactions]);
+
+  const monthLabel = useMemo(() => {
+    const [y, m] = month.split("-");
+    const date = new Date(Number(y), Number(m) - 1, 1);
+    const raw = date.toLocaleDateString("es-MX", {
+      year: "numeric",
+      month: "long",
+    });
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+  }, [month]);
+
+  const recentActivity = useMemo(() => {
+    const sorted = [...transactions].sort((a, b) =>
+      a.date < b.date ? 1 : -1
+    );
+    return sorted.slice(0, 8);
+  }, [transactions]);
+
   const smartSummary = useMemo(() => {
     const lines: string[] = [];
 
-    if (!transactions.length) {
+    if (!familyCtx) {
       lines.push(
-        "Todavía no hay movimientos este mes con etiqueta familiar. Empieza a registrar gastos en modo familia para ver el resumen."
+        "Todavía no tienes configurado un grupo familiar. Ve a la sección Familia para crear uno."
       );
       return lines;
     }
 
-    if (totalIngresos > 0) {
-      const ratio = (totalGastos * 100) / totalIngresos;
+    if (!transactions.length) {
       lines.push(
-        `La familia ha gastado el ${ratio.toFixed(
+        "Este mes aún no hay movimientos familiares. Cuando tú o tu familia registren ingresos y gastos verás el resumen aquí."
+      );
+      return lines;
+    }
+
+    if (ingresosFamilia === 0 && gastosFamilia > 0) {
+      lines.push(
+        "Este mes sólo se han registrado gastos familiares sin ingresos. Revisa si falta capturar sueldos o aportaciones."
+      );
+    }
+
+    if (ingresosFamilia > 0) {
+      const ratio = (gastosFamilia / ingresosFamilia) * 100;
+      lines.push(
+        `La familia ha gastado aproximadamente el ${ratio.toFixed(
           1
-        )}% de los ingresos registrados en ${monthLabel}.`
+        )}% de los ingresos registrados en el mes.`
       );
 
-      if (ratio > 90) {
+      if (ratio > 95) {
         lines.push(
-          "Están muy cerca de gastar todo lo que ingresaron. Puede ser buen momento para frenar gastos variables."
+          "Están prácticamente gastando todo lo que ingresa. Quizá vale la pena frenar un poco los gastos en lo que resta del mes."
         );
-      } else if (ratio > 70) {
+      } else if (ratio > 75) {
         lines.push(
-          "El nivel de gasto es alto pero aún tienen algo de margen. Vale la pena revisar en qué se está concentrando el gasto."
+          "El nivel de gasto familiar es alto, pero aún tienen cierto margen. Revisar las principales categorías puede ayudar."
         );
       } else if (ratio < 50) {
         lines.push(
-          "Van muy bien: están gastando menos de la mitad de los ingresos del mes."
+          "Van muy bien. Están gastando menos de la mitad de lo que entra a la familia este mes."
         );
       }
-    } else if (totalGastos > 0) {
+    }
+
+    if (gastosPorCategoria.length > 0) {
+      const top1 = gastosPorCategoria[0];
       lines.push(
-        "Sólo se han registrado gastos, pero ningún ingreso familiar. Revisa si falta capturar sueldos o ingresos principales."
+        `La categoría con más gasto familiar este mes es "${top1.category}" con ${formatMoney(
+          top1.total
+        )} (${top1.percent.toFixed(1)}% del total de gastos).`
       );
+      if (gastosPorCategoria.length > 1) {
+        const top2 = gastosPorCategoria[1];
+        lines.push(
+          `La segunda categoría con más peso es "${top2.category}" con ${formatMoney(
+            top2.total
+          )}.`
+        );
+      }
     }
 
     if (gastosPorPersona.length > 0) {
       const top = gastosPorPersona[0];
       lines.push(
-        `La persona con más gasto es "${top.label}" con ${formatMoney(
+        `Quien más ha generado gastos familiares este mes es "${top.label}" con ${formatMoney(
           top.total
-        )} (${top.percent}% del gasto familiar).`
-      );
-    }
-
-    if (gastosPorCategoria.length > 0) {
-      const topCat = gastosPorCategoria[0];
-      lines.push(
-        `La categoría con más gasto es "${topCat.category}" con ${formatMoney(
-          topCat.total
-        )} (${topCat.percent}% del total).`
-      );
-    }
-
-    if (patrimonioNeto >= 0) {
-      lines.push(
-        `El patrimonio neto familiar es positivo: ${formatMoney(
-          patrimonioNeto
-        )}.`
-      );
-    } else {
-      lines.push(
-        `El patrimonio neto familiar es negativo: ${formatMoney(
-          patrimonioNeto
-        )}. Conviene revisar activos y deudas.`
-      );
-    }
-
-    if (pagoMensualDeudas > 0) {
-      lines.push(
-        `La carga fija mensual por deudas es de ${formatMoney(
-          pagoMensualDeudas
-        )}.`
+        )} (${top.percent.toFixed(1)}% del gasto familiar).`
       );
     }
 
     return lines;
   }, [
+    familyCtx,
     transactions,
-    totalIngresos,
-    totalGastos,
-    gastosPorPersona,
+    ingresosFamilia,
+    gastosFamilia,
     gastosPorCategoria,
-    patrimonioNeto,
-    pagoMensualDeudas,
-    monthLabel,
+    gastosPorPersona,
   ]);
 
-  // ==================================================
-  //  UI ESTADOS BÁSICOS
-  // ==================================================
+  // =========================================================
+  //  RENDER: estados especiales
+  // =========================================================
   if (authLoading) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
@@ -524,205 +545,269 @@ export default function FamilyDashboardPage() {
 
   if (!user) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
-        <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <p className="text-sm font-semibold">Dashboard familiar</p>
-          <p className="text-slate-500 dark:text-slate-400">
-            Inicia sesión desde el dashboard principal para ver el resumen
-            familiar.
+      <div className="flex flex-1 items-center justify-center">
+        <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h1 className="text-lg font-semibold">Finanzas familiares</h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Inicia sesión para ver el dashboard familiar y conectar tus gastos
+            con tu familia.
           </p>
-          {authError && (
-            <p className="text-[11px] text-rose-600 dark:text-rose-400">
-              {authError}
-            </p>
-          )}
+
+          <h2 className="text-sm font-medium">
+            {authMode === "login" ? "Inicia sesión" : "Crea tu cuenta"}
+          </h2>
+
+          <form
+            onSubmit={authMode === "login" ? handleSignIn : handleSignUp}
+            className="space-y-3 text-sm"
+          >
+            <div>
+              <label className="mb-1 block text-xs text-gray-600 dark:text-gray-300">
+                Correo electrónico
+              </label>
+              <input
+                type="email"
+                required
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="tucorreo@ejemplo.com"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs text-gray-600 dark:text-gray-300">
+                Contraseña
+              </label>
+              <input
+                type="password"
+                required
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="Mínimo 6 caracteres"
+              />
+            </div>
+
+            {authError && (
+              <p className="text-xs text-red-500">{authError}</p>
+            )}
+
+            <button
+              type="submit"
+              className="w-full rounded-lg bg-sky-500 py-2 text-sm font-medium text-white transition hover:bg-sky-600"
+            >
+              {authMode === "login" ? "Entrar" : "Crear cuenta"}
+            </button>
+          </form>
+
+          <div className="text-center text-xs text-gray-600 dark:text-gray-300">
+            {authMode === "login" ? (
+              <>
+                ¿No tienes cuenta?{" "}
+                <button
+                  className="text-sky-600 underline"
+                  onClick={() => {
+                    setAuthMode("signup");
+                    setAuthError(null);
+                  }}
+                >
+                  Crear una nueva
+                </button>
+              </>
+            ) : (
+              <>
+                ¿Ya tienes cuenta?{" "}
+                <button
+                  className="text-sky-600 underline"
+                  onClick={() => {
+                    setAuthMode("login");
+                    setAuthError(null);
+                  }}
+                >
+                  Inicia sesión
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     );
   }
 
-  // ==================================================
-  //  RENDER DASHBOARD
-  // ==================================================
+  // =========================================================
+  //  RENDER: DASHBOARD FAMILIAR
+  // =========================================================
   return (
     <main className="flex flex-1 flex-col gap-4">
       <AppHeader
         title="Dashboard familiar"
-        subtitle="Vista consolidada de ingresos, gastos y patrimonio de la familia."
+        subtitle="Resumen 360° de ingresos y gastos de tu familia."
         activeTab="familia"
-        userEmail={user.email ?? ""}
+        userEmail={user.email}
         onSignOut={handleSignOut}
       />
 
-      {/* Encabezado: mes + info familia */}
-      <section className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="space-y-2">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Mes analizado
+      <section className="space-y-4">
+        {/* Barra superior */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-2">
+              <div className="text-xs text-slate-500 dark:text-slate-300">
+                Mes que estás analizando
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="month"
+                  value={month}
+                  onChange={(e) => setMonth(e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                  aria-label={`Mes: ${monthLabel}`}
+                />
+              </div>
+
+              {familyCtx && (
+                <div className="space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                  <div>
+                    Familia:{" "}
+                    <span className="font-semibold">
+                      {familyCtx.familyName}
+                    </span>{" "}
+                    {isOwner ? "(jefe de familia)" : "(miembro)"}
+                  </div>
+                  <div>
+                    Miembros activos:{" "}
+                    <span className="font-semibold">
+                      {familyCtx.activeMembers}
+                    </span>
+                  </div>
+                </div>
+              )}
+              {familyError && (
+                <p className="text-[11px] text-rose-500">{familyError}</p>
+              )}
             </div>
-            <div className="mt-1 flex items-center gap-2">
-              <input
-                type="month"
-                value={month}
-                onChange={(e) => setMonth(e.target.value)}
-                className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-xs outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              />
-              <span className="text-xs font-medium text-slate-700 dark:text-slate-200">
-                {monthLabel}
-              </span>
+
+            {/* Navegación rápida */}
+            <div className="flex flex-wrap gap-2 text-xs">
+              <Link
+                href="/gastos"
+                className="rounded-full bg-sky-500 px-3 py-1 font-medium text-white hover:bg-sky-600"
+              >
+                Capturar gastos / ingresos
+              </Link>
+              <Link
+                href="/patrimonio"
+                className="rounded-full bg-emerald-500 px-3 py-1 font-medium text-white hover:bg-emerald-600"
+              >
+                Ver / editar patrimonio
+              </Link>
+              <Link
+                href="/familia"
+                className="rounded-full bg-slate-900 px-3 py-1 font-medium text-white hover:bg-black dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
+              >
+                Configuración de familia
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        {/* Tarjetas principales (alineadas y del mismo alto) */}
+        <div className="mt-2 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          {/* Ingresos */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              Ingresos familiares del mes
+            </h3>
+            <div className="flex h-[110px] flex-col justify-center">
+              <div className="text-xl md:text-2xl font-semibold tracking-tight text-emerald-600 dark:text-emerald-400">
+                {formatMoney(ingresosFamilia)}
+              </div>
+              <p className="mt-2 text-sm leading-tight text-slate-500">
+                Suma de todos los ingresos donde tú eres el dueño financiero.
+              </p>
             </div>
           </div>
 
-          <div className="space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
-            {familyCtxLoading && (
-              <p>Cargando información de familia...</p>
-            )}
-            {familyCtx && (
-              <>
-                <p>
-                  Familia:{" "}
-                  <span className="font-semibold">
-                    {familyCtx.familyName}
-                  </span>{" "}
-                  {isFamilyOwner ? "(jefe de familia)" : "(miembro)"}
-                </p>
-                {!isFamilyOwner && (
-                  <p className="text-[11px] text-amber-600 dark:text-amber-300">
-                    Nota: este dashboard se basa en movimientos donde el dueño
-                    financiero es el jefe de familia.
-                  </p>
-                )}
-              </>
-            )}
-            {!familyCtx && !familyCtxLoading && (
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Aún no tienes una familia configurada. Este dashboard se basa
-                sólo en los movimientos donde tú eres el dueño financiero.
+          {/* Gastos */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              Gastos familiares del mes
+            </h3>
+            <div className="flex h-[110px] flex-col justify-center">
+              <div className="text-xl md:text-2xl font-semibold tracking-tight text-rose-600 dark:text-rose-400">
+                {formatMoney(gastosFamilia)}
+              </div>
+              <p className="mt-2 text-sm leading-tight text-slate-500">
+                Incluye tus gastos y los de tus familiares con tus tarjetas.
               </p>
-            )}
-            {familyCtxError && (
-              <p className="text-[11px] text-rose-500">
-                {familyCtxError}
+            </div>
+          </div>
+
+          {/* Flujo */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              Flujo familiar (Ingresos – Gastos)
+            </h3>
+            <div className="flex h-[110px] flex-col justify-center">
+              <div
+                className={`text-xl md:text-2xl font-semibold tracking-tight ${
+                  flujoFamiliar < 0
+                    ? "text-rose-600 dark:text-rose-400"
+                    : "text-emerald-600 dark:text-emerald-400"
+                }`}
+              >
+                {formatMoney(flujoFamiliar)}
+              </div>
+              <p className="mt-2 text-sm leading-tight text-slate-500">
+                Si es negativo, la familia está gastando más de lo que ingresa.
               </p>
-            )}
+            </div>
           </div>
-        </div>
 
-        <div
-          className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] ${
-            loadingDashboard
-              ? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-              : "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
-          }`}
-        >
-          <span className="h-2 w-2 rounded-full bg-emerald-500" />
-          {loadingDashboard ? "Actualizando datos..." : "Datos al día"}
+          {/* Miembros activos */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              Miembros activos
+            </h3>
+            <div className="flex h-[110px] flex-col justify-center">
+              <div className="text-xl md:text-2xl font-semibold tracking-tight text-sky-600 dark:text-sky-400">
+                {familyCtx?.activeMembers ?? 0}
+              </div>
+              <p className="mt-2 text-sm leading-tight text-slate-500">
+                Cada miembro puede registrar gastos; el resumen se centra en el
+                dueño financiero.
+              </p>
+            </div>
+          </div>
+
+          {/* Tip rápido */}
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 shadow-sm dark:border-amber-700 dark:bg-amber-900/30">
+            <h3 className="text-sm font-semibold text-amber-700 dark:text-amber-300">
+              Tip rápido
+            </h3>
+            <div className="flex h-[110px] flex-col justify-center">
+              <p className="text-sm leading-tight text-amber-700 dark:text-amber-300">
+                Pídele a tu familia que use siempre el campo{" "}
+                <strong>“Quién generó”</strong> al capturar gastos. Así este
+                dashboard te dirá quién está gastando más.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 
-      {/* Tarjetas principales */}
-      <section className="grid gap-4 md:grid-cols-4">
-        <div className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <span className="text-slate-500 dark:text-slate-400">
-            Ingresos familiares del mes
-          </span>
-          <span className="mt-1 text-2xl font-semibold text-emerald-600 dark:text-emerald-400">
-            {formatMoney(totalIngresos)}
-          </span>
-        </div>
-
-        <div className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <span className="text-slate-500 dark:text-slate-400">
-            Gastos familiares del mes
-          </span>
-          <span className="mt-1 text-2xl font-semibold text-rose-600 dark:text-rose-400">
-            {formatMoney(totalGastos)}
-          </span>
-        </div>
-
-        <div className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <span className="text-slate-500 dark:text-slate-400">
-            Flujo del mes (Ingresos - Gastos)
-          </span>
-          <span
-            className={`mt-1 text-2xl font-semibold ${
-              flujoMes >= 0
-                ? "text-emerald-600 dark:text-emerald-400"
-                : "text-rose-600 dark:text-rose-400"
-            }`}
-          >
-            {formatMoney(flujoMes)}
-          </span>
-        </div>
-
-        <div className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <span className="text-slate-500 dark:text-slate-400">
-            Costo fijo mensual de deudas
-          </span>
-          <span className="mt-1 text-2xl font-semibold text-amber-600 dark:text-amber-400">
-            {formatMoney(pagoMensualDeudas)}
-          </span>
-        </div>
-      </section>
-
-      {/* Patrimonio */}
-      <section className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="text-slate-500 dark:text-slate-400">
-            Activos familiares
-          </div>
-          <div className="mt-1 text-2xl font-semibold text-emerald-600 dark:text-emerald-400">
-            {formatMoney(totalActivos)}
-          </div>
-          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-            Casas, autos, ahorros, inversiones y otros activos registrados por
-            el jefe de familia.
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="text-slate-500 dark:text-slate-400">
-            Deudas familiares
-          </div>
-          <div className="mt-1 text-2xl font-semibold text-rose-600 dark:text-rose-400">
-            {formatMoney(totalDeudas)}
-          </div>
-          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-            Hipotecas, autos, tarjetas y demás deudas registradas.
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="text-slate-500 dark:text-slate-400">
-            Patrimonio neto familiar
-          </div>
-          <div
-            className={`mt-1 text-2xl font-semibold ${
-              patrimonioNeto >= 0
-                ? "text-emerald-600 dark:text-emerald-400"
-                : "text-rose-600 dark:text-rose-400"
-            }`}
-          >
-            {formatMoney(patrimonioNeto)}
-          </div>
-          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-            Activos menos deudas, a nivel familia.
-          </p>
-        </div>
-      </section>
-
-      {/* Resumen inteligente */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      {/* Resumen inteligente familiar */}
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <h2 className="mb-2 text-sm font-semibold">
-          Resumen inteligente familiar
+          Resumen inteligente de tus finanzas familiares
         </h2>
         {smartSummary.length === 0 ? (
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+          <p className="text-xs text-gray-500">
             Aún no hay suficiente información para generar un resumen.
           </p>
         ) : (
-          <ul className="list-disc space-y-1 pl-4 text-[11px] leading-relaxed">
+          <ul className="list-disc space-y-1 pl-5 text-xs">
             {smartSummary.map((line, idx) => (
               <li key={idx}>{line}</li>
             ))}
@@ -730,58 +815,15 @@ export default function FamilyDashboardPage() {
         )}
       </section>
 
-      {/* Gráficas: por persona y por categoría */}
+      {/* Gráficas principales */}
       <section className="grid gap-4 md:grid-cols-2">
-        <div className="h-72 rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="h-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <h3 className="mb-2 text-xs font-semibold">
-            Gastos por persona (familia)
-          </h3>
-          {chartDataPersonas.length === 0 ? (
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Aún no hay gastos etiquetados por persona.
-            </p>
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={chartDataPersonas}
-                margin={{ top: 10, right: 10, left: 0, bottom: 40 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="persona"
-                  tick={{
-                    fontSize: 10,
-                    fill: isDark ? "#e5e7eb" : "#374151",
-                  }}
-                  angle={-30}
-                  textAnchor="end"
-                />
-                <YAxis
-                  tick={{
-                    fontSize: 10,
-                    fill: isDark ? "#e5e7eb" : "#374151",
-                  }}
-                />
-                <Tooltip />
-                <Legend />
-                <Bar
-                  dataKey="total"
-                  name="Gasto"
-                  radius={4}
-                  fill={isDark ? "#38bdf8" : "#0ea5e9"}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="h-72 rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-2 text-xs font-semibold">
-            Gastos familiares por categoría
+            Gastos familiares por categoría (mes actual)
           </h3>
           {chartDataCategorias.length === 0 ? (
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Aún no hay gastos registrados con categorías.
+            <p className="text-xs text-gray-500">
+              Aún no hay gastos registrados en este mes.
             </p>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -809,68 +851,202 @@ export default function FamilyDashboardPage() {
                 <Legend />
                 <Bar
                   dataKey="total"
-                  name="Gasto"
+                  name="Gasto familiar"
                   radius={4}
-                  fill={isDark ? "#22c55e" : "#16a34a"}
+                  fill={isDark ? "#38bdf8" : "#0ea5e9"}
                 />
               </BarChart>
             </ResponsiveContainer>
           )}
         </div>
+
+        <div className="h-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h3 className="mb-2 text-xs font-semibold">
+            Ingresos vs gastos familiares por día
+          </h3>
+          {chartDataLinea.length === 0 ? (
+            <p className="text-xs text-gray-500">
+              Aún no hay movimientos suficientes para la gráfica.
+            </p>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartDataLinea}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="dateLabel"
+                  tick={{
+                    fontSize: 10,
+                    fill: isDark ? "#e5e7eb" : "#374151",
+                  }}
+                />
+                <YAxis
+                  tick={{
+                    fontSize: 10,
+                    fill: isDark ? "#e5e7eb" : "#374151",
+                  }}
+                />
+                <Tooltip />
+                <Legend />
+                <Line
+                  type="monotone"
+                  dataKey="ingresos"
+                  name="Ingresos"
+                  dot={false}
+                  stroke={isDark ? "#22c55e" : "#16a34a"}
+                  strokeWidth={2}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="gastos"
+                  name="Gastos"
+                  dot={false}
+                  stroke={isDark ? "#fb7185" : "#ef4444"}
+                  strokeWidth={2}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
       </section>
 
-      {/* Tabla resumen por persona */}
-      <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      {/* Barras por categoría y por persona */}
+      <section className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="mb-2 text-sm font-semibold">
+            Detalle de gastos familiares por categoría
+          </h2>
+          {gastosPorCategoria.length === 0 ? (
+            <p className="text-xs text-gray-500">
+              Aún no hay gastos registrados.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {gastosPorCategoria.map((item) => (
+                <div key={item.category} className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span>{item.category}</span>
+                    <span>
+                      {formatMoney(item.total)}{" "}
+                      <span className="text-gray-400">
+                        ({item.percent.toFixed(1)}%)
+                      </span>
+                    </span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded bg-gray-200 dark:bg-slate-700">
+                    <div
+                      className="h-2 rounded bg-sky-500"
+                      style={{
+                        width: `${Math.max(item.percent, 2)}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="mb-2 text-sm font-semibold">
+            Gastos familiares por persona
+          </h2>
+          {gastosPorPersona.length === 0 ? (
+            <p className="text-xs text-gray-500">
+              Aún no hay gastos familiares con el campo “Quién generó”
+              registrado.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {gastosPorPersona.map((item) => (
+                <div key={item.label} className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span>{item.label}</span>
+                    <span>
+                      {formatMoney(item.total)}{" "}
+                      <span className="text-gray-400">
+                        ({item.percent.toFixed(1)}%)
+                      </span>
+                    </span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded bg-gray-200 dark:bg-slate-700">
+                    <div
+                      className="h-2 rounded bg-emerald-500"
+                      style={{
+                        width: `${Math.max(item.percent, 2)}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
+            Estos montos consideran sólo los{" "}
+            <span className="font-semibold">gastos</span> del mes actual y usan
+            el campo <span className="font-semibold">“Quién generó”</span> en
+            tus movimientos. Es ideal para ver quién está gastando más dentro
+            de la familia.
+          </p>
+        </div>
+      </section>
+
+      {/* Actividad reciente */}
+      <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <h2 className="mb-2 text-sm font-semibold">
-          Resumen de gasto por persona
+          Actividad reciente de la familia
         </h2>
-        {gastosPorPersona.length === 0 ? (
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">
-            Cuando registres gastos con etiquetas de “Quién generó”, aquí verás
-            cuánto gasta cada miembro.
+        {loadingTx ? (
+          <p className="text-xs text-slate-500">Cargando movimientos...</p>
+        ) : recentActivity.length === 0 ? (
+          <p className="text-xs text-slate-500">
+            Aún no hay actividad en este mes.
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse text-[11px]">
-              <thead className="bg-slate-50 text-slate-600 dark:bg-slate-900 dark:text-slate-200">
-                <tr>
-                  <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-700">
-                    Persona
-                  </th>
-                  <th className="border-b border-slate-200 px-2 py-1 text-right dark:border-slate-700">
-                    Gasto total
-                  </th>
-                  <th className="border-b border-slate-200 px-2 py-1 text-right dark:border-slate-700">
-                    % del total
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {gastosPorPersona.map((p) => (
-                  <tr
-                    key={p.label}
-                    className="odd:bg-white even:bg-slate-50 dark:odd:bg-slate-900 dark:even:bg-slate-800"
+          <ul className="space-y-2 text-xs">
+            {recentActivity.map((t) => (
+              <li
+                key={t.id}
+                className="flex items-start justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/40"
+              >
+                <div className="flex flex-col">
+                  <span className="text-[11px] text-slate-500">
+                    {formatDateDisplay(t.date)}
+                  </span>
+                  <span className="font-medium text-slate-800 dark:text-slate-100">
+                    {t.type === "ingreso" ? "Ingreso" : "Gasto"} · {t.category}
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-300">
+                    {t.spender_label
+                      ? `Generó: ${t.spender_label}`
+                      : "Generó: (sin etiqueta)"}
+                  </span>
+                  {t.notes && (
+                    <span className="mt-1 line-clamp-2 text-[11px] text-slate-500 dark:text-slate-300">
+                      {t.notes}
+                    </span>
+                  )}
+                </div>
+                <div className="ml-3 flex flex-col items-end">
+                  <span
+                    className={`text-sm font-semibold ${
+                      t.type === "ingreso"
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-rose-600 dark:text-rose-400"
+                    }`}
                   >
-                    <td className="border-b border-slate-100 px-2 py-1 dark:border-slate-700">
-                      {p.label}
-                    </td>
-                    <td className="border-b border-slate-100 px-2 py-1 text-right dark:border-slate-700">
-                      {formatMoney(p.total)}
-                    </td>
-                    <td className="border-b border-slate-100 px-2 py-1 text-right dark:border-slate-700">
-                      {p.percent}%
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    {formatMoney(t.amount)}
+                  </span>
+                  <span className="mt-1 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                    {t.method}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
-
-        {dashError && (
-          <p className="mt-2 text-[11px] text-rose-500 dark:text-rose-300">
-            {dashError}
-          </p>
+        {txError && (
+          <p className="mt-2 text-[11px] text-rose-500">{txError}</p>
         )}
       </section>
     </main>

@@ -584,6 +584,13 @@ export default function HomeDashboardPage() {
   >
     Gestionar familia
   </Link>
+
+    <Link href="/familia/dashboard">
+    <button className="rounded-full bg-indigo-500 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-600">
+      Dashboard familiar
+    </button>
+  </Link>
+
 </div>
         </div>
       </section>
