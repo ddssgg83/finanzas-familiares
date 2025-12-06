@@ -17,6 +17,8 @@ type Asset = {
   notes: string | null;
   family_member_id: string | null;
   created_at?: string;
+  owner_user_id?: string | null;
+  created_by?: string | null;
 };
 
 type Debt = {
@@ -33,7 +35,29 @@ type Debt = {
   current_balance: number | null;
   family_member_id: string | null;
   created_at?: string;
+  owner_user_id?: string | null;
+  created_by?: string | null;
 };
+
+// ---- Familia (para modo familiar) ----
+type Family = {
+  id: string;
+  name: string;
+  user_id: string; // jefe de familia
+  created_at: string;
+};
+
+type FamilyMember = {
+  id: string;
+  family_id: string;
+  user_id: string | null;
+  invited_email: string;
+  role: "owner" | "member";
+  status: "active" | "pending" | "left";
+  created_at: string;
+};
+
+type ViewMode = "personal" | "family";
 
 // Formularios
 type AssetForm = {
@@ -80,6 +104,15 @@ export default function PatrimonioPage() {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+
+  // -------- MODO VISTA (Personal / Familia) --------
+  const [viewMode, setViewMode] = useState<ViewMode>("personal");
+
+  // -------- INFO FAMILIA --------
+  const [family, setFamily] = useState<Family | null>(null);
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
+  const [familyLoading, setFamilyLoading] = useState(false);
+  const [familyError, setFamilyError] = useState<string | null>(null);
 
   // -------- DATA --------
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -160,41 +193,180 @@ export default function PatrimonioPage() {
       setUser(null);
       setAssets([]);
       setDebts([]);
+      setFamily(null);
+      setFamilyMembers([]);
     } catch (err) {
       console.error("Error cerrando sesión", err);
     }
   };
 
-   // -------- Cargar activos + deudas --------
+  // -------- Cargar info de familia (si existe) --------
   useEffect(() => {
-    if (!user) {
+    const currentUser = user;
+    if (!currentUser) {
+      setFamily(null);
+      setFamilyMembers([]);
+      setFamilyError(null);
+      setFamilyLoading(false);
+      return;
+    }
+
+    const userId = currentUser.id;
+    const email = (currentUser.email ?? "").toLowerCase();
+    let cancelled = false;
+
+    async function loadFamilyInfo() {
+      setFamilyLoading(true);
+      setFamilyError(null);
+
+      try {
+        // 1) Buscar si pertenece a una familia como miembro activo
+        const { data: memberRows, error: membershipError } = await supabase
+          .from("family_members")
+          .select(
+            "id,family_id,user_id,invited_email,role,status,created_at"
+          )
+          .or(`user_id.eq.${userId},invited_email.eq.${email}`)
+          .eq("status", "active")
+          .limit(1);
+
+        if (membershipError) {
+          console.error(
+            "Error buscando membresía de familia en patrimonio:",
+            membershipError
+          );
+          throw membershipError;
+        }
+
+        if (!memberRows || memberRows.length === 0) {
+          if (!cancelled) {
+            setFamily(null);
+            setFamilyMembers([]);
+          }
+          return;
+        }
+
+        const member = memberRows[0];
+
+        // 2) Obtener la familia
+        const { data: familyRow, error: familyErrorResp } = await supabase
+          .from("families")
+          .select("id,name,user_id,created_at")
+          .eq("id", member.family_id)
+          .single();
+
+        if (familyErrorResp) {
+          console.error(
+            "Error cargando familia en patrimonio:",
+            familyErrorResp
+          );
+          throw familyErrorResp;
+        }
+
+        // 3) Obtener todos los miembros
+        const { data: allMembers, error: membersError } = await supabase
+          .from("family_members")
+          .select(
+            "id,family_id,user_id,invited_email,role,status,created_at"
+          )
+          .eq("family_id", familyRow.id)
+          .order("created_at", { ascending: true });
+
+        if (membersError) {
+          console.error(
+            "Error cargando miembros de familia en patrimonio:",
+            membersError
+          );
+          throw membersError;
+        }
+
+        if (!cancelled) {
+          setFamily(familyRow as Family);
+          setFamilyMembers((allMembers ?? []) as FamilyMember[]);
+        }
+      } catch (err) {
+        console.error("Error cargando info de familia (patrimonio):", err);
+        if (!cancelled) {
+          setFamily(null);
+          setFamilyMembers([]);
+          setFamilyError(
+            "No se pudo cargar la información de tu familia. Puedes seguir usando tu patrimonio personal."
+          );
+        }
+      } finally {
+        if (!cancelled) setFamilyLoading(false);
+      }
+    }
+
+    loadFamilyInfo();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  // ¿Es jefe de familia?
+  const isFamilyOwner = !!(
+    family &&
+    user &&
+    family.user_id === user.id
+  );
+
+  // Si alguien intenta dejar modo "familia" pero no es owner, lo regresamos a personal
+  useEffect(() => {
+    if (viewMode === "family" && !isFamilyOwner) {
+      setViewMode("personal");
+    }
+  }, [viewMode, isFamilyOwner]);
+
+  // -------- Cargar activos + deudas (según modo) --------
+  useEffect(() => {
+    const currentUser = user;
+    if (!currentUser) {
       setAssets([]);
       setDebts([]);
       return;
     }
 
-    // TS: garantizamos que usamos un id ya no-null
-    const userId = user.id;
+    const userId = currentUser.id;
+    const ownerUserId = family?.user_id ?? userId;
+    let cancelled = false;
 
     async function loadPatrimonio() {
       setLoading(true);
       setError(null);
+
       try {
+        // Activos
+        let assetsQuery = supabase
+          .from("assets")
+          .select(
+            "id,name,category,current_value,owner,notes,family_member_id,created_at,owner_user_id,created_by"
+          )
+          .order("created_at", { ascending: false });
+
+        // Deudas
+        let debtsQuery = supabase
+          .from("debts")
+          .select(
+            "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at,owner_user_id,created_by"
+          )
+          .order("created_at", { ascending: false });
+
+        // Lógica de alcance:
+        // - Si soy jefe y estoy en modo familia: todo lo que tenga owner_user_id = mi id.
+        // - En cualquier otro caso: sólo lo que yo creé (created_by = mi id).
+        if (viewMode === "family" && family && isFamilyOwner) {
+          assetsQuery = assetsQuery.eq("owner_user_id", ownerUserId);
+          debtsQuery = debtsQuery.eq("owner_user_id", ownerUserId);
+        } else {
+          assetsQuery = assetsQuery.eq("created_by", userId);
+          debtsQuery = debtsQuery.eq("created_by", userId);
+        }
+
         const [assetsRes, debtsRes] = await Promise.all([
-          supabase
-            .from("assets")
-            .select(
-              "id,name,category,current_value,owner,notes,family_member_id,created_at"
-            )
-            .eq("user_id", userId)
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("debts")
-            .select(
-              "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at"
-            )
-            .eq("user_id", userId)
-            .order("created_at", { ascending: false }),
+          assetsQuery,
+          debtsQuery,
         ]);
 
         if (assetsRes.error) {
@@ -206,18 +378,26 @@ export default function PatrimonioPage() {
           throw debtsRes.error;
         }
 
-        setAssets((assetsRes.data ?? []) as Asset[]);
-        setDebts((debtsRes.data ?? []) as Debt[]);
+        if (!cancelled) {
+          setAssets((assetsRes.data ?? []) as Asset[]);
+          setDebts((debtsRes.data ?? []) as Debt[]);
+        }
       } catch (err) {
         console.error("Error cargando patrimonio", err);
-        setError("No se pudieron cargar tus activos y deudas.");
+        if (!cancelled) {
+          setError("No se pudieron cargar tus activos y deudas.");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
     loadPatrimonio();
-  }, [user]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, viewMode, family, familyMembers, isFamilyOwner]);
 
   // -------- Totales generales (sin filtros) --------
   const totalActivos = useMemo(
@@ -398,16 +578,17 @@ export default function PatrimonioPage() {
       family_member_id: null as string | null,
     };
 
+    const ownerUserId = family?.user_id ?? user.id;
+
     try {
       if (editingAssetId) {
-        // UPDATE
+        // UPDATE (no tocamos owner_user_id ni created_by)
         const { data, error } = await supabase
           .from("assets")
           .update(payload)
           .eq("id", editingAssetId)
-          .eq("user_id", user.id)
           .select(
-            "id,name,category,current_value,owner,notes,family_member_id,created_at"
+            "id,name,category,current_value,owner,notes,family_member_id,created_at,owner_user_id,created_by"
           )
           .single();
 
@@ -422,11 +603,14 @@ export default function PatrimonioPage() {
         const { data, error } = await supabase
           .from("assets")
           .insert({
-            user_id: user.id,
             ...payload,
+            owner_user_id: ownerUserId,
+            created_by: user.id,
+            // opcional: mantener user_id para compatibilidad vieja
+            user_id: user.id,
           })
           .select(
-            "id,name,category,current_value,owner,notes,family_member_id,created_at"
+            "id,name,category,current_value,owner,notes,family_member_id,created_at,owner_user_id,created_by"
           )
           .single();
 
@@ -489,16 +673,17 @@ export default function PatrimonioPage() {
       family_member_id: null as string | null,
     };
 
+    const ownerUserId = family?.user_id ?? user.id;
+
     try {
       if (editingDebtId) {
-        // UPDATE
+        // UPDATE (no tocamos owner_user_id ni created_by)
         const { data, error } = await supabase
           .from("debts")
           .update(payload)
           .eq("id", editingDebtId)
-          .eq("user_id", user.id)
           .select(
-            "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at"
+            "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at,owner_user_id,created_by"
           )
           .single();
 
@@ -513,11 +698,14 @@ export default function PatrimonioPage() {
         const { data, error } = await supabase
           .from("debts")
           .insert({
-            user_id: user.id,
             ...payload,
+            owner_user_id: ownerUserId,
+            created_by: user.id,
+            // opcional compatibilidad
+            user_id: user.id,
           })
           .select(
-            "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at"
+            "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at,owner_user_id,created_by"
           )
           .single();
 
@@ -527,7 +715,7 @@ export default function PatrimonioPage() {
         resetDebtForm();
       }
     } catch (err) {
-      console.error("Error guardando deuda", err);
+      console.error("Error guardando deuda", JSON.stringify(err, null, 2));
       alert("No se pudo guardar la deuda.");
     } finally {
       setSavingDebt(false);
@@ -545,8 +733,7 @@ export default function PatrimonioPage() {
       const { error } = await supabase
         .from("assets")
         .delete()
-        .eq("id", asset.id)
-        .eq("user_id", user.id);
+        .eq("id", asset.id);
 
       if (error) throw error;
 
@@ -571,8 +758,7 @@ export default function PatrimonioPage() {
       const { error } = await supabase
         .from("debts")
         .delete()
-        .eq("id", debt.id)
-        .eq("user_id", user.id);
+        .eq("id", debt.id);
 
       if (error) throw error;
 
@@ -643,6 +829,13 @@ export default function PatrimonioPage() {
     }
   };
 
+  const scopeLabel =
+    viewMode === "family" && family && isFamilyOwner
+      ? `tu familia "${family.name}"`
+      : "tus datos personales";
+
+  const familyMembersWithUser = familyMembers.filter((m) => m.user_id);
+
   // -------- UI AUTH --------
   if (authLoading) {
     return (
@@ -682,17 +875,56 @@ export default function PatrimonioPage() {
         onSignOut={handleSignOut}
       />
 
-      {/* Barra de acciones */}
-      <section className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900 print:border-0 print:shadow-none">
+      {/* Barra de acciones + modo de vista */}
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900 print:border-0 print:shadow-none">
         <div className="flex flex-col gap-0.5">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             Resumen de patrimonio
           </span>
           <span className="text-[11px] text-slate-500 dark:text-slate-400">
-            Foto completa de lo que tienes menos lo que debes.
+            Estás viendo {scopeLabel}. Puedes alternar entre tu vista personal y
+            la vista familiar (si eres jefe de familia).
           </span>
         </div>
-        <div className="flex items-center gap-2">
+
+        <div className="flex flex-wrap items-center gap-2">
+          {isFamilyOwner && (
+            <div className="inline-flex items-center overflow-hidden rounded-full border border-slate-200 bg-slate-50 text-[11px] dark:border-slate-700 dark:bg-slate-900">
+              <button
+                type="button"
+                onClick={() => setViewMode("personal")}
+                className={`px-3 py-1 ${
+                  viewMode === "personal"
+                    ? "bg-sky-500 text-white"
+                    : "text-slate-700 dark:text-slate-200"
+                }`}
+              >
+                Solo yo
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("family")}
+                className={`px-3 py-1 ${
+                  viewMode === "family"
+                    ? "bg-emerald-500 text-white"
+                    : "text-slate-700 dark:text-slate-200"
+                }`}
+              >
+                Familia
+                {familyMembersWithUser.length > 0
+                  ? ` (${familyMembersWithUser.length})`
+                  : ""}
+              </button>
+            </div>
+          )}
+
+          {!isFamilyOwner && family && (
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] text-slate-600 dark:bg-slate-800 dark:text-slate-200">
+              Tienes familia configurada ({family.name}). El patrimonio
+              familiar sólo lo puede ver el jefe de familia.
+            </span>
+          )}
+
           <button
             type="button"
             onClick={handleExportPdf}
@@ -760,6 +992,19 @@ export default function PatrimonioPage() {
         </div>
       </section>
 
+      <section className="px-1">
+        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+          Estas cifras consideran{" "}
+          <span className="font-semibold">
+            {viewMode === "family" && family && isFamilyOwner
+              ? `a todos los miembros vinculados de la familia "${family.name}".`
+              : "únicamente tus registros personales."}
+          </span>{" "}
+          Los filtros de abajo te permiten analizar por dueño, banco,
+          categoría, etc.
+        </p>
+      </section>
+
       {/* Filtros de patrimonio */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -809,6 +1054,9 @@ export default function PatrimonioPage() {
                   Buscando: “{searchText}”
                 </span>
               )}
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
+                Modo: {viewMode === "personal" ? "Solo yo" : "Familia"}
+              </span>
             </div>
           </div>
 
@@ -857,7 +1105,9 @@ export default function PatrimonioPage() {
 
         <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
           Los montos de esta sección y las tablas de abajo se calculan solo con
-          los activos y deudas que coinciden con los filtros seleccionados.
+          los activos y deudas que coinciden con los filtros seleccionados y
+          con el modo actual ({viewMode === "personal" ? "Solo yo" : "Familia"}
+          ).
         </p>
       </section>
 
@@ -921,7 +1171,9 @@ export default function PatrimonioPage() {
             </div>
             <textarea
               value={assetForm.notes}
-              onChange={(e) => handleChangeAssetForm("notes", e.target.value)}
+              onChange={(e) =>
+                handleChangeAssetForm("notes", e.target.value)
+              }
               className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 md:col-span-4"
               placeholder="Notas (ubicación, institución, algún detalle, etc.)"
             />
@@ -1099,7 +1351,9 @@ export default function PatrimonioPage() {
               </div>
               <select
                 value={debtForm.owner}
-                onChange={(e) => handleChangeDebtForm("owner", e.target.value)}
+                onChange={(e) =>
+                  handleChangeDebtForm("owner", e.target.value)
+                }
                 className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
               >
                 {ownerOptions.map((o) => (
@@ -1218,9 +1472,10 @@ export default function PatrimonioPage() {
         </div>
       </section>
 
-      {error && (
+      {(error || familyError) && (
         <section className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
-          {error}
+          {error && <p>{error}</p>}
+          {familyError && <p className="mt-1">{familyError}</p>}
         </section>
       )}
     </main>
