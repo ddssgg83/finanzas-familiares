@@ -158,6 +158,9 @@ export default function GastosPage() {
   });
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Saber si el usuario es jefe de familia
+const [isFamilyOwner, setIsFamilyOwner] = useState(false);
+
 
   // Presupuesto
   const [budgetInput, setBudgetInput] = useState("");
@@ -458,6 +461,43 @@ export default function GastosPage() {
       setAuthError("No se pudo iniciar sesión.");
     }
   };
+useEffect(() => {
+  if (!user) {
+    setIsFamilyOwner(false);
+    return;
+  }
+
+  let cancelled = false;
+
+  const checkOwner = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("families")
+        .select("id")
+        .eq("user_id", user.id)
+        .limit(1);
+
+      if (error) {
+        console.error("Error revisando si es jefe de familia en /gastos", error);
+        if (!cancelled) setIsFamilyOwner(false);
+        return;
+      }
+
+      if (!cancelled) {
+        setIsFamilyOwner((data ?? []).length > 0);
+      }
+    } catch (err) {
+      console.error("Error revisando si es jefe de familia en /gastos", err);
+      if (!cancelled) setIsFamilyOwner(false);
+    }
+  };
+
+  checkOwner();
+
+  return () => {
+    cancelled = true;
+  };
+}, [user]);
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -566,9 +606,6 @@ export default function GastosPage() {
     };
   }, [user]);
 
-  const isFamilyOwner =
-    !!familyCtx && !!user && familyCtx.ownerUserId === user.id;
-
   useEffect(() => {
     if (viewScope === "family" && !isFamilyOwner) {
       setViewScope("mine");
@@ -652,110 +689,128 @@ export default function GastosPage() {
     loadOffline();
   }, []);
 
-  // --------------------------------------------------
-  //   Cargar transacciones del mes desde Supabase
-  // --------------------------------------------------
-  useEffect(() => {
-    if (!user) {
-      setTransactions([]);
-      return;
-    }
+ // --------------------------------------------------
+//   Cargar transacciones del mes desde Supabase
+// --------------------------------------------------
+useEffect(() => {
+  const currentUser = user;
+  if (!currentUser) {
+    setTransactions([]);
+    return;
+  }
 
-    const userId = user.id;
+  const userId = currentUser.id;
 
-    async function load() {
-      setLoading(true);
-      setError(null);
+  async function load() {
+    setLoading(true);
+    setError(null);
 
-      try {
-        const [year, monthNumber] = month.split("-");
-        const from = `${month}-01`;
-        const to = `${month}-${new Date(
-          Number(year),
-          Number(monthNumber),
-          0
-        )
-          .getDate()
-          .toString()
-          .padStart(2, "0")}`;
+    try {
+      const [year, monthNumber] = month.split("-");
+      const from = `${month}-01`;
+      const to = `${month}-${new Date(
+        Number(year),
+        Number(monthNumber),
+        0
+      )
+        .getDate()
+        .toString()
+        .padStart(2, "0")}`;
 
-        let query = supabase
-          .from("transactions")
-          .select(
-            "id,date,type,category,amount,method,notes,owner_user_id,spender_user_id,spender_label,created_by,card_id"
-          )
-          .gte("date", from)
-          .lte("date", to)
-          .order("date", { ascending: false });
+      // Base: rango de fechas
+      let query = supabase
+        .from("transactions")
+        .select("*")
+        .gte("date", from)
+        .lte("date", to);
 
-        if (isFamilyOwner && viewScope === "family") {
+      if (isFamilyOwner) {
+        if (viewScope === "family") {
+          // 👨‍👩‍👧 Vista familiar: todo lo que tenga como owner al jefe
           query = query.eq("owner_user_id", userId);
         } else {
-          query = query.or(`created_by.is.null,created_by.eq.${userId}`);
+          // 👤 Vista "Solo yo" siendo jefe:
+          // - tus propios movimientos personales
+          // - y los que se generaron con tus tarjetas compartidas
+          query = query.or(
+            [
+              `user_id.eq.${userId}`, // tus movimientos personales
+              `owner_user_id.eq.${userId}` // movimientos de tarjetas que tú compartiste
+            ].join(",")
+          );
         }
+      } else {
+        // Usuario normal (no jefe): sólo sus propios movimientos
+        query = query.eq("user_id", userId);
+      }
 
-        const { data, error } = await query;
-        if (error) throw error;
+      const { data, error } = await query;
+      if (error) throw error;
 
-        setTransactions(
-          (data ?? []).map((t: any) => ({
-            id: t.id,
-            date: t.date,
-            type: t.type,
-            category: t.category,
-            amount: Number(t.amount),
-            method: t.method,
-            notes: t.notes,
-            owner_user_id: t.owner_user_id ?? null,
-            spender_user_id: t.spender_user_id ?? null,
-            spender_label: t.spender_label ?? null,
-            created_by: t.created_by ?? null,
-            card_id: t.card_id ?? null,
-          }))
+      setTransactions(
+        (data ?? []).map((t: any) => ({
+          id: t.id,
+          date: t.date,
+          type: t.type,
+          category: t.category,
+          amount: Number(t.amount),
+          method: t.method,
+          notes: t.notes,
+          owner_user_id: t.owner_user_id ?? null,
+          spender_user_id: t.spender_user_id ?? null,
+          spender_label: t.spender_label ?? null,
+          created_by: t.created_by ?? null,
+          card_id: t.card_id ?? null,
+        }))
+      );
+
+      // Cache local por mes
+      if (typeof window !== "undefined") {
+        localStorage.setItem(
+          `ff-cache-${month}`,
+          JSON.stringify(data ?? [])
         );
+      }
+    } catch (err) {
+      console.error(err);
+      setError("No se pudieron cargar los movimientos.");
 
-        if (typeof window !== "undefined") {
-          localStorage.setItem(`ff-cache-${month}`, JSON.stringify(data ?? []));
-        }
-      } catch (err: any) {
-        console.error(err);
-        setError("No se pudieron cargar los movimientos.");
-
-        if (typeof window !== "undefined") {
-          const cache = localStorage.getItem(`ff-cache-${month}`);
-          if (cache) {
-            try {
-              const parsed = JSON.parse(cache);
-              setTransactions(
-                (parsed ?? []).map((t: any) => ({
-                  id: t.id,
-                  date: t.date,
-                  type: t.type,
-                  category: t.category,
-                  amount: Number(t.amount),
-                  method: t.method,
-                  notes: t.notes,
-                  owner_user_id: t.owner_user_id ?? null,
-                  spender_user_id: t.spender_user_id ?? null,
-                  spender_label: t.spender_label ?? null,
-                  created_by: t.created_by ?? null,
-                  card_id: t.card_id ?? null,
-                }))
-              );
-            } catch {
-              // ignoramos error de parseo
-            }
+      // Intentar leer del cache si hay error
+      if (typeof window !== "undefined") {
+        const cache = localStorage.getItem(`ff-cache-${month}`);
+        if (cache) {
+          try {
+            const parsed = JSON.parse(cache);
+            setTransactions(
+              (parsed ?? []).map((t: any) => ({
+                id: t.id,
+                date: t.date,
+                type: t.type,
+                category: t.category,
+                amount: Number(t.amount),
+                method: t.method,
+                notes: t.notes,
+                owner_user_id: t.owner_user_id ?? null,
+                spender_user_id: t.spender_user_id ?? null,
+                spender_label: t.spender_label ?? null,
+                created_by: t.created_by ?? null,
+                card_id: t.card_id ?? null,
+              }))
+            );
+          } catch {
+            // ignoramos error de parseo
           }
         }
-      } finally {
-        setLoading(false);
       }
+    } finally {
+      setLoading(false);
     }
+  }
 
-    if (typeof window !== "undefined") {
-      load();
-    }
-  }, [month, user, isFamilyOwner, viewScope]);
+  if (typeof window !== "undefined") {
+    load();
+  }
+}, [month, user, isFamilyOwner, viewScope]);
 
   // --------------------------------------------------
   //   Sincronizar cola offline al volver internet
@@ -1741,9 +1796,6 @@ export default function GastosPage() {
                 >
                   {showExportOptions ? "Cerrar exportar" : "Exportar"}
                 </button>
-              </div>
-              <div className="mt-1 text-xs font-medium text-slate-700 dark:text-slate-200">
-                {monthLabel}
               </div>
 
               {/* Info de familia */}

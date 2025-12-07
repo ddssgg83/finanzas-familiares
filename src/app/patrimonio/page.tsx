@@ -1,6 +1,5 @@
 "use client";
 
-import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
@@ -8,76 +7,84 @@ import { AppHeader } from "@/components/AppHeader";
 
 export const dynamic = "force-dynamic";
 
+// =========================================================
+//  Tipos
+// =========================================================
+
 type Asset = {
   id: string;
   name: string;
   category: string | null;
-  current_value: number;
+  current_value: number | null;
   owner: string | null;
   notes: string | null;
-  family_member_id: string | null;
   created_at?: string;
+  user_id?: string | null;
+  family_id?: string | null;
 };
 
 type Debt = {
   id: string;
   name: string;
-  category: string | null;
-  type: string | null;
+  type: string;
   total_amount: number;
-  monthly_payment: number | null;
-  interest_rate: number | null;
-  due_date: string | null; // yyyy-mm-dd
-  owner: string | null;
-  notes: string | null;
   current_balance: number | null;
-  family_member_id: string | null;
+  notes: string | null;
   created_at?: string;
+  user_id?: string | null;
+  family_id?: string | null;
 };
 
-// ---- Familia (para modo familiar) ----
-type Family = {
-  id: string;
-  name: string;
-  user_id: string; // jefe de familia
-  created_at: string;
-};
-
-type FamilyMember = {
-  id: string;
-  family_id: string;
-  user_id: string | null;
-  invited_email: string;
-  role: "owner" | "member";
-  status: "active" | "pending" | "left";
-  created_at: string;
-};
-
-type ViewMode = "personal" | "family";
-
-// Formularios
 type AssetForm = {
   name: string;
   category: string;
-  currentValue: string;
+  current_value: string;
   owner: string;
   notes: string;
 };
 
 type DebtForm = {
   name: string;
-  category: string;
   type: string;
-  totalAmount: string;
-  monthlyPayment: string;
-  interestRate: string;
-  dueDate: string;
-  owner: string;
-  currentBalance: string;
+  total_amount: string;
+  current_balance: string;
   notes: string;
 };
 
-const BASE_OWNER_OPTIONS = ["Yo", "Esposa", "Hijo / Hija", "Otro"];
+type FamilyContext = {
+  familyId: string;
+  familyName: string;
+  ownerUserId: string;
+  activeMembers: number;
+  activeMemberUserIds: string[];
+};
+
+type ViewScope = "personal" | "family";
+
+const ASSET_CATEGORIES = [
+  "Cuenta bancaria",
+  "Inversión",
+  "Casa / Departamento",
+  "Terreno",
+  "Automóvil",
+  "Negocio",
+  "Ahorro niños",
+  "Otro",
+];
+
+const DEBT_TYPES = [
+  "Tarjeta de crédito",
+  "Crédito hipotecario",
+  "Crédito automotriz",
+  "Préstamo personal",
+  "Préstamo familiar",
+  "Crédito negocio",
+  "Otro",
+];
+
+// =========================================================
+//  Helpers
+// =========================================================
 
 function formatMoney(num: number) {
   return num.toLocaleString("es-MX", {
@@ -87,13 +94,17 @@ function formatMoney(num: number) {
   });
 }
 
-function formatDateDisplay(ymd: string | null | undefined) {
-  if (!ymd) return "-";
+function formatDateDisplay(ymd?: string | null) {
+  if (!ymd) return "";
   const s = ymd.slice(0, 10);
   const [y, m, d] = s.split("-");
   if (!y || !m || !d) return ymd;
   return `${d}/${m}/${y}`;
 }
+
+// =========================================================
+//  Página principal
+// =========================================================
 
 export default function PatrimonioPage() {
   // -------- AUTH --------
@@ -101,54 +112,43 @@ export default function PatrimonioPage() {
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // -------- MODO VISTA (Personal / Familia) --------
-  const [viewMode, setViewMode] = useState<ViewMode>("personal");
-
-  // -------- INFO FAMILIA --------
-  const [family, setFamily] = useState<Family | null>(null);
-  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
+  // -------- FAMILY CONTEXT --------
+  const [familyCtx, setFamilyCtx] = useState<FamilyContext | null>(null);
   const [familyLoading, setFamilyLoading] = useState(false);
   const [familyError, setFamilyError] = useState<string | null>(null);
 
-  // -------- DATA --------
+  // Vista: sólo yo vs familia (para jefes de familia)
+  const [viewScope, setViewScope] = useState<ViewScope>("personal");
+
+  // -------- DATA PATRIMONIO --------
   const [assets, setAssets] = useState<Asset[]>([]);
   const [debts, setDebts] = useState<Debt[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [savingAsset, setSavingAsset] = useState(false);
-  const [savingDebt, setSavingDebt] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loadingPatrimonio, setLoadingPatrimonio] = useState(false);
+  const [patrimonioError, setPatrimonioError] = useState<string | null>(null);
 
   // Formularios
   const [assetForm, setAssetForm] = useState<AssetForm>({
     name: "",
-    category: "",
-    currentValue: "",
-    owner: "Yo",
+    category: "Cuenta bancaria",
+    current_value: "",
+    owner: "",
     notes: "",
   });
 
   const [debtForm, setDebtForm] = useState<DebtForm>({
     name: "",
-    category: "",
-    type: "",
-    totalAmount: "",
-    monthlyPayment: "",
-    interestRate: "",
-    dueDate: "",
-    owner: "Yo",
-    currentBalance: "",
+    type: "Tarjeta de crédito",
+    total_amount: "",
+    current_balance: "",
     notes: "",
   });
 
-  // Filtros
-  const [ownerFilter, setOwnerFilter] = useState<string>("TODOS");
-  const [searchText, setSearchText] = useState<string>("");
+  const [savingAsset, setSavingAsset] = useState(false);
+  const [savingDebt, setSavingDebt] = useState(false);
 
-  // Edición
-  const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
-  const [editingDebtId, setEditingDebtId] = useState<string | null>(null);
-
-  // -------- AUTH EFFECT --------
+  // =========================================================
+  //  1. AUTH
+  // =========================================================
   useEffect(() => {
     let ignore = false;
 
@@ -159,7 +159,9 @@ export default function PatrimonioPage() {
         const { data, error } = await supabase.auth.getUser();
         if (error && (error as any).name !== "AuthSessionMissingError") {
           console.error("Error obteniendo usuario actual", error);
-          setAuthError("Hubo un problema al cargar tu sesión.");
+          if (!ignore) {
+            setAuthError("Hubo un problema al cargar tu sesión.");
+          }
         }
         if (!ignore) {
           setUser(data?.user ?? null);
@@ -187,21 +189,21 @@ export default function PatrimonioPage() {
     try {
       await supabase.auth.signOut();
       setUser(null);
+      setFamilyCtx(null);
       setAssets([]);
       setDebts([]);
-      setFamily(null);
-      setFamilyMembers([]);
     } catch (err) {
       console.error("Error cerrando sesión", err);
     }
   };
 
-  // -------- Cargar info de familia (si existe) --------
+  // =========================================================
+  //  2. FAMILY CONTEXT (saber si eres jefe de familia)
+  // =========================================================
   useEffect(() => {
     const currentUser = user;
     if (!currentUser) {
-      setFamily(null);
-      setFamilyMembers([]);
+      setFamilyCtx(null);
       setFamilyError(null);
       setFamilyLoading(false);
       return;
@@ -211,189 +213,155 @@ export default function PatrimonioPage() {
     const email = (currentUser.email ?? "").toLowerCase();
     let cancelled = false;
 
-    async function loadFamilyInfo() {
+    const loadFamily = async () => {
       setFamilyLoading(true);
       setFamilyError(null);
-
       try {
-        // 1) Buscar si pertenece a una familia como miembro activo
-        const { data: memberRows, error: membershipError } = await supabase
+        // 1) Buscar membresía activa por user_id o invited_email
+        const { data: memberRows, error: memberError } = await supabase
           .from("family_members")
-          .select(
-            "id,family_id,user_id,invited_email,role,status,created_at"
-          )
+          .select("id,family_id,status,user_id,invited_email")
           .or(`user_id.eq.${userId},invited_email.eq.${email}`)
           .eq("status", "active")
           .limit(1);
 
-        if (membershipError) {
-          console.error(
-            "Error buscando membresía de familia en patrimonio:",
-            membershipError
-          );
-          throw membershipError;
-        }
+        if (memberError) throw memberError;
 
         if (!memberRows || memberRows.length === 0) {
-          if (!cancelled) {
-            setFamily(null);
-            setFamilyMembers([]);
-          }
+          if (!cancelled) setFamilyCtx(null);
           return;
         }
 
         const member = memberRows[0];
 
-        // 2) Obtener la familia
-        const { data: familyRow, error: familyErrorResp } = await supabase
+        // 2) Cargar familia
+        const { data: fam, error: famError } = await supabase
           .from("families")
-          .select("id,name,user_id,created_at")
+          .select("id,name,user_id")
           .eq("id", member.family_id)
           .single();
 
-        if (familyErrorResp) {
-          console.error(
-            "Error cargando familia en patrimonio:",
-            familyErrorResp
-          );
-          throw familyErrorResp;
-        }
+        if (famError) throw famError;
 
-        // 3) Obtener todos los miembros
-        const { data: allMembers, error: membersError } = await supabase
+        // 3) Cargar todos los miembros activos para saber sus user_id
+        const { data: activeMembers, error: membersError } = await supabase
           .from("family_members")
-          .select(
-            "id,family_id,user_id,invited_email,role,status,created_at"
-          )
-          .eq("family_id", familyRow.id)
-          .order("created_at", { ascending: true });
+          .select("id,status,user_id")
+          .eq("family_id", fam.id)
+          .eq("status", "active");
 
-        if (membersError) {
-          console.error(
-            "Error cargando miembros de familia en patrimonio:",
-            membersError
-          );
-          throw membersError;
-        }
+        if (membersError) throw membersError;
+
+        const activeMemberUserIds = (activeMembers ?? [])
+          .map((m) => m.user_id)
+          .filter((id): id is string => !!id);
 
         if (!cancelled) {
-          setFamily(familyRow as Family);
-          setFamilyMembers((allMembers ?? []) as FamilyMember[]);
+          setFamilyCtx({
+            familyId: fam.id,
+            familyName: fam.name,
+            ownerUserId: fam.user_id,
+            activeMembers: activeMembers?.length ?? 0,
+            activeMemberUserIds,
+          });
         }
       } catch (err) {
-        console.error("Error cargando info de familia (patrimonio):", err);
+        console.error("Error cargando familia en Patrimonio:", err);
         if (!cancelled) {
-          setFamily(null);
-          setFamilyMembers([]);
           setFamilyError(
-            "No se pudo cargar la información de tu familia. Puedes seguir usando tu patrimonio personal."
+            "No se pudo cargar la información de tu familia. Revisa la sección Familia."
           );
+          setFamilyCtx(null);
         }
       } finally {
         if (!cancelled) setFamilyLoading(false);
       }
-    }
+    };
 
-    loadFamilyInfo();
+    loadFamily();
 
     return () => {
       cancelled = true;
     };
   }, [user]);
 
-  // ¿Es jefe de familia?
-  const isFamilyOwner = !!(
-    family &&
-    user &&
-    family.user_id === user.id
-  );
+  const isFamilyOwner =
+    !!familyCtx && !!user && familyCtx.ownerUserId === user.id;
 
-  // Si alguien intenta dejar modo "familia" pero no es owner, lo regresamos a personal
+  // Si NO eres jefe de familia, la vista efectiva siempre es "personal"
+  const effectiveScope: ViewScope =
+    familyCtx && isFamilyOwner ? viewScope : "personal";
+
+  // =========================================================
+  //  3. Cargar patrimonio (activos + deudas)
+  // =========================================================
   useEffect(() => {
-    if (viewMode === "family" && !isFamilyOwner) {
-      setViewMode("personal");
-    }
-  }, [viewMode, isFamilyOwner]);
-
-  // -------- Cargar activos + deudas (según modo) --------
-  useEffect(() => {
-    const currentUser = user;
-    if (!currentUser) {
-      setAssets([]);
-      setDebts([]);
-      return;
-    }
-
-    const userId = currentUser.id;
-    let cancelled = false;
-
     async function loadPatrimonio() {
-      setLoading(true);
-      setError(null);
+      if (!user) {
+        setAssets([]);
+        setDebts([]);
+        return;
+      }
+
+      const userId = user.id;
 
       try {
-        // Por defecto sólo mis datos
-        let userIds: string[] = [userId];
+        setLoadingPatrimonio(true);
+        setPatrimonioError(null);
 
-        // Si estamos en modo familia y soy owner, incluimos a todos los miembros con user_id
-        if (viewMode === "family" && family && isFamilyOwner) {
-          const memberUserIds = familyMembers
-            .map((m) => m.user_id)
-            .filter((id): id is string => !!id);
-
-          if (memberUserIds.length) {
-            userIds = Array.from(new Set([...memberUserIds, userId]));
-          }
-        }
+        const isFamilyView =
+          Boolean(familyCtx) && isFamilyOwner && viewScope === "family";
 
         const [assetsRes, debtsRes] = await Promise.all([
           supabase
             .from("assets")
             .select(
-              "id,name,category,current_value,owner,notes,family_member_id,created_at,user_id"
+              "id,name,category,current_value,owner,notes,created_at,family_id,user_id"
             )
-            .in("user_id", userIds)
-            .order("created_at", { ascending: false }),
+            .match(
+              isFamilyView
+                ? { family_id: familyCtx!.familyId }
+                : { user_id: userId }
+            ),
           supabase
             .from("debts")
             .select(
-              "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at,user_id"
+              "id,name,type,total_amount,current_balance,notes,created_at,family_id,user_id"
             )
-            .in("user_id", userIds)
-            .order("created_at", { ascending: false }),
+            .match(
+              isFamilyView
+                ? { family_id: familyCtx!.familyId }
+                : { user_id: userId }
+            ),
         ]);
 
         if (assetsRes.error) {
-          console.error("Error cargando activos", assetsRes.error);
-          throw assetsRes.error;
-        }
-        if (debtsRes.error) {
-          console.error("Error cargando deudas", debtsRes.error);
-          throw debtsRes.error;
+          console.warn("Error cargando activos", assetsRes.error);
+        } else {
+          setAssets((assetsRes.data ?? []) as Asset[]);
         }
 
-        if (!cancelled) {
-          setAssets((assetsRes.data ?? []) as Asset[]);
+        if (debtsRes.error) {
+          console.warn("Error cargando deudas", debtsRes.error);
+        } else {
           setDebts((debtsRes.data ?? []) as Debt[]);
         }
       } catch (err) {
-        console.error("Error cargando patrimonio", err);
-        if (!cancelled) {
-          setError("No se pudieron cargar tus activos y deudas.");
-        }
+        console.error("Error cargando patrimonio (familia):", err);
+        setPatrimonioError(
+          "No se pudo cargar el patrimonio. Intenta de nuevo más tarde."
+        );
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoadingPatrimonio(false);
       }
     }
 
     loadPatrimonio();
+  }, [user, familyCtx, isFamilyOwner, viewScope]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [user, viewMode, family, familyMembers, isFamilyOwner]);
-
-  // -------- Totales generales (sin filtros) --------
+  // =========================================================
+  //  4. Cálculos agregados
+  // =========================================================
   const totalActivos = useMemo(
     () => assets.reduce((sum, a) => sum + (a.current_value ?? 0), 0),
     [assets]
@@ -402,7 +370,8 @@ export default function PatrimonioPage() {
   const totalDeudas = useMemo(
     () =>
       debts.reduce(
-        (sum, d) => sum + Number(d.current_balance ?? d.total_amount ?? 0),
+        (sum, d) =>
+          sum + Number(d.current_balance ?? d.total_amount ?? 0),
         0
       ),
     [debts]
@@ -410,98 +379,13 @@ export default function PatrimonioPage() {
 
   const patrimonioNeto = totalActivos - totalDeudas;
 
-  const totalPagoMensualDeudas = useMemo(
-    () => debts.reduce((sum, d) => sum + Number(d.monthly_payment ?? 0), 0),
-    [debts]
-  );
-
-  // -------- Opciones de dueño (para filtros y selects) --------
-  const ownerOptions = useMemo(() => {
-    const set = new Set<string>(BASE_OWNER_OPTIONS);
-    for (const a of assets) {
-      if (a.owner) set.add(a.owner);
-    }
-    for (const d of debts) {
-      if (d.owner) set.add(d.owner);
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "es-MX"));
-  }, [assets, debts]);
-
-  // -------- Listas filtradas --------
-  const filteredAssets = useMemo(() => {
-    const q = searchText.trim().toLowerCase();
-    return assets.filter((a) => {
-      if (
-        ownerFilter !== "TODOS" &&
-        (a.owner ?? "").toLowerCase() !== ownerFilter.toLowerCase()
-      ) {
-        return false;
-      }
-
-      if (!q) return true;
-
-      const haystack = [a.name, a.category ?? "", a.owner ?? "", a.notes ?? ""]
-        .join(" ")
-        .toLowerCase();
-
-      return haystack.includes(q);
-    });
-  }, [assets, ownerFilter, searchText]);
-
-  const filteredDebts = useMemo(() => {
-    const q = searchText.trim().toLowerCase();
-    return debts.filter((d) => {
-      if (
-        ownerFilter !== "TODOS" &&
-        (d.owner ?? "").toLowerCase() !== ownerFilter.toLowerCase()
-      ) {
-        return false;
-      }
-
-      if (!q) return true;
-
-      const haystack = [
-        d.name,
-        d.type ?? "",
-        d.category ?? "",
-        d.owner ?? "",
-        d.notes ?? "",
-      ]
-        .join(" ")
-        .toLowerCase();
-
-      return haystack.includes(q);
-    });
-  }, [debts, ownerFilter, searchText]);
-
-  // -------- Totales filtrados --------
-  const filteredTotalActivos = useMemo(
-    () => filteredAssets.reduce((sum, a) => sum + (a.current_value ?? 0), 0),
-    [filteredAssets]
-  );
-
-  const filteredTotalDeudas = useMemo(
-    () =>
-      filteredDebts.reduce(
-        (sum, d) => sum + Number(d.current_balance ?? d.total_amount ?? 0),
-        0
-      ),
-    [filteredDebts]
-  );
-
-  const filteredPatrimonioNeto = filteredTotalActivos - filteredTotalDeudas;
-
-  const filteredPagoMensual = useMemo(
-    () =>
-      filteredDebts.reduce(
-        (sum, d) => sum + Number(d.monthly_payment ?? 0),
-        0
-      ),
-    [filteredDebts]
-  );
-
-  // -------- Handlers formularios --------
-  const handleChangeAssetForm = (field: keyof AssetForm, value: string) => {
+  // =========================================================
+  //  5. Handlers formularios
+  // =========================================================
+  const handleChangeAssetForm = (
+    field: keyof AssetForm,
+    value: string
+  ) => {
     setAssetForm((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -509,322 +393,157 @@ export default function PatrimonioPage() {
     setDebtForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const resetAssetForm = () => {
-    setAssetForm({
-      name: "",
-      category: "",
-      currentValue: "",
-      owner: "Yo",
-      notes: "",
-    });
-    setEditingAssetId(null);
-  };
-
-  const resetDebtForm = () => {
-    setDebtForm({
-      name: "",
-      category: "",
-      type: "",
-      totalAmount: "",
-      monthlyPayment: "",
-      interestRate: "",
-      dueDate: "",
-      owner: "Yo",
-      currentBalance: "",
-      notes: "",
-    });
-    setEditingDebtId(null);
-  };
-
-  const cancelAssetEdit = () => {
-    resetAssetForm();
-  };
-
-  const cancelDebtEdit = () => {
-    resetDebtForm();
-  };
-
-  const handleSaveAsset = async (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmitAsset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) {
-      alert("Debes iniciar sesión para registrar activos.");
+      alert("Tu sesión expiró. Vuelve a iniciar sesión.");
       return;
     }
 
-    const valueNumber = Number(assetForm.currentValue);
-    if (!assetForm.name.trim()) {
-      alert("Ponle un nombre al activo (Casa, Auto, Ahorros, etc.).");
+    const val = Number(assetForm.current_value.replace(",", ""));
+    if (!assetForm.name.trim() || !Number.isFinite(val)) {
+      alert("Revisa el nombre y el valor del activo.");
       return;
     }
-    if (!Number.isFinite(valueNumber) || valueNumber <= 0) {
-      alert("Ingresa un valor actual válido mayor a 0.");
-      return;
-    }
-
-    setSavingAsset(true);
-
-    const payload = {
-      name: assetForm.name.trim(),
-      category: assetForm.category.trim() || null,
-      current_value: valueNumber,
-      owner: assetForm.owner.trim() || null,
-      notes: assetForm.notes.trim() || null,
-      family_member_id: null as string | null,
-    };
 
     try {
-      if (editingAssetId) {
-        // UPDATE
-        const { data, error } = await supabase
-          .from("assets")
-          .update(payload)
-          .eq("id", editingAssetId)
-          .eq("user_id", user.id)
-          .select(
-            "id,name,category,current_value,owner,notes,family_member_id,created_at"
-          )
-          .single();
+      setSavingAsset(true);
 
-        if (error) throw error;
-
-        setAssets((prev) =>
-          prev.map((a) => (a.id === editingAssetId ? (data as Asset) : a))
-        );
-        resetAssetForm();
-      } else {
-        // INSERT
-        const { data, error } = await supabase
-          .from("assets")
-          .insert({
+      const { data, error } = await supabase
+        .from("assets")
+        .insert([
+          {
             user_id: user.id,
-            ...payload,
-          })
-          .select(
-            "id,name,category,current_value,owner,notes,family_member_id,created_at"
-          )
-          .single();
+            family_id: familyCtx?.familyId ?? null,
+            name: assetForm.name.trim(),
+            category: assetForm.category || null,
+            current_value: val,
+            owner: assetForm.owner.trim() || null,
+            notes: assetForm.notes.trim() || null,
+          },
+        ])
+        .select(
+          "id,user_id,family_id,name,category,current_value,owner,notes,created_at"
+        )
+        .single();
 
-        if (error) throw error;
+      if (error) throw error;
 
+      // Si estamos en vista personal o el activo pertenece a uno de los ids que se muestran, lo agregamos
+      if (
+        effectiveScope === "personal" ||
+        !familyCtx ||
+        !isFamilyOwner ||
+        familyCtx.activeMemberUserIds.includes(data.user_id) ||
+        data.user_id === familyCtx.ownerUserId
+      ) {
         setAssets((prev) => [data as Asset, ...prev]);
-        resetAssetForm();
       }
+
+      setAssetForm({
+        name: "",
+        category: assetForm.category,
+        current_value: "",
+        owner: "",
+        notes: "",
+      });
     } catch (err) {
-      console.error("Error guardando activo", err);
-      alert("No se pudo guardar el activo.");
+      console.error("Error guardando activo:", err);
+      alert("No se pudo guardar el activo. Intenta de nuevo.");
     } finally {
       setSavingAsset(false);
     }
   };
 
-  const handleSaveDebt = async (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmitDebt = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!user) {
-      alert("Debes iniciar sesión para registrar deudas.");
+      alert("Tu sesión expiró. Vuelve a iniciar sesión.");
       return;
     }
-
-    if (!debtForm.name.trim()) {
-      alert(
-        "Ponle un nombre a la deuda (Hipoteca casa, Auto, Tarjeta BBVA, etc.)."
-      );
-      return;
-    }
-
-    const totalAmount = Number(debtForm.totalAmount);
-    const monthlyPayment = debtForm.monthlyPayment
-      ? Number(debtForm.monthlyPayment)
-      : null;
-    const interestRate = debtForm.interestRate
-      ? Number(debtForm.interestRate)
-      : null;
-    const currentBalance = debtForm.currentBalance
-      ? Number(debtForm.currentBalance)
-      : null;
-
-    if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
-      alert("Ingresa un monto total válido mayor a 0.");
-      return;
-    }
-
-    setSavingDebt(true);
-
-    const payload = {
-      name: debtForm.name.trim(),
-      category: debtForm.category.trim() || null,
-      type: debtForm.type.trim() || null,
-      total_amount: totalAmount,
-      monthly_payment: monthlyPayment,
-      interest_rate: interestRate,
-      due_date: debtForm.dueDate || null,
-      owner: debtForm.owner.trim() || null,
-      current_balance: currentBalance,
-      notes: debtForm.notes.trim() || null,
-      family_member_id: null as string | null,
-    };
 
     try {
-      if (editingDebtId) {
-        // UPDATE
-        const { data, error } = await supabase
-          .from("debts")
-          .update(payload)
-          .eq("id", editingDebtId)
-          .eq("user_id", user.id)
-          .select(
-            "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at"
-          )
-          .single();
+      setSavingDebt(true);
 
-        if (error) throw error;
+      const total = Number(debtForm.total_amount) || 0;
 
-        setDebts((prev) =>
-          prev.map((d) => (d.id === editingDebtId ? (data as Debt) : d))
-        );
-        resetDebtForm();
-      } else {
-        // INSERT
-        const { data, error } = await supabase
-          .from("debts")
-          .insert({
+      const currentBalance =
+        debtForm.current_balance && debtForm.current_balance !== ""
+          ? Number(debtForm.current_balance)
+          : total;
+
+      const { data, error } = await supabase
+        .from("debts")
+        .insert([
+          {
             user_id: user.id,
-            ...payload,
-          })
-          .select(
-            "id,name,category,type,total_amount,monthly_payment,interest_rate,due_date,owner,notes,current_balance,family_member_id,created_at"
-          )
-          .single();
+            family_id: familyCtx?.familyId ?? null,
+            name: debtForm.name.trim(),
+            type: debtForm.type || "OTRO",
+            total_amount: total,
+            current_balance: currentBalance,
+            notes: debtForm.notes.trim() || null,
+          },
+        ])
+        .select(
+          "id,user_id,family_id,name,type,total_amount,current_balance,notes,created_at"
+        )
+        .single();
 
-        if (error) throw error;
+      if (error) throw error;
 
+      if (
+        effectiveScope === "personal" ||
+        !familyCtx ||
+        !isFamilyOwner ||
+        familyCtx.activeMemberUserIds.includes(data.user_id)
+      ) {
         setDebts((prev) => [data as Debt, ...prev]);
-        resetDebtForm();
       }
+
+      setDebtForm({
+        name: "",
+        type: "OTRO",
+        total_amount: "",
+        current_balance: "",
+        notes: "",
+      });
     } catch (err) {
-      console.error("Error guardando deuda", err);
+      console.error("Error guardando deuda:", err);
       alert("No se pudo guardar la deuda.");
     } finally {
       setSavingDebt(false);
     }
   };
 
-  const handleDeleteAsset = async (asset: Asset) => {
-    if (!user) {
-      alert("Debes iniciar sesión para eliminar activos.");
-      return;
-    }
-    if (!confirm(`¿Eliminar el activo "${asset.name}"?`)) return;
-
+  const handleDeleteAsset = async (id: string) => {
+    if (!window.confirm("¿Seguro que quieres eliminar este activo?")) return;
     try {
-      const { error } = await supabase
-        .from("assets")
-        .delete()
-        .eq("id", asset.id)
-        .eq("user_id", user.id);
-
+      const { error } = await supabase.from("assets").delete().eq("id", id);
       if (error) throw error;
-
-      setAssets((prev) => prev.filter((a) => a.id !== asset.id));
-      if (editingAssetId === asset.id) {
-        resetAssetForm();
-      }
+      setAssets((prev) => prev.filter((a) => a.id !== id));
     } catch (err) {
-      console.error("Error eliminando activo", err);
+      console.error("Error eliminando activo:", err);
       alert("No se pudo eliminar el activo.");
     }
   };
 
-  const handleDeleteDebt = async (debt: Debt) => {
-    if (!user) {
-      alert("Debes iniciar sesión para eliminar deudas.");
-      return;
-    }
-    if (!confirm(`¿Eliminar la deuda "${debt.name}"?`)) return;
-
+  const handleDeleteDebt = async (id: string) => {
+    if (!window.confirm("¿Seguro que quieres eliminar esta deuda?")) return;
     try {
-      const { error } = await supabase
-        .from("debts")
-        .delete()
-        .eq("id", debt.id)
-        .eq("user_id", user.id);
-
+      const { error } = await supabase.from("debts").delete().eq("id", id);
       if (error) throw error;
-
-      setDebts((prev) => prev.filter((d) => d.id !== debt.id));
-      if (editingDebtId === debt.id) {
-        resetDebtForm();
-      }
+      setDebts((prev) => prev.filter((d) => d.id !== id));
     } catch (err) {
-      console.error("Error eliminando deuda", err);
+      console.error("Error eliminando deuda:", err);
       alert("No se pudo eliminar la deuda.");
     }
   };
 
-  const handleEditAsset = (asset: Asset) => {
-    setEditingDebtId(null);
-    setEditingAssetId(asset.id);
-    setAssetForm({
-      name: asset.name ?? "",
-      category: asset.category ?? "",
-      currentValue:
-        typeof asset.current_value === "number"
-          ? asset.current_value.toString()
-          : "",
-      owner: asset.owner ?? "Yo",
-      notes: asset.notes ?? "",
-    });
-    if (typeof window !== "undefined") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  };
-
-  const handleEditDebt = (debt: Debt) => {
-    setEditingAssetId(null);
-    setEditingDebtId(debt.id);
-    setDebtForm({
-      name: debt.name ?? "",
-      category: debt.category ?? "",
-      type: debt.type ?? "",
-      totalAmount:
-        typeof debt.total_amount === "number"
-          ? debt.total_amount.toString()
-          : "",
-      monthlyPayment:
-        typeof debt.monthly_payment === "number"
-          ? debt.monthly_payment.toString()
-          : "",
-      interestRate:
-        typeof debt.interest_rate === "number"
-          ? debt.interest_rate.toString()
-          : "",
-      dueDate: debt.due_date ?? "",
-      owner: debt.owner ?? "Yo",
-      currentBalance:
-        typeof debt.current_balance === "number"
-          ? debt.current_balance.toString()
-          : "",
-      notes: debt.notes ?? "",
-    });
-    if (typeof window !== "undefined") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  };
-
-  const handleExportPdf = () => {
-    // Versión simple: usa imprimir del navegador (puedes guardar como PDF)
-    if (typeof window !== "undefined") {
-      window.print();
-    }
-  };
-
-  const scopeLabel =
-    viewMode === "family" && family && isFamilyOwner
-      ? `tu familia "${family.name}"`
-      : "tus datos personales";
-
-  const familyMembersWithUser = familyMembers.filter((m) => m.user_id);
-
-  // -------- UI AUTH --------
+  // =========================================================
+  //  6. RENDERS ESPECIALES (auth)
+  // =========================================================
   if (authLoading) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
@@ -836,634 +555,512 @@ export default function PatrimonioPage() {
   if (!user) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
-        <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <p className="text-sm font-semibold">Patrimonio familiar</p>
-          <p className="text-slate-500 dark:text-slate-400">
-            Inicia sesión desde el dashboard para ver y registrar tus activos y
-            deudas.
-          </p>
-          {authError && (
-            <p className="text-[11px] text-rose-600 dark:text-rose-400">
-              {authError}
-            </p>
-          )}
-        </div>
+        Necesitas iniciar sesión para ver y editar tu patrimonio.
+        {authError && (
+          <p className="mt-2 text-xs text-rose-500">{authError}</p>
+        )}
       </div>
     );
   }
 
-  // -------- UI PATRIMONIO --------
+  // =========================================================
+  //  7. RENDER PRINCIPAL
+  // =========================================================
   return (
-    <main className="flex flex-1 flex-col gap-4 print:bg-white">
+    <main className="flex flex-1 flex-col gap-4">
       <AppHeader
-        title="Patrimonio familiar"
-        subtitle="Aquí llevas el control de tus activos (lo que tienes) y tus deudas (lo que debes)."
+        title="Patrimonio (activos y deudas)"
+        subtitle="Foto completa de lo que tienes y lo que debes. Desde aquí alimentas tu valor patrimonial."
         activeTab="patrimonio"
-        userEmail={user?.email ?? ""}
+        userEmail={user.email}
         onSignOut={handleSignOut}
       />
 
-      {/* Barra de acciones + modo de vista */}
-      <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900 print:border-0 print:shadow-none">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            Resumen de patrimonio
-          </span>
-          <span className="text-[11px] text-slate-500 dark:text-slate-400">
-            Estás viendo {scopeLabel}. Puedes alternar entre tu vista personal y
-            la vista familiar (si eres jefe de familia).
-          </span>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          {isFamilyOwner && (
-            <div className="inline-flex items-center overflow-hidden rounded-full border border-slate-200 bg-slate-50 text-[11px] dark:border-slate-700 dark:bg-slate-900">
-              <button
-                type="button"
-                onClick={() => setViewMode("personal")}
-                className={`px-3 py-1 ${
-                  viewMode === "personal"
-                    ? "bg-sky-500 text-white"
-                    : "text-slate-700 dark:text-slate-200"
-                }`}
-              >
-                Solo yo
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("family")}
-                className={`px-3 py-1 ${
-                  viewMode === "family"
-                    ? "bg-emerald-500 text-white"
-                    : "text-slate-700 dark:text-slate-200"
-                }`}
-              >
-                Familia
-                {familyMembersWithUser.length > 0
-                  ? ` (${familyMembersWithUser.length})`
-                  : ""}
-              </button>
-            </div>
-          )}
-
-          {!isFamilyOwner && family && (
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] text-slate-600 dark:bg-slate-800 dark:text-slate-200">
-              Tienes familia configurada ({family.name}). El patrimonio
-              familiar sólo lo puede ver el jefe de familia.
-            </span>
-          )}
-
-          <button
-            type="button"
-            onClick={handleExportPdf}
-            className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 print:hidden"
-          >
-            Exportar PDF / Imprimir
-          </button>
-        </div>
-      </section>
-
-      {/* Resumen general */}
-      <section className="grid gap-4 md:grid-cols-4">
+      {/* Resumen + contexto familiar */}
+      <section className="space-y-4">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="text-xs text-slate-500 dark:text-slate-400">
-            Activos totales
-          </div>
-          <div className="mt-1 text-2xl font-semibold text-emerald-600 dark:text-emerald-400">
-            {formatMoney(totalActivos)}
-          </div>
-          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-            Casas, autos, ahorros, inversiones, etc.
-          </p>
-        </div>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-1">
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                Resumen de patrimonio
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Aquí ves tus activos, deudas y patrimonio neto. Si eres jefe de
+                familia, puedes cambiar la vista a patrimonio familiar.
+              </p>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="text-xs text-slate-500 dark:text-slate-400">
-            Deudas totales
-          </div>
-          <div className="mt-1 text-2xl font-semibold text-rose-600 dark:text-rose-400">
-            {formatMoney(totalDeudas)}
-          </div>
-          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-            Hipotecas, autos, tarjetas y demás compromisos.
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="text-xs text-slate-500 dark:text-slate-400">
-            Patrimonio neto
-          </div>
-          <div
-            className={`mt-1 text-2xl font-semibold ${
-              patrimonioNeto >= 0
-                ? "text-emerald-600 dark:text-emerald-400"
-                : "text-rose-600 dark:text-rose-400"
-            }`}
-          >
-            {formatMoney(patrimonioNeto)}
-          </div>
-          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-            Activos – Deudas.
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="text-xs text-slate-500 dark:text-slate-400">
-            Pago mensual fijo de deudas
-          </div>
-          <div className="mt-1 text-2xl font-semibold text-amber-600 dark:text-amber-400">
-            {formatMoney(totalPagoMensualDeudas)}
-          </div>
-          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-            Suma de todos los pagos mensuales que definiste en tus deudas.
-          </p>
-        </div>
-      </section>
-
-      <section className="px-1">
-        <p className="text-[11px] text-slate-500 dark:text-slate-400">
-          Estas cifras consideran{" "}
-          <span className="font-semibold">
-            {viewMode === "family" && family && isFamilyOwner
-              ? `a todos los miembros vinculados de la familia "${family.name}".`
-              : "únicamente tus registros personales."}
-          </span>{" "}
-          Los filtros de abajo te permiten analizar por dueño, banco,
-          categoría, etc.
-        </p>
-      </section>
-
-      {/* Filtros de patrimonio */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          {/* Filtros lado izquierdo */}
-          <div className="w-full lg:max-w-lg">
-            <h2 className="text-sm font-semibold">Filtros de patrimonio</h2>
-
-            <div className="mt-3 grid gap-3 text-xs md:grid-cols-2">
-              <div>
-                <div className="mb-1 text-slate-500 dark:text-slate-300">
-                  Dueño
+              {familyCtx && (
+                <div className="mt-2 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                  <div>
+                    Familia:{" "}
+                    <span className="font-semibold">
+                      {familyCtx.familyName}
+                    </span>{" "}
+                    {isFamilyOwner
+                      ? "(jefe de familia)"
+                      : "(miembro de familia)"}
+                  </div>
+                  <div>
+                    Miembros activos:{" "}
+                    <span className="font-semibold">
+                      {familyCtx.activeMembers}
+                    </span>
+                  </div>
                 </div>
+              )}
+
+              {familyError && (
+                <p className="mt-1 text-[11px] text-rose-500">
+                  {familyError}
+                </p>
+              )}
+            </div>
+
+            {/* Toggle de vista SOLO si es jefe de familia */}
+            {familyCtx && isFamilyOwner ? (
+              <div className="flex flex-col items-start gap-2 text-xs md:items-end">
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Vista de patrimonio
+                </div>
+                <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-[11px] dark:border-slate-700 dark:bg-slate-900">
+                  <button
+                    type="button"
+                    onClick={() => setViewScope("personal")}
+                    className={`rounded-full px-3 py-1 ${
+                      effectiveScope === "personal"
+                        ? "bg-sky-500 text-white"
+                        : "text-slate-700 dark:text-slate-200"
+                    }`}
+                  >
+                    Sólo mi patrimonio
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewScope("family")}
+                    className={`rounded-full px-3 py-1 ${
+                      effectiveScope === "family"
+                        ? "bg-sky-500 text-white"
+                        : "text-slate-700 dark:text-slate-200"
+                    }`}
+                  >
+                    Patrimonio familiar
+                  </button>
+                </div>
+                <p className="max-w-xs text-[11px] text-slate-500 dark:text-slate-400">
+                  En modo familiar se suman tus activos y deudas más las de tus
+                  familiares activos en la app.
+                </p>
+              </div>
+            ) : (
+              <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
+                Vista actual:{" "}
+                <span className="font-semibold">Sólo tu patrimonio.</span>
+                {familyCtx && !isFamilyOwner && (
+                  <>
+                    {" "}
+                    El modo familiar sólo está disponible para el jefe de
+                    familia.
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Tarjetas resumen */}
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="flex min-h-[110px] flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              Activos totales
+            </div>
+            <div className="mt-1 text-2xl md:text-3xl font-semibold tracking-tight text-emerald-600 dark:text-emerald-400">
+              {formatMoney(totalActivos)}
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Todo lo que tienes a valor aproximado actual.
+            </p>
+          </div>
+
+          <div className="flex min-h-[110px] flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              Deudas totales
+            </div>
+            <div className="mt-1 text-2xl md:text-3xl font-semibold tracking-tight text-rose-600 dark:text-rose-400">
+              {formatMoney(totalDeudas)}
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Saldo pendiente considerando tarjetas, créditos y préstamos.
+            </p>
+          </div>
+
+          <div className="flex min-h-[110px] flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              Patrimonio neto estimado
+            </div>
+            <div
+              className={`mt-1 text-2xl md:text-3xl font-semibold tracking-tight ${
+                patrimonioNeto >= 0
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-rose-600 dark:text-rose-400"
+              }`}
+            >
+              {formatMoney(patrimonioNeto)}
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Activos – Deudas. Este es el número clave que vas a querer ver
+              subir con el tiempo.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Formularios de captura */}
+      <section className="grid gap-4 md:grid-cols-2">
+        {/* Form Activos */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+            Agregar activo
+          </h2>
+          <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
+            Usa esto para cuentas bancarias, inversiones, propiedades, autos,
+            negocios, etc.
+          </p>
+          <form onSubmit={handleSubmitAsset} className="space-y-3 text-xs">
+            <div>
+              <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
+                Nombre del activo
+              </label>
+              <input
+                type="text"
+                value={assetForm.name}
+                onChange={(e) =>
+                  handleChangeAssetForm("name", e.target.value)
+                }
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="Ej. Cuenta BBVA, Casa Monterrey, Tesla, etc."
+                required
+              />
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
+                  Categoría
+                </label>
                 <select
-                  value={ownerFilter}
-                  onChange={(e) => setOwnerFilter(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                  value={assetForm.category}
+                  onChange={(e) =>
+                    handleChangeAssetForm("category", e.target.value)
+                  }
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
                 >
-                  <option value="TODOS">Todos</option>
-                  {ownerOptions.map((o) => (
-                    <option key={o} value={o}>
-                      {o}
+                  {ASSET_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
                     </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <div className="mb-1 text-slate-500 dark:text-slate-300">
-                  Buscar
-                </div>
+                <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
+                  Valor aproximado actual
+                </label>
                 <input
-                  type="text"
-                  value={searchText}
-                  onChange={(e) => setSearchText(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-                  placeholder="Nombre, banco, categoría, notas..."
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={assetForm.current_value}
+                  onChange={(e) =>
+                    handleChangeAssetForm("current_value", e.target.value)
+                  }
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                  placeholder="Ej. 250000"
+                  required
                 />
               </div>
             </div>
 
-            <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-slate-500 dark:text-slate-300">
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
-                Dueño: {ownerFilter === "TODOS" ? "Todos" : ownerFilter}
-              </span>
-              {searchText && (
-                <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-700 dark:bg-sky-900/40 dark:text-sky-200">
-                  Buscando: “{searchText}”
-                </span>
-              )}
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
-                Modo: {viewMode === "personal" ? "Solo yo" : "Familia"}
-              </span>
-            </div>
-          </div>
-
-          {/* Totales filtrados */}
-          <div className="grid w-full gap-3 text-xs sm:grid-cols-2 lg:max-w-md">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                Activos filtrados
-              </div>
-              <div className="mt-1 text-lg font-semibold text-emerald-600 dark:text-emerald-400">
-                {formatMoney(filteredTotalActivos)}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                Deudas filtradas
-              </div>
-              <div className="mt-1 text-lg font-semibold text-rose-600 dark:text-rose-400">
-                {formatMoney(filteredTotalDeudas)}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                Patrimonio filtrado
-              </div>
-              <div
-                className={`mt-1 text-lg font-semibold ${
-                  filteredPatrimonioNeto >= 0
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : "text-rose-600 dark:text-rose-400"
-                }`}
-              >
-                {formatMoney(filteredPatrimonioNeto)}
-              </div>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                Pago mensual filtrado
-              </div>
-              <div className="mt-1 text-lg font-semibold text-amber-600 dark:text-amber-400">
-                {formatMoney(filteredPagoMensual)}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
-          Los montos de esta sección y las tablas de abajo se calculan solo con
-          los activos y deudas que coinciden con los filtros seleccionados y
-          con el modo actual ({viewMode === "personal" ? "Solo yo" : "Familia"}
-          ).
-        </p>
-      </section>
-
-      {/* Formularios + tablas */}
-      <section className="grid gap-4 lg:grid-cols-2">
-        {/* Activos */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="mb-2 text-sm font-semibold">Activos</h2>
-          <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
-            Registra todo lo que tienes a tu nombre o de tu familia:
-            propiedades, autos, cuentas, inversiones, etc.
-          </p>
-
-          <form
-            onSubmit={handleSaveAsset}
-            className="mb-3 grid gap-2 text-xs md:grid-cols-4"
-          >
-            <input
-              type="text"
-              value={assetForm.name}
-              onChange={(e) => handleChangeAssetForm("name", e.target.value)}
-              className="md:col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              placeholder="Nombre (Casa, Auto, Ahorros...)"
-            />
-            <input
-              type="text"
-              value={assetForm.category}
-              onChange={(e) =>
-                handleChangeAssetForm("category", e.target.value)
-              }
-              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              placeholder="Categoría (Propiedad, Efectivo, Inversión...)"
-            />
-            <input
-              type="number"
-              value={assetForm.currentValue}
-              onChange={(e) =>
-                handleChangeAssetForm("currentValue", e.target.value)
-              }
-              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              placeholder="Valor actual"
-            />
-            {/* Dueño */}
-            <div className="md:col-span-2">
-              <div className="mb-1 text-[11px] text-slate-500 dark:text-slate-300">
-                Dueño
-              </div>
-              <select
+            <div>
+              <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
+                ¿A nombre de quién está?
+              </label>
+              <input
+                type="text"
                 value={assetForm.owner}
                 onChange={(e) =>
                   handleChangeAssetForm("owner", e.target.value)
                 }
-                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              >
-                {ownerOptions.map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </select>
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="Ej. David, Dibri, Hijo, etc."
+              />
             </div>
-            <textarea
-              value={assetForm.notes}
-              onChange={(e) =>
-                handleChangeAssetForm("notes", e.target.value)
-              }
-              className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 md:col-span-4"
-              placeholder="Notas (ubicación, institución, algún detalle, etc.)"
-            />
-            <div className="mt-1 flex flex-wrap gap-2 md:col-span-4">
-              <button
-                type="submit"
-                disabled={savingAsset}
-                className="inline-flex flex-1 items-center justify-center rounded-lg bg-emerald-500 px-3 py-1 text-[11px] font-semibold text-white hover:bg-emerald-600 disabled:opacity-60"
-              >
-                {savingAsset
-                  ? "Guardando..."
-                  : editingAssetId
-                  ? "Guardar cambios"
-                  : "Agregar activo"}
-              </button>
-              {editingAssetId && (
-                <button
-                  type="button"
-                  onClick={cancelAssetEdit}
-                  className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Cancelar edición
-                </button>
-              )}
-            </div>
-          </form>
 
-          {loading && assets.length === 0 ? (
-            <p className="text-[11px] text-slate-500">Cargando activos...</p>
-          ) : filteredAssets.length === 0 ? (
-            <p className="text-[11px] text-slate-500">
-              No hay activos que coincidan con los filtros.
+            <div>
+              <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
+                Notas (opcional)
+              </label>
+              <textarea
+                value={assetForm.notes}
+                onChange={(e) =>
+                  handleChangeAssetForm("notes", e.target.value)
+                }
+                className="h-16 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="Ej. Esta cuenta es para emergencias, esta casa aún tiene hipoteca, etc."
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={savingAsset}
+              className="w-full rounded-lg bg-emerald-500 py-2 text-xs font-medium text-white transition hover:bg-emerald-600 disabled:opacity-60"
+            >
+              {savingAsset ? "Guardando..." : "Guardar activo"}
+            </button>
+          </form>
+        </div>
+
+        {/* Form Deudas */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+            Agregar deuda
+          </h2>
+          <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
+            Registra tarjetas de crédito, préstamos, créditos de auto, casa,
+            etc. Lo importante es el saldo actual.
+          </p>
+
+          <form onSubmit={handleSubmitDebt} className="space-y-3 text-xs">
+            <div>
+              <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
+                Nombre de la deuda
+              </label>
+              <input
+                type="text"
+                value={debtForm.name}
+                onChange={(e) =>
+                  handleChangeDebtForm("name", e.target.value)
+                }
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="Ej. Tarjeta BBVA Azul, Crédito casa, etc."
+                required
+              />
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
+                  Tipo de deuda
+                </label>
+                <select
+                  value={debtForm.type}
+                  onChange={(e) =>
+                    handleChangeDebtForm("type", e.target.value)
+                  }
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                >
+                  {DEBT_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
+                  Monto total autorizado o original
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={debtForm.total_amount}
+                  onChange={(e) =>
+                    handleChangeDebtForm("total_amount", e.target.value)
+                  }
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                  placeholder="Ej. 100000"
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
+                Saldo actual aproximado
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={debtForm.current_balance}
+                onChange={(e) =>
+                  handleChangeDebtForm("current_balance", e.target.value)
+                }
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="Ej. 45000"
+              />
+              <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                Si lo dejas vacío, se tomará el monto total como saldo.
+              </p>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
+                Notas (opcional)
+              </label>
+              <textarea
+                value={debtForm.notes}
+                onChange={(e) =>
+                  handleChangeDebtForm("notes", e.target.value)
+                }
+                className="h-16 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="Ej. Esta tarjeta se paga el 5 de cada mes, crédito a 15 años, etc."
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={savingDebt}
+              className="w-full rounded-lg bg-rose-500 py-2 text-xs font-medium text-white transition hover:bg-rose-600 disabled:opacity-60"
+            >
+              {savingDebt ? "Guardando..." : "Guardar deuda"}
+            </button>
+          </form>
+        </div>
+      </section>
+
+      {/* Listados */}
+      <section className="grid gap-4 md:grid-cols-2">
+        {/* Lista activos */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              Lista de activos
+            </h2>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+              {assets.length} registro(s)
+            </span>
+          </div>
+
+          {loadingPatrimonio ? (
+            <p className="text-xs text-slate-500">Cargando activos...</p>
+          ) : assets.length === 0 ? (
+            <p className="text-xs text-slate-500">
+              Aún no has registrado activos en esta vista.
             </p>
           ) : (
-            <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-100 dark:border-slate-700">
-              <table className="min-w-full border-collapse text-[11px]">
-                <thead className="sticky top-0 bg-slate-50 text-slate-600 dark:bg-slate-900/80 dark:text-slate-300">
-                  <tr>
-                    <th className="px-2 py-1 text-left font-medium">Nombre</th>
-                    <th className="px-2 py-1 text-left font-medium">
-                      Categoría
-                    </th>
-                    <th className="px-2 py-1 text-left font-medium">Dueño</th>
-                    <th className="px-2 py-1 text-right font-medium">Valor</th>
-                    <th className="px-2 py-1 text-center font-medium">
-                      Acciones
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredAssets.map((a) => (
-                    <tr
-                      key={a.id}
-                      className="border-t border-slate-100 odd:bg-white even:bg-slate-50 hover:bg-slate-100/70 dark:border-slate-700 dark:odd:bg-slate-900 dark:even:bg-slate-800 dark:hover:bg-slate-700/60"
+            <ul className="space-y-2 text-xs">
+              {assets.map((a) => (
+                <li
+                  key={a.id}
+                  className="flex items-start justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/40"
+                >
+                  <div className="flex flex-col">
+                    <span className="font-medium text-slate-800 dark:text-slate-100">
+                      {a.name}
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {a.category || "Sin categoría"} ·{" "}
+                      {a.owner ? `A nombre de: ${a.owner}` : "Propietario: N/D"}
+                    </span>
+                    {a.created_at && (
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                        Registrado: {formatDateDisplay(a.created_at)}
+                      </span>
+                    )}
+                    {a.notes && (
+                      <span className="mt-1 text-[11px] text-slate-500 dark:text-slate-300">
+                        {a.notes}
+                      </span>
+                    )}
+                  </div>
+                  <div className="ml-3 flex flex-col items-end gap-2">
+                    <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                      {formatMoney(a.current_value ?? 0)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteAsset(a.id)}
+                      className="text-[10px] text-rose-500 hover:underline"
                     >
-                      <td className="px-2 py-1">{a.name}</td>
-                      <td className="px-2 py-1">{a.category ?? "-"}</td>
-                      <td className="px-2 py-1">
-                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                          {a.owner ?? "-"}
-                        </span>
-                      </td>
-                      <td className="px-2 py-1 text-right">
-                        {formatMoney(a.current_value ?? 0)}
-                      </td>
-                      <td className="px-2 py-1 text-center">
-                        <div className="flex justify-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleEditAsset(a)}
-                            className="rounded px-1 py-0.5 text-[10px] text-sky-700 hover:bg-sky-50 dark:text-sky-300 dark:hover:bg-sky-900/40"
-                          >
-                            Editar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteAsset(a)}
-                            className="rounded px-1 py-0.5 text-[10px] text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/40"
-                          >
-                            Eliminar
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                      Eliminar
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
 
-        {/* Deudas */}
+        {/* Lista deudas */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="mb-2 text-sm font-semibold">Deudas</h2>
-          <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
-            Registra hipotecas, créditos de auto, tarjetas y cualquier otro
-            compromiso. El campo de pago mensual te ayuda a ver la carga fija al
-            mes.
-          </p>
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              Lista de deudas
+            </h2>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+              {debts.length} registro(s)
+            </span>
+          </div>
 
-          <form
-            onSubmit={handleSaveDebt}
-            className="mb-3 grid gap-2 text-xs md:grid-cols-4"
-          >
-            <input
-              type="text"
-              value={debtForm.name}
-              onChange={(e) => handleChangeDebtForm("name", e.target.value)}
-              className="md:col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              placeholder="Nombre (Hipoteca casa, Tarjeta BBVA...)"
-            />
-            <input
-              type="text"
-              value={debtForm.type}
-              onChange={(e) => handleChangeDebtForm("type", e.target.value)}
-              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              placeholder="Tipo (Hipoteca, Auto, Tarjeta...)"
-            />
-            <input
-              type="text"
-              value={debtForm.category}
-              onChange={(e) =>
-                handleChangeDebtForm("category", e.target.value)
-              }
-              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              placeholder="Categoría (Banco, Tienda, etc.)"
-            />
-            <input
-              type="number"
-              value={debtForm.totalAmount}
-              onChange={(e) =>
-                handleChangeDebtForm("totalAmount", e.target.value)
-              }
-              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              placeholder="Monto total"
-            />
-            <input
-              type="number"
-              value={debtForm.currentBalance}
-              onChange={(e) =>
-                handleChangeDebtForm("currentBalance", e.target.value)
-              }
-              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              placeholder="Saldo actual"
-            />
-            <input
-              type="number"
-              value={debtForm.monthlyPayment}
-              onChange={(e) =>
-                handleChangeDebtForm("monthlyPayment", e.target.value)
-              }
-              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              placeholder="Pago mensual fijo"
-            />
-            <input
-              type="number"
-              step="0.01"
-              value={debtForm.interestRate}
-              onChange={(e) =>
-                handleChangeDebtForm("interestRate", e.target.value)
-              }
-              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              placeholder="Tasa interés (%)"
-            />
-            <input
-              type="date"
-              value={debtForm.dueDate}
-              onChange={(e) => handleChangeDebtForm("dueDate", e.target.value)}
-              className="md:col-span-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-            />
-            {/* Dueño */}
-            <div className="md:col-span-2">
-              <div className="mb-1 text-[11px] text-slate-500 dark:text-slate-300">
-                De quién es la deuda
-              </div>
-              <select
-                value={debtForm.owner}
-                onChange={(e) =>
-                  handleChangeDebtForm("owner", e.target.value)
-                }
-                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              >
-                {ownerOptions.map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <textarea
-              value={debtForm.notes}
-              onChange={(e) => handleChangeDebtForm("notes", e.target.value)}
-              className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 md:col-span-4"
-              placeholder="Notas (institución, condiciones, etc.)"
-            />
-            <div className="mt-1 flex flex-wrap gap-2 md:col-span-4">
-              <button
-                type="submit"
-                disabled={savingDebt}
-                className="inline-flex flex-1 items-center justify-center rounded-lg bg-rose-500 px-3 py-1 text-[11px] font-semibold text-white hover:bg-rose-600 disabled:opacity-60"
-              >
-                {savingDebt
-                  ? "Guardando..."
-                  : editingDebtId
-                  ? "Guardar cambios"
-                  : "Agregar deuda"}
-              </button>
-              {editingDebtId && (
-                <button
-                  type="button"
-                  onClick={cancelDebtEdit}
-                  className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Cancelar edición
-                </button>
-              )}
-            </div>
-          </form>
-
-          {loading && debts.length === 0 ? (
-            <p className="text-[11px] text-slate-500">Cargando deudas...</p>
-          ) : filteredDebts.length === 0 ? (
-            <p className="text-[11px] text-slate-500">
-              No hay deudas que coincidan con los filtros.
+          {loadingPatrimonio ? (
+            <p className="text-xs text-slate-500">Cargando deudas...</p>
+          ) : debts.length === 0 ? (
+            <p className="text-xs text-slate-500">
+              Aún no has registrado deudas en esta vista.
             </p>
           ) : (
-            <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-100 dark:border-slate-700">
-              <table className="min-w-full border-collapse text-[11px]">
-                <thead className="sticky top-0 bg-slate-50 text-slate-600 dark:bg-slate-900/80 dark:text-slate-300">
-                  <tr>
-                    <th className="px-2 py-1 text-left font-medium">Deuda</th>
-                    <th className="px-2 py-1 text-left font-medium">Tipo</th>
-                    <th className="px-2 py-1 text-left font-medium">Dueño</th>
-                    <th className="px-2 py-1 text-right font-medium">Total</th>
-                    <th className="px-2 py-1 text-right font-medium">Saldo</th>
-                    <th className="px-2 py-1 text-right font-medium">
-                      Pago mensual
-                    </th>
-                    <th className="px-2 py-1 text-left font-medium">Vence</th>
-                    <th className="px-2 py-1 text-center font-medium">
-                      Acciones
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredDebts.map((d) => (
-                    <tr
-                      key={d.id}
-                      className="border-t border-slate-100 odd:bg-white even:bg-slate-50 hover:bg-slate-100/70 dark:border-slate-700 dark:odd:bg-slate-900 dark:even:bg-slate-800 dark:hover:bg-slate-700/60"
+            <ul className="space-y-2 text-xs">
+              {debts.map((d) => (
+                <li
+                  key={d.id}
+                  className="flex items-start justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/40"
+                >
+                  <div className="flex flex-col">
+                    <span className="font-medium text-slate-800 dark:text-slate-100">
+                      {d.name}
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {d.type || "Sin tipo"} · Total:{" "}
+                      {formatMoney(d.total_amount ?? 0)}
+                    </span>
+                    {d.created_at && (
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                        Registrada: {formatDateDisplay(d.created_at)}
+                      </span>
+                    )}
+                    {d.notes && (
+                      <span className="mt-1 text-[11px] text-slate-500 dark:text-slate-300">
+                        {d.notes}
+                      </span>
+                    )}
+                  </div>
+                  <div className="ml-3 flex flex-col items-end gap-2">
+                    <span className="text-sm font-semibold text-rose-600 dark:text-rose-400">
+                      {formatMoney(
+                        Number(d.current_balance ?? d.total_amount ?? 0)
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteDebt(d.id)}
+                      className="text-[10px] text-rose-500 hover:underline"
                     >
-                      <td className="px-2 py-1">{d.name}</td>
-                      <td className="px-2 py-1">
-                        {d.type || d.category || "-"}
-                      </td>
-                      <td className="px-2 py-1">
-                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                          {d.owner ?? "-"}
-                        </span>
-                      </td>
-                      <td className="px-2 py-1 text-right">
-                        {formatMoney(d.total_amount ?? 0)}
-                      </td>
-                      <td className="px-2 py-1 text-right">
-                        {formatMoney(d.current_balance ?? d.total_amount ?? 0)}
-                      </td>
-                      <td className="px-2 py-1 text-right">
-                        {formatMoney(d.monthly_payment ?? 0)}
-                      </td>
-                      <td className="px-2 py-1">
-                        {formatDateDisplay(d.due_date)}
-                      </td>
-                      <td className="px-2 py-1 text-center">
-                        <div className="flex justify-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleEditDebt(d)}
-                            className="rounded px-1 py-0.5 text-[10px] text-sky-700 hover:bg-sky-50 dark:text-sky-300 dark:hover:bg-sky-900/40"
-                          >
-                            Editar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteDebt(d)}
-                            className="rounded px-1 py-0.5 text-[10px] text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/40"
-                          >
-                            Eliminar
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                      Eliminar
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       </section>
 
-      {(error || familyError) && (
-        <section className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
-          {error && <p>{error}</p>}
-          {familyError && <p className="mt-1">{familyError}</p>}
+      {patrimonioError && (
+        <section className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
+          {patrimonioError}
         </section>
       )}
     </main>
