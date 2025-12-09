@@ -62,6 +62,11 @@ type FamilyContext = {
   ownerUserId: string;
   memberId: string;
   role: "owner" | "member";
+  activeMemberUserIds: string[];
+  membersByUserId?: Record<
+    string,
+    { userId: string; fullName: string; shortLabel: string }
+  >;
 };
 
 const DEFAULT_CATEGORIES: Option[] = [
@@ -195,6 +200,40 @@ const [isFamilyOwner, setIsFamilyOwner] = useState(false);
 
   const [cards, setCards] = useState<Card[]>([]);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+
+ // Decide qué texto mostrar en la columna "Generó"
+const getSpenderLabel = (tx: Tx): string => {
+  if (!user) return "—";
+
+  // Si tenemos contexto de familia y el spender es un miembro conocido
+  const member =
+    familyCtx?.membersByUserId &&
+    tx.spender_user_id
+      ? familyCtx.membersByUserId[tx.spender_user_id]
+      : null;
+
+  if (member) {
+    // Si yo soy el que gastó → "Yo"
+    if (tx.spender_user_id === user.id) {
+      return "Yo";
+    }
+
+    // Si fue un miembro (hijo, esposa, muchacha, etc.)
+    return member.shortLabel || member.fullName || "Miembro";
+  }
+
+  // Si el spender es el usuario logueado pero no hay contexto de familia
+  if (tx.spender_user_id === user.id) {
+    return "Yo";
+  }
+
+  // Si había un label manual en versiones viejas
+  if (tx.spender_label && tx.spender_label !== "Yo") {
+    return tx.spender_label;
+  }
+
+  return "Miembro";
+};
 
   // Cuando cambias la tarjeta en el formulario
   const handleChangeCard = (cardId: string | null) => {
@@ -532,79 +571,133 @@ useEffect(() => {
   };
 
   // --------------------------------------------------
-  //   Cargar contexto de familia (si pertenece a una)
-  // --------------------------------------------------
-  useEffect(() => {
-    const currentUser = user;
-    if (!currentUser) {
-      setFamilyCtx(null);
-      setFamilyCtxError(null);
-      setFamilyCtxLoading(false);
-      return;
-    }
+//   Cargar contexto de familia (si pertenece a una)
+// --------------------------------------------------
+useEffect(() => {
+  const currentUser = user;
+  if (!currentUser) {
+    setFamilyCtx(null);
+    setFamilyCtxError(null);
+    setFamilyCtxLoading(false);
+    return;
+  }
 
-    const userId = currentUser.id;
-    const email = (currentUser.email ?? "").toLowerCase();
-    let cancelled = false;
+  const userId = currentUser.id;
+  const email = (currentUser.email ?? "").toLowerCase();
+  let cancelled = false;
 
-    const loadFamilyCtx = async () => {
-      setFamilyCtxLoading(true);
-      setFamilyCtxError(null);
-      try {
-        // 1) Buscar membresía activa usando user_id O invited_email
-        const { data: memberRows, error: memberError } = await supabase
-          .from("family_members")
-          .select("id,family_id,role,status,user_id,invited_email")
-          .or(`user_id.eq.${userId},invited_email.eq.${email}`)
-          .eq("status", "active")
-          .limit(1);
+  const loadFamilyCtx = async () => {
+    setFamilyCtxLoading(true);
+    setFamilyCtxError(null);
 
-        if (memberError) throw memberError;
+    try {
+      // 1) Buscar mi membresía activa (como jefe o miembro)
+      const { data: memberRows, error: memberError } = await supabase
+        .from("family_members")
+        .select("id,family_id,role,status,user_id,invited_email")
+        .or(`user_id.eq.${userId},invited_email.eq.${email}`)
+        .eq("status", "active")
+        .limit(1);
 
-        if (!memberRows || memberRows.length === 0) {
-          if (!cancelled) {
-            setFamilyCtx(null);
-          }
-          return;
-        }
+      if (memberError) throw memberError;
 
-        const member = memberRows[0];
-
-        // 2) Cargar familia
-        const { data: fam, error: famError } = await supabase
-          .from("families")
-          .select("id,name,user_id")
-          .eq("id", member.family_id)
-          .single();
-
-        if (famError) throw famError;
-
+      if (!memberRows || memberRows.length === 0) {
         if (!cancelled) {
-          setFamilyCtx({
-            familyId: fam.id,
-            familyName: fam.name,
-            ownerUserId: fam.user_id,
-            memberId: member.id,
-            role: member.role as "owner" | "member",
-          });
-        }
-      } catch (err: any) {
-        console.error("Error cargando contexto de familia:", err);
-        if (!cancelled) {
-          setFamilyCtxError("No se pudo cargar la información de familia.");
           setFamilyCtx(null);
         }
-      } finally {
-        if (!cancelled) setFamilyCtxLoading(false);
+        return;
       }
-    };
 
-    loadFamilyCtx();
+      const member = memberRows[0];
 
-    return () => {
-      cancelled = true;
+      // 2) Cargar la familia (para saber quién es el owner)
+      const { data: fam, error: famError } = await supabase
+        .from("families")
+        .select("id,name,user_id")
+        .eq("id", member.family_id)
+        .single();
+
+      if (famError) throw famError;
+
+      // 2.1) Traer TODOS los miembros activos de esa familia
+let membersByUserId: Record<
+  string,
+  { userId: string; fullName: string; shortLabel: string }
+> = {};
+
+const { data: allMembers, error: membersError } = await supabase
+  .from("family_members")
+  .select("user_id, full_name, short_label, status")  // 👈 AQUI YA METEMOS short_label
+  .eq("family_id", fam.id)
+  .eq("status", "active");
+
+if (membersError) {
+  console.error("Error cargando miembros:", membersError);
+} else if (allMembers) {
+  allMembers.forEach((m) => {
+    if (!m.user_id) return;
+
+    const fullName = m.full_name ?? "Miembro";
+
+    // Si no hay short_label, usamos el primer nombre como fallback
+    const autoShort = fullName.split(" ")[0] ?? fullName;
+    const shortLabel = m.short_label ?? autoShort;
+
+    membersByUserId[m.user_id] = {
+      userId: m.user_id,
+      fullName,
+      shortLabel,
     };
-  }, [user]);
+  });
+}
+
+      // 3) Traer TODOS los miembros activos para obtener sus user_id
+      const { data: activeMembers, error: activeError } = await supabase
+        .from("family_members")
+        .select("user_id,status")
+        .eq("family_id", fam.id)
+        .eq("status", "active");
+
+      if (activeError) throw activeError;
+
+      let activeIds =
+        (activeMembers ?? [])
+          .map((r: any) => r.user_id)
+          .filter((id: string | null) => !!id) as string[];
+
+      // Asegurarnos de que el dueño esté en la lista
+      if (!activeIds.includes(fam.user_id)) {
+        activeIds.push(fam.user_id);
+      }
+
+      if (!cancelled) {
+        setFamilyCtx({
+          familyId: fam.id,
+          familyName: fam.name,
+          ownerUserId: fam.user_id,
+          memberId: member.id,
+          role: member.role as "owner" | "member",
+          activeMemberUserIds: activeIds,
+          membersByUserId,
+        });
+      }
+    } catch (err: any) {
+      console.error("Error cargando contexto de familia:", err);
+      if (!cancelled) {
+        setFamilyCtxError("No se pudo cargar la información de familia.");
+        setFamilyCtx(null);
+      }
+    } finally {
+      if (!cancelled) setFamilyCtxLoading(false);
+    }
+  };
+
+  loadFamilyCtx();
+
+  return () => {
+    cancelled = true;
+  };
+}, [user]);
 
   useEffect(() => {
     if (viewScope === "family" && !isFamilyOwner) {
@@ -724,20 +817,44 @@ useEffect(() => {
         .gte("date", from)
         .lte("date", to);
 
+      console.log("DEBUG scope", {
+        isFamilyOwner,
+        viewScope,
+        familyCtx,
+      });
+
       if (isFamilyOwner) {
-        if (viewScope === "family") {
-          // 👨‍👩‍👧 Vista familiar: todo lo que tenga como owner al jefe
-          query = query.eq("owner_user_id", userId);
-        } else {
-          // 👤 Vista "Solo yo" siendo jefe:
-          // - tus propios movimientos personales
-          // - y los que se generaron con tus tarjetas compartidas
+        if (viewScope === "mine") {
+          // 🔵 SOLO YO (jefe):
+          // - movimientos que YO capturé
+          // - + movimientos que paga el jefe (owner_user_id = jefe)
           query = query.or(
             [
-              `user_id.eq.${userId}`, // tus movimientos personales
-              `owner_user_id.eq.${userId}` // movimientos de tarjetas que tú compartiste
+              `user_id.eq.${userId}`,
+              `owner_user_id.eq.${userId}`,
             ].join(",")
           );
+        } else {
+          // 🟢 FAMILIA (jefe):
+          // - TODOS los movimientos capturados por cualquier miembro activo
+          // - + todos los que paga el jefe, por si algún miembro aún no está bien linkeado
+          if (familyCtx && familyCtx.activeMemberUserIds.length > 0) {
+            const list = familyCtx.activeMemberUserIds.join(",");
+            query = query.or(
+              [
+                `user_id.in.(${list})`,
+                `owner_user_id.eq.${userId}`,
+              ].join(",")
+            );
+          } else {
+            // Fallback: al menos que vea lo mismo que "Solo yo"
+            query = query.or(
+              [
+                `user_id.eq.${userId}`,
+                `owner_user_id.eq.${userId}`,
+              ].join(",")
+            );
+          }
         }
       } else {
         // Usuario normal (no jefe): sólo sus propios movimientos
@@ -764,7 +881,6 @@ useEffect(() => {
         }))
       );
 
-      // Cache local por mes
       if (typeof window !== "undefined") {
         localStorage.setItem(
           `ff-cache-${month}`,
@@ -775,7 +891,6 @@ useEffect(() => {
       console.error(err);
       setError("No se pudieron cargar los movimientos.");
 
-      // Intentar leer del cache si hay error
       if (typeof window !== "undefined") {
         const cache = localStorage.getItem(`ff-cache-${month}`);
         if (cache) {
@@ -810,7 +925,7 @@ useEffect(() => {
   if (typeof window !== "undefined") {
     load();
   }
-}, [month, user, isFamilyOwner, viewScope]);
+}, [month, user, isFamilyOwner, viewScope, familyCtx]);
 
   // --------------------------------------------------
   //   Sincronizar cola offline al volver internet
@@ -1415,7 +1530,7 @@ useEffect(() => {
   // --------------------------------------------------
   //   Guardar / editar / borrar movimiento
   // --------------------------------------------------
-  const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -1446,8 +1561,14 @@ useEffect(() => {
       spender_label: spenderLabel,
     };
 
-    // 🔑 Si pertenece a una familia, el dueño financiero es el owner de la familia
-    const ownerUserId = familyCtx ? familyCtx.ownerUserId : user.id;
+    // 👇 NUEVO: determinar correctamente quién es el dueño financiero
+    // 1) Si hay tarjeta seleccionada → el dueño es el owner_id de la tarjeta
+    // 2) Si NO hay tarjeta → el dueño es el propio usuario que registra
+    const selectedCard = selectedCardId
+      ? cards.find((c) => c.id === selectedCardId)
+      : undefined;
+
+    const ownerUserId = selectedCard?.owner_id ?? user.id;
     const spenderUserId = user.id;
 
     setSaving(true);
@@ -1516,6 +1637,7 @@ useEffect(() => {
                   ...basePayload,
                   owner_user_id: ownerUserId,
                   spender_user_id: spenderUserId,
+                  spender_label: spenderLabel,
                   created_by: user.id,
                   card_id: selectedCardId ?? null,
                 }
@@ -1530,6 +1652,7 @@ useEffect(() => {
             user_id: user.id,
             owner_user_id: ownerUserId,
             spender_user_id: spenderUserId,
+            spender_label: spenderLabel,
             created_by: user.id,
             card_id: selectedCardId ?? null,
           })
@@ -2881,8 +3004,7 @@ useEffect(() => {
 {/* Generó */}
 <td className="border-t px-2 py-1">
   <span className="text-xs text-slate-600 dark:text-slate-300">
-    {t.spender_label ??
-      (t.spender_user_id === user.id ? "Yo" : "Otro")}
+    {getSpenderLabel(t)}
   </span>
 </td>
 

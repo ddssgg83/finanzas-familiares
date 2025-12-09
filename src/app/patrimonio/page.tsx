@@ -57,6 +57,10 @@ type FamilyContext = {
   ownerUserId: string;
   activeMembers: number;
   activeMemberUserIds: string[];
+  membersByUserId?: Record<
+    string,
+    { userId: string; fullName: string; shortLabel: string }
+  >;
 };
 
 type ViewScope = "personal" | "family";
@@ -83,8 +87,8 @@ const DEBT_TYPES = [
 ];
 
 // =========================================================
-//  Helpers
-// =========================================================
+ //  Helpers
+ // =========================================================
 
 function formatMoney(num: number) {
   return num.toLocaleString("es-MX", {
@@ -129,7 +133,7 @@ export default function PatrimonioPage() {
   // Formularios
   const [assetForm, setAssetForm] = useState<AssetForm>({
     name: "",
-    category: "Cuenta bancaria",
+    category: ASSET_CATEGORIES[0],
     current_value: "",
     owner: "",
     notes: "",
@@ -137,7 +141,7 @@ export default function PatrimonioPage() {
 
   const [debtForm, setDebtForm] = useState<DebtForm>({
     name: "",
-    type: "Tarjeta de crédito",
+    type: DEBT_TYPES[0],
     total_amount: "",
     current_balance: "",
     notes: "",
@@ -145,6 +149,10 @@ export default function PatrimonioPage() {
 
   const [savingAsset, setSavingAsset] = useState(false);
   const [savingDebt, setSavingDebt] = useState(false);
+
+  // Edición
+  const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
+  const [editingDebtId, setEditingDebtId] = useState<string | null>(null);
 
   // =========================================================
   //  1. AUTH
@@ -370,8 +378,7 @@ export default function PatrimonioPage() {
   const totalDeudas = useMemo(
     () =>
       debts.reduce(
-        (sum, d) =>
-          sum + Number(d.current_balance ?? d.total_amount ?? 0),
+        (sum, d) => sum + Number(d.current_balance ?? d.total_amount ?? 0),
         0
       ),
     [debts]
@@ -382,15 +389,34 @@ export default function PatrimonioPage() {
   // =========================================================
   //  5. Handlers formularios
   // =========================================================
-  const handleChangeAssetForm = (
-    field: keyof AssetForm,
-    value: string
-  ) => {
+  const handleChangeAssetForm = (field: keyof AssetForm, value: string) => {
     setAssetForm((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleChangeDebtForm = (field: keyof DebtForm, value: string) => {
     setDebtForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const resetAssetForm = () => {
+    setAssetForm({
+      name: "",
+      category: ASSET_CATEGORIES[0],
+      current_value: "",
+      owner: "",
+      notes: "",
+    });
+    setEditingAssetId(null);
+  };
+
+  const resetDebtForm = () => {
+    setDebtForm({
+      name: "",
+      type: DEBT_TYPES[0],
+      total_amount: "",
+      current_balance: "",
+      notes: "",
+    });
+    setEditingDebtId(null);
   };
 
   const handleSubmitAsset = async (e: React.FormEvent) => {
@@ -400,8 +426,10 @@ export default function PatrimonioPage() {
       return;
     }
 
-    const val = Number(assetForm.current_value.replace(",", ""));
-    if (!assetForm.name.trim() || !Number.isFinite(val)) {
+    const rawValue = assetForm.current_value.replace(/\s/g, "").replace(",", "");
+    const val = Number(rawValue);
+
+    if (!assetForm.name.trim() || !Number.isFinite(val) || val < 0) {
       alert("Revisa el nombre y el valor del activo.");
       return;
     }
@@ -409,44 +437,63 @@ export default function PatrimonioPage() {
     try {
       setSavingAsset(true);
 
-      const { data, error } = await supabase
-        .from("assets")
-        .insert([
-          {
-            user_id: user.id,
-            family_id: familyCtx?.familyId ?? null,
+      if (editingAssetId) {
+        // UPDATE
+        const { data, error } = await supabase
+          .from("assets")
+          .update({
             name: assetForm.name.trim(),
             category: assetForm.category || null,
             current_value: val,
             owner: assetForm.owner.trim() || null,
             notes: assetForm.notes.trim() || null,
-          },
-        ])
-        .select(
-          "id,user_id,family_id,name,category,current_value,owner,notes,created_at"
-        )
-        .single();
+          })
+          .eq("id", editingAssetId)
+          .select(
+            "id,user_id,family_id,name,category,current_value,owner,notes,created_at"
+          )
+          .single();
 
-      if (error) throw error;
+        if (error) throw error;
 
-      // Si estamos en vista personal o el activo pertenece a uno de los ids que se muestran, lo agregamos
-      if (
-        effectiveScope === "personal" ||
-        !familyCtx ||
-        !isFamilyOwner ||
-        familyCtx.activeMemberUserIds.includes(data.user_id) ||
-        data.user_id === familyCtx.ownerUserId
-      ) {
-        setAssets((prev) => [data as Asset, ...prev]);
+        setAssets((prev) =>
+          prev.map((a) => (a.id === editingAssetId ? (data as Asset) : a))
+        );
+        resetAssetForm();
+      } else {
+        // INSERT
+        const { data, error } = await supabase
+          .from("assets")
+          .insert([
+            {
+              user_id: user.id,
+              family_id: familyCtx?.familyId ?? null,
+              name: assetForm.name.trim(),
+              category: assetForm.category || null,
+              current_value: val,
+              owner: assetForm.owner.trim() || null,
+              notes: assetForm.notes.trim() || null,
+            },
+          ])
+          .select(
+            "id,user_id,family_id,name,category,current_value,owner,notes,created_at"
+          )
+          .single();
+
+        if (error) throw error;
+
+        if (
+          effectiveScope === "personal" ||
+          !familyCtx ||
+          !isFamilyOwner ||
+          familyCtx.activeMemberUserIds.includes(data.user_id) ||
+          data.user_id === familyCtx.ownerUserId
+        ) {
+          setAssets((prev) => [data as Asset, ...prev]);
+        }
+
+        resetAssetForm();
       }
-
-      setAssetForm({
-        name: "",
-        category: assetForm.category,
-        current_value: "",
-        owner: "",
-        notes: "",
-      });
     } catch (err) {
       console.error("Error guardando activo:", err);
       alert("No se pudo guardar el activo. Intenta de nuevo.");
@@ -463,52 +510,89 @@ export default function PatrimonioPage() {
       return;
     }
 
+    const rawTotal = debtForm.total_amount.replace(/\s/g, "").replace(",", "");
+    const total = Number(rawTotal);
+
+    if (!debtForm.name.trim() || !Number.isFinite(total) || total < 0) {
+      alert("Revisa el nombre y el monto total de la deuda.");
+      return;
+    }
+
+    const rawCurrent = debtForm.current_balance
+      ? debtForm.current_balance.replace(/\s/g, "").replace(",", "")
+      : "";
+    const currentBalance =
+      rawCurrent && rawCurrent !== "" ? Number(rawCurrent) : total;
+
+    if (!Number.isFinite(currentBalance) || currentBalance < 0) {
+      alert("Revisa el saldo actual de la deuda.");
+      return;
+    }
+
+    const debtType = DEBT_TYPES.includes(debtForm.type)
+      ? debtForm.type
+      : "Otro";
+
     try {
       setSavingDebt(true);
 
-      const total = Number(debtForm.total_amount) || 0;
-
-      const currentBalance =
-        debtForm.current_balance && debtForm.current_balance !== ""
-          ? Number(debtForm.current_balance)
-          : total;
-
-      const { data, error } = await supabase
-        .from("debts")
-        .insert([
-          {
-            user_id: user.id,
-            family_id: familyCtx?.familyId ?? null,
+      if (editingDebtId) {
+        // UPDATE
+        const { data, error } = await supabase
+          .from("debts")
+          .update({
             name: debtForm.name.trim(),
-            type: debtForm.type || "OTRO",
+            type: debtType,
             total_amount: total,
             current_balance: currentBalance,
             notes: debtForm.notes.trim() || null,
-          },
-        ])
-        .select(
-          "id,user_id,family_id,name,type,total_amount,current_balance,notes,created_at"
-        )
-        .single();
+          })
+          .eq("id", editingDebtId)
+          .select(
+            "id,user_id,family_id,name,type,total_amount,current_balance,notes,created_at"
+          )
+          .single();
 
-      if (error) throw error;
+        if (error) throw error;
 
-      if (
-        effectiveScope === "personal" ||
-        !familyCtx ||
-        !isFamilyOwner ||
-        familyCtx.activeMemberUserIds.includes(data.user_id)
-      ) {
-        setDebts((prev) => [data as Debt, ...prev]);
+        setDebts((prev) =>
+          prev.map((d) => (d.id === editingDebtId ? (data as Debt) : d))
+        );
+        resetDebtForm();
+      } else {
+        // INSERT
+        const { data, error } = await supabase
+          .from("debts")
+          .insert([
+            {
+              user_id: user.id,
+              family_id: familyCtx?.familyId ?? null,
+              name: debtForm.name.trim(),
+              type: debtType,
+              total_amount: total,
+              current_balance: currentBalance,
+              notes: debtForm.notes.trim() || null,
+            },
+          ])
+          .select(
+            "id,user_id,family_id,name,type,total_amount,current_balance,notes,created_at"
+          )
+          .single();
+
+        if (error) throw error;
+
+        if (
+          effectiveScope === "personal" ||
+          !familyCtx ||
+          !isFamilyOwner ||
+          familyCtx.activeMemberUserIds.includes(data.user_id) ||
+          data.user_id === familyCtx.ownerUserId
+        ) {
+          setDebts((prev) => [data as Debt, ...prev]);
+        }
+
+        resetDebtForm();
       }
-
-      setDebtForm({
-        name: "",
-        type: "OTRO",
-        total_amount: "",
-        current_balance: "",
-        notes: "",
-      });
     } catch (err) {
       console.error("Error guardando deuda:", err);
       alert("No se pudo guardar la deuda.");
@@ -523,6 +607,9 @@ export default function PatrimonioPage() {
       const { error } = await supabase.from("assets").delete().eq("id", id);
       if (error) throw error;
       setAssets((prev) => prev.filter((a) => a.id !== id));
+      if (editingAssetId === id) {
+        resetAssetForm();
+      }
     } catch (err) {
       console.error("Error eliminando activo:", err);
       alert("No se pudo eliminar el activo.");
@@ -535,10 +622,38 @@ export default function PatrimonioPage() {
       const { error } = await supabase.from("debts").delete().eq("id", id);
       if (error) throw error;
       setDebts((prev) => prev.filter((d) => d.id !== id));
+      if (editingDebtId === id) {
+        resetDebtForm();
+      }
     } catch (err) {
       console.error("Error eliminando deuda:", err);
       alert("No se pudo eliminar la deuda.");
     }
+  };
+
+  const startEditAsset = (asset: Asset) => {
+    setEditingAssetId(asset.id);
+    setAssetForm({
+      name: asset.name ?? "",
+      category: asset.category || ASSET_CATEGORIES[0],
+      current_value: asset.current_value?.toString() ?? "",
+      owner: asset.owner ?? "",
+      notes: asset.notes ?? "",
+    });
+  };
+
+  const startEditDebt = (debt: Debt) => {
+    setEditingDebtId(debt.id);
+    setDebtForm({
+      name: debt.name ?? "",
+      type: DEBT_TYPES.includes(debt.type) ? debt.type : DEBT_TYPES[0],
+      total_amount: debt.total_amount?.toString() ?? "",
+      current_balance:
+        debt.current_balance != null
+          ? debt.current_balance.toString()
+          : "",
+      notes: debt.notes ?? "",
+    });
   };
 
   // =========================================================
@@ -606,6 +721,11 @@ export default function PatrimonioPage() {
                       {familyCtx.activeMembers}
                     </span>
                   </div>
+                  {familyLoading && (
+                    <div className="text-[10px] text-slate-400">
+                      Actualizando información de familia...
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -718,9 +838,20 @@ export default function PatrimonioPage() {
       <section className="grid gap-4 md:grid-cols-2">
         {/* Form Activos */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-            Agregar activo
-          </h2>
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              {editingAssetId ? "Editar activo" : "Agregar activo"}
+            </h2>
+            {editingAssetId && (
+              <button
+                type="button"
+                onClick={resetAssetForm}
+                className="text-[11px] text-slate-500 hover:underline"
+              >
+                Cancelar edición
+              </button>
+            )}
+          </div>
           <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
             Usa esto para cuentas bancarias, inversiones, propiedades, autos,
             negocios, etc.
@@ -815,16 +946,33 @@ export default function PatrimonioPage() {
               disabled={savingAsset}
               className="w-full rounded-lg bg-emerald-500 py-2 text-xs font-medium text-white transition hover:bg-emerald-600 disabled:opacity-60"
             >
-              {savingAsset ? "Guardando..." : "Guardar activo"}
+              {savingAsset
+                ? editingAssetId
+                  ? "Actualizando..."
+                  : "Guardando..."
+                : editingAssetId
+                ? "Actualizar activo"
+                : "Guardar activo"}
             </button>
           </form>
         </div>
 
         {/* Form Deudas */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-            Agregar deuda
-          </h2>
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              {editingDebtId ? "Editar deuda" : "Agregar deuda"}
+            </h2>
+            {editingDebtId && (
+              <button
+                type="button"
+                onClick={resetDebtForm}
+                className="text-[11px] text-slate-500 hover:underline"
+              >
+                Cancelar edición
+              </button>
+            )}
+          </div>
           <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
             Registra tarjetas de crédito, préstamos, créditos de auto, casa,
             etc. Lo importante es el saldo actual.
@@ -925,7 +1073,13 @@ export default function PatrimonioPage() {
               disabled={savingDebt}
               className="w-full rounded-lg bg-rose-500 py-2 text-xs font-medium text-white transition hover:bg-rose-600 disabled:opacity-60"
             >
-              {savingDebt ? "Guardando..." : "Guardar deuda"}
+              {savingDebt
+                ? editingDebtId
+                  ? "Actualizando..."
+                  : "Guardando..."
+                : editingDebtId
+                ? "Actualizar deuda"
+                : "Guardar deuda"}
             </button>
           </form>
         </div>
@@ -970,23 +1124,43 @@ export default function PatrimonioPage() {
                         Registrado: {formatDateDisplay(a.created_at)}
                       </span>
                     )}
+                    {effectiveScope === "family" && (
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                        Registrado por:{" "}
+                        {a.user_id === user.id
+                          ? "Tú"
+                          : "Otro miembro de tu familia"}
+                      </span>
+                    )}
                     {a.notes && (
                       <span className="mt-1 text-[11px] text-slate-500 dark:text-slate-300">
                         {a.notes}
                       </span>
                     )}
                   </div>
-                  <div className="ml-3 flex flex-col items-end gap-2">
+                  <div className="ml-3 flex flex-col items-end gap-1">
                     <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
                       {formatMoney(a.current_value ?? 0)}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteAsset(a.id)}
-                      className="text-[10px] text-rose-500 hover:underline"
-                    >
-                      Eliminar
-                    </button>
+                    {/* Por ahora sólo puedes editar/eliminar lo que tú capturaste */}
+                    {a.user_id === user.id && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => startEditAsset(a)}
+                          className="text-[10px] text-sky-600 hover:underline"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteAsset(a.id)}
+                          className="text-[10px] text-rose-500 hover:underline"
+                        >
+                          Eliminar
+                        </button>
+                      </>
+                    )}
                   </div>
                 </li>
               ))}
@@ -1031,25 +1205,45 @@ export default function PatrimonioPage() {
                         Registrada: {formatDateDisplay(d.created_at)}
                       </span>
                     )}
+                    {effectiveScope === "family" && (
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                        Registrada por:{" "}
+                        {d.user_id === user.id
+                          ? "Tú"
+                          : "Otro miembro de tu familia"}
+                      </span>
+                    )}
                     {d.notes && (
                       <span className="mt-1 text-[11px] text-slate-500 dark:text-slate-300">
                         {d.notes}
                       </span>
                     )}
                   </div>
-                  <div className="ml-3 flex flex-col items-end gap-2">
+                  <div className="ml-3 flex flex-col items-end gap-1">
                     <span className="text-sm font-semibold text-rose-600 dark:text-rose-400">
                       {formatMoney(
                         Number(d.current_balance ?? d.total_amount ?? 0)
                       )}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteDebt(d.id)}
-                      className="text-[10px] text-rose-500 hover:underline"
-                    >
-                      Eliminar
-                    </button>
+                    {/* Por ahora sólo puedes editar/eliminar lo que tú capturaste */}
+                    {d.user_id === user.id && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => startEditDebt(d)}
+                          className="text-[10px] text-sky-600 hover:underline"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteDebt(d.id)}
+                          className="text-[10px] text-rose-500 hover:underline"
+                        >
+                          Eliminar
+                        </button>
+                      </>
+                    )}
                   </div>
                 </li>
               ))}
