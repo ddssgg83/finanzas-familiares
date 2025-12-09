@@ -1,28 +1,27 @@
+// src/app/api/aprende-ai/route.ts
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
-// Usa SOLO la clave privada (NO NEXT_PUBLIC)
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 export async function POST(req: Request) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("[aprende-ai] OPENAI_API_KEY no está definida");
-    return NextResponse.json(
-      { answer: "No hay API key configurada." },
-      { status: 500 }
-    );
-  }
-
   try {
     const body = await req.json();
     const {
-      mode = "qa",
+      mode = "qa", // "qa" | "explain" | "plan" | "analyze-expenses"
       question,
       summary,
       monthLabel,
     } = body;
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      console.error("[aprende-ai] Falta OPENAI_API_KEY en el servidor");
+      return NextResponse.json(
+        { answer: "Error de configuración de IA en el servidor." },
+        { status: 500 }
+      );
+    }
+
+    const client = new OpenAI({ apiKey });
 
     let systemContent = "";
     let userContent = "";
@@ -30,26 +29,28 @@ export async function POST(req: Request) {
     switch (mode) {
       case "explain":
         systemContent =
-          "Eres un maestro de primaria que explica finanzas en español muy simple, como para un niño de 10 años.";
+          "Eres un maestro de primaria que explica finanzas en español muy simple, como para un niño de 10 años. Usa ejemplos de la vida diaria en familia.";
         userContent = question ?? "";
         break;
 
       case "plan":
         systemContent =
-          "Eres un asesor financiero personal. Responde SOLO con un plan de acción práctico y numerado.";
+          "Eres un asesor financiero personal. Responde SOLO con un plan de acción claro, en pasos numerados y bullets, aplicado a la situación del usuario. Nada de teoría, solo cosas prácticas.";
         userContent = question ?? "";
         break;
 
       case "analyze-expenses":
         systemContent =
-          "Eres un asesor personal. Da (1) observaciones clave, (2) 3 acciones para ahorrar, (3) frase corta de ánimo.";
-        userContent = `Resumen del mes ${monthLabel ?? ""}:\n${summary ?? ""}`;
+          "Eres un asesor financiero personal. Te doy un resumen de ingresos y gastos de un mes. Devuelve: (1) 3–5 observaciones clave, (2) 3 acciones concretas para reducir gastos, (3) una frase final de ánimo corta.";
+        userContent = `Resumen de mis movimientos del mes ${
+          monthLabel ?? ""
+        }:\n${summary ?? ""}`;
         break;
 
       case "qa":
       default:
         systemContent =
-          "Eres un asesor financiero personal. Responde en español, de forma clara y práctica.";
+          "Eres un asesor financiero personal que habla en español, directo y práctico. Te enfocas en ayudar a familias con presupuesto, deudas, ahorro y tarjetas.";
         userContent = question ?? "";
         break;
     }
@@ -60,15 +61,13 @@ export async function POST(req: Request) {
         { role: "system", content: systemContent },
         { role: "user", content: userContent },
       ],
-      temperature: 0.4,
-      max_tokens: 600,
     });
 
-    return NextResponse.json({
-      answer: completion.choices[0].message.content ?? "",
-    });
-  } catch (err: any) {
-    console.error("[aprende-ai] Error:", err?.message ?? err);
+    const answer = completion.choices[0].message.content ?? "";
+
+    return NextResponse.json({ answer });
+  } catch (err) {
+    console.error("Error en /api/aprende-ai:", err);
     return NextResponse.json(
       { answer: "Error al conectarse con la IA." },
       { status: 500 }
