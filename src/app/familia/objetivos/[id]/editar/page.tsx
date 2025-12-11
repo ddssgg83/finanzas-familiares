@@ -20,13 +20,9 @@ type GoalFormState = {
   track_category: string;
 };
 
-export default function EditFamilyGoalPage({
-  params,
-}: {
-  params: { id: string };
-}) {
+export default function EditFamilyGoalPage(props: any) {
   const router = useRouter();
-  const goalId = params.id;
+  const goalId = (props?.params?.id ?? "") as string;
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,50 +42,89 @@ export default function EditFamilyGoalPage({
     track_category: "",
   });
 
+  // Cargar usuario + meta existente
   useEffect(() => {
-    const fetchGoal = async () => {
+    let cancelled = false;
+
+    const load = async () => {
       try {
+        setLoading(true);
+        setError(null);
+
         const {
           data: { user },
+          error: userError,
         } = await supabase.auth.getUser();
-        setUser(user);
 
-        const { data, error } = await supabase
-          .from("family_goals")
-          .select("*")
-          .eq("id", goalId)
-          .maybeSingle();
-
-        if (error) throw error;
-        if (!data) {
-          setError("No se encontró esta meta.");
-          setLoading(false);
+        if (userError) throw userError;
+        if (!user) {
+          if (!cancelled) {
+            setError("No se encontró el usuario. Inicia sesión de nuevo.");
+          }
           return;
         }
 
-        setForm({
-          name: data.name || "",
-          description: data.description || "",
-          target_amount: String(data.target_amount ?? ""),
-          due_date: data.due_date || "",
-          category: data.category || "",
-          type: data.type || "",
-          status: data.status || "",
-          auto_track: !!data.auto_track,
-          track_direction: data.track_direction || "",
-          track_category: data.track_category || "",
-        });
+        if (!cancelled) {
+          setUser(user);
+        }
+
+        if (!goalId) {
+          if (!cancelled) {
+            setError("No se encontró el ID de la meta.");
+          }
+          return;
+        }
+
+        const { data: goal, error: goalError } = await supabase
+          .from("family_goals")
+          .select(
+            "id,name,description,target_amount,due_date,category,type,status,auto_track,track_direction,track_category"
+          )
+          .eq("id", goalId)
+          .maybeSingle();
+
+        if (goalError) throw goalError;
+        if (!goal) {
+          if (!cancelled) {
+            setError("No se encontró la meta familiar.");
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          setForm({
+            name: goal.name ?? "",
+            description: goal.description ?? "",
+            target_amount: goal.target_amount
+              ? String(goal.target_amount)
+              : "",
+            due_date: goal.due_date ? goal.due_date.slice(0, 10) : "",
+            category: goal.category ?? "",
+            type: goal.type ?? "",
+            status: goal.status ?? "",
+            auto_track: Boolean(goal.auto_track),
+            track_direction: (goal.track_direction ??
+              "") as GoalFormState["track_direction"],
+            track_category: goal.track_category ?? "",
+          });
+        }
       } catch (err: any) {
-        console.error("Error cargando meta:", err);
-        setError(
-          err?.message || "Ocurrió un error al cargar la meta seleccionada."
-        );
+        console.error("Error cargando meta familiar:", err);
+        if (!cancelled) {
+          setError(
+            err?.message || "Ocurrió un error al cargar la meta familiar."
+          );
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
-    fetchGoal();
+    load();
+
+    return () => {
+      cancelled = true;
+    };
   }, [goalId]);
 
   const handleChange = (
@@ -107,265 +142,271 @@ export default function EditFamilyGoalPage({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
+    if (!goalId) {
+      setError("No se encontró el ID de la meta.");
+      return;
+    }
+
     try {
       setSaving(true);
       setError(null);
 
+      const targetAmountNum = Number(form.target_amount || 0);
+      if (!targetAmountNum || targetAmountNum <= 0) {
+        setError("Ingresa un monto objetivo válido mayor a 0.");
+        setSaving(false);
+        return;
+      }
+
+      const payload = {
+        name: form.name.trim(),
+        description: form.description.trim() || null,
+        target_amount: targetAmountNum,
+        due_date: form.due_date || null,
+        category: form.category || null,
+        type: form.type || null,
+        status: form.status || null,
+        auto_track: form.auto_track,
+        track_direction: form.auto_track ? form.track_direction || null : null,
+        track_category: form.auto_track ? form.track_category || null : null,
+      };
+
       const { error: updateError } = await supabase
         .from("family_goals")
-        .update({
-          name: form.name.trim(),
-          description: form.description.trim() || null,
-          target_amount: Number(form.target_amount || 0),
-          due_date: form.due_date || null,
-          category: form.category.trim() || null,
-          type: form.type.trim() || null,
-          status: form.status || null,
-          auto_track: form.auto_track,
-          track_direction: form.auto_track ? form.track_direction || null : null,
-          track_category: form.auto_track
-            ? form.track_category.trim() || null
-            : null,
-        })
+        .update(payload)
         .eq("id", goalId);
 
       if (updateError) throw updateError;
 
       router.push("/familia/objetivos");
     } catch (err: any) {
-      console.error("Error actualizando meta:", err);
+      console.error("Error actualizando meta familiar:", err);
       setError(
-        err?.message || "Ocurrió un error al actualizar la meta. Intenta de nuevo."
+        err?.message || "Ocurrió un error al guardar los cambios de la meta."
       );
     } finally {
       setSaving(false);
     }
   };
 
+  const handleCancel = () => {
+    router.push("/familia/objetivos");
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
       <AppHeader
-        title="Familia"
-        subtitle="Editar meta familiar"
+        title="Editar objetivo familiar"
+        subtitle="Ajusta el nombre, monto objetivo y configuración de seguimiento de esta meta."
         activeTab="familia"
       />
 
-      <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-10 pt-4 md:px-6 md:pt-6 lg:px-8">
-        <header className="flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight md:text-xl">
-              Editar objetivo familiar
-            </h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400 md:text-sm">
-              Ajusta el monto, fecha o configuración de seguimiento de esta
-              meta.
-            </p>
-          </div>
-        </header>
-
-        {loading && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            Cargando meta…
-          </div>
-        )}
-
-        {error && !loading && (
+      <main className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pb-10 pt-4 md:px-6 md:pt-6 lg:px-8">
+        {error && (
           <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-300">
             {error}
           </div>
         )}
 
-        {!loading && !error && (
-          <form
-            onSubmit={handleSubmit}
-            className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900 md:p-5"
-          >
-            <div className="space-y-2">
-              <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                Nombre de la meta
-              </label>
-              <input
-                required
-                name="name"
-                value={form.name}
-                onChange={handleChange}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
-              />
-            </div>
+        {loading ? (
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            Cargando información de la meta…
+          </div>
+        ) : (
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <h1 className="mb-3 text-base font-semibold">
+              Editar objetivo familiar
+            </h1>
 
-            <div className="space-y-2">
-              <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                Descripción
-              </label>
-              <textarea
-                name="description"
-                value={form.description}
-                onChange={handleChange}
-                rows={3}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
-              />
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                  Monto objetivo
-                </label>
-                <input
-                  required
-                  type="number"
-                  min={0}
-                  step="100"
-                  name="target_amount"
-                  value={form.target_amount}
-                  onChange={handleChange}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                  Fecha objetivo
-                </label>
-                <input
-                  type="date"
-                  name="due_date"
-                  value={form.due_date}
-                  onChange={handleChange}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-3">
-              <div className="space-y-2">
-                <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                  Categoría
-                </label>
-                <input
-                  name="category"
-                  value={form.category}
-                  onChange={handleChange}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                  Tipo
-                </label>
-                <select
-                  name="type"
-                  value={form.type}
-                  onChange={handleChange}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
-                >
-                  <option value="">Sin tipo</option>
-                  <option value="ahorro">Ahorro</option>
-                  <option value="deuda">Pago de deuda</option>
-                  <option value="gasto_controlado">Gasto controlado</option>
-                  <option value="otro">Otro</option>
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                  Estatus
-                </label>
-                <select
-                  name="status"
-                  value={form.status}
-                  onChange={handleChange}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
-                >
-                  <option value="">Sin estatus</option>
-                  <option value="pendiente">Pendiente</option>
-                  <option value="en_progreso">En progreso</option>
-                  <option value="completado">Completado</option>
-                  <option value="pausado">Pausado</option>
-                  <option value="cancelado">Cancelado</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="mt-2 space-y-2 rounded-2xl bg-slate-50 p-3 text-[11px] text-slate-600 dark:bg-slate-900/60 dark:text-slate-300">
-              <div className="flex items-center justify-between gap-2">
+            <form onSubmit={handleSubmit} className="space-y-4 text-xs md:text-sm">
+              <div className="grid gap-3 md:grid-cols-2">
                 <div>
-                  <p className="font-medium">
-                    Actualizar esta meta automáticamente
-                  </p>
-                  <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                    Si activas esta opción, la meta se actualizará cada que
-                    registres un movimiento con cierta categoría.
-                  </p>
+                  <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
+                    Nombre del objetivo
+                  </label>
+                  <input
+                    type="text"
+                    name="name"
+                    value={form.name}
+                    onChange={handleChange}
+                    required
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950"
+                    placeholder="Ej. Viaje familiar, fondo de emergencia…"
+                  />
                 </div>
-                <label className="inline-flex cursor-pointer items-center gap-2">
+
+                <div>
+                  <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
+                    Monto objetivo (MXN)
+                  </label>
+                  <input
+                    type="number"
+                    name="target_amount"
+                    value={form.target_amount}
+                    onChange={handleChange}
+                    min={0}
+                    step="100"
+                    required
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950"
+                    placeholder="Ej. 50000"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
+                    Fecha límite (opcional)
+                  </label>
+                  <input
+                    type="date"
+                    name="due_date"
+                    value={form.due_date}
+                    onChange={handleChange}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
+                    Categoría (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    name="category"
+                    value={form.category}
+                    onChange={handleChange}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950"
+                    placeholder="Ej. Viajes, ahorro, deudas…"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
+                    Tipo de objetivo (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    name="type"
+                    value={form.type}
+                    onChange={handleChange}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950"
+                    placeholder="Ej. Ahorro, reducción de gasto, pago de deuda…"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
+                    Estatus (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    name="status"
+                    value={form.status}
+                    onChange={handleChange}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950"
+                    placeholder="Ej. Activa, en pausa, cumplida…"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
+                  Descripción (opcional)
+                </label>
+                <textarea
+                  name="description"
+                  value={form.description}
+                  onChange={handleChange}
+                  rows={3}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950"
+                  placeholder="Cuenta un poco más sobre esta meta."
+                />
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-950">
+                <label className="flex items-start gap-2">
                   <input
                     type="checkbox"
                     name="auto_track"
                     checked={form.auto_track}
                     onChange={handleChange}
-                    className="h-4 w-4 rounded border-slate-300 text-emerald-500 focus:ring-emerald-400"
+                    className="mt-[2px]"
                   />
-                  <span className="text-[11px]">Activar</span>
+                  <span>
+                    Activar seguimiento automático con movimientos de gastos /
+                    ingresos
+                    <span className="mt-1 block text-[10px] text-slate-500 dark:text-slate-400">
+                      Si lo activas, podrás elegir hacia dónde se mueve el
+                      progreso (ingresos, ahorros, gastos reducidos) y una
+                      categoría específica.
+                    </span>
+                  </span>
                 </label>
+
+                {form.auto_track && (
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
+                        ¿Qué movimientos cuentan para el avance?
+                      </label>
+                      <select
+                        name="track_direction"
+                        value={form.track_direction}
+                        onChange={handleChange}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950"
+                      >
+                        <option value="">Selecciona una opción</option>
+                        <option value="ingresos">
+                          Ingresos (ej. abonos a la meta)
+                        </option>
+                        <option value="ahorros">
+                          Ahorros (ingresos menos gastos)
+                        </option>
+                        <option value="gastos_reducidos">
+                          Gastos reducidos en cierta categoría
+                        </option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
+                        Categoría relacionada (opcional)
+                      </label>
+                      <input
+                        type="text"
+                        name="track_category"
+                        value={form.track_category}
+                        onChange={handleChange}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950"
+                        placeholder="Ej. SUPER, VIAJES, SERVICIOS…"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {form.auto_track && (
-                <div className="mt-2 grid gap-3 md:grid-cols-2">
-                  <div className="space-y-1">
-                    <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                      Dirección del avance
-                    </label>
-                    <select
-                      name="track_direction"
-                      value={form.track_direction}
-                      onChange={handleChange}
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
-                    >
-                      <option value="">Selecciona</option>
-                      <option value="ingresos">Ingresos (aportes)</option>
-                      <option value="ahorros">
-                        Ahorros (monto apartado como ahorro)
-                      </option>
-                      <option value="gastos_reducidos">
-                        Gastos reducidos (control de gasto)
-                      </option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                      Categoría que actualiza esta meta
-                    </label>
-                    <input
-                      name="track_category"
-                      value={form.track_category}
-                      onChange={handleChange}
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => router.back()}
-                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                disabled={saving}
-                className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-70 dark:bg-emerald-500 dark:hover:bg-emerald-600"
-              >
-                {saving ? "Guardando…" : "Guardar cambios"}
-              </button>
-            </div>
-          </form>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="rounded-full border border-slate-300 px-4 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {saving ? "Guardando…" : "Guardar cambios"}
+                </button>
+              </div>
+            </form>
+          </section>
         )}
       </main>
     </div>
