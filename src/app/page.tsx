@@ -1,903 +1,506 @@
+// src/app/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
-import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-  Legend,
-  LineChart,
-  Line,
-} from "recharts";
-import { useTheme } from "next-themes";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { AppHeader } from "@/components/AppHeader";
 
 export const dynamic = "force-dynamic";
 
-type TxType = "ingreso" | "gasto";
-
-type Tx = {
-  id: string;
-  date: string;
-  type: TxType;
-  category: string;
-  amount: number;
-  method: string;
-  notes?: string | null;
+type MonthlySummary = {
+  incomes: number;
+  expenses: number;
+  balance: number;
+  monthLabel: string;
 };
 
-type Asset = {
-  id: string;
-  name: string;
-  category: string | null;
-  current_value: number | null;
-  owner: string | null;
-  notes: string | null;
-  created_at?: string;
+type NetWorthSummary = {
+  assets: number;
+  debts: number;
+  netWorth: number;
 };
 
-type Debt = {
+type Goal = {
   id: string;
-  name: string;
-  type: string;
-  total_amount: number;
-  current_balance: number | null;
-  notes: string | null;
-  created_at?: string;
+  title: string;
+  targetAmount: number;
+  deadline?: string;
+  status: "en-proceso" | "completado" | "pausado";
 };
 
-function getCurrentMonthKey(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
-}
-
-function formatMoney(num: number) {
-  return num.toLocaleString("es-MX", {
-    style: "currency",
-    currency: "MXN",
-    minimumFractionDigits: 2,
-  });
-}
-
-function formatDateDisplay(ymd: string) {
-  const s = (ymd ?? "").slice(0, 10);
-  const [y, m, d] = s.split("-");
-  if (!y || !m || !d) return ymd;
-  return `${d}/${m}/${y}`;
-}
-
-export default function HomeDashboardPage() {
-  // ---------- AUTH ----------
+export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
-  const [authEmail, setAuthEmail] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState<MonthlySummary | null>(null);
+  const [netWorth, setNetWorth] = useState<NetWorthSummary | null>(null);
+  const [dataError, setDataError] = useState<string | null>(null);
 
-  // ---------- ESTADO PRINCIPAL ----------
-  const [month, setMonth] = useState<string>(() => getCurrentMonthKey());
-  const [transactions, setTransactions] = useState<Tx[]>([]);
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [debts, setDebts] = useState<Debt[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadingPatrimonio, setLoadingPatrimonio] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Objetivos (por ahora solo en memoria)
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [goalTitle, setGoalTitle] = useState("");
+  const [goalTarget, setGoalTarget] = useState("");
+  const [goalDeadline, setGoalDeadline] = useState("");
 
-  // Presupuesto (localStorage)
-  const [budget, setBudget] = useState<number | null>(null);
-
-  // Saber si el usuario es jefe de familia
-  const [isFamilyOwner, setIsFamilyOwner] = useState(false);
-
-  // Tema (para gráficas)
-  const { theme, systemTheme } = useTheme();
-  const [mountedTheme, setMountedTheme] = useState(false);
-  useEffect(() => setMountedTheme(true), []);
-  const currentTheme = theme === "system" ? systemTheme : theme;
-  const isDark = mountedTheme && currentTheme === "dark";
-
-  // ---------- AUTH ----------
   useEffect(() => {
-    let ignore = false;
-
-    async function loadUser() {
-      setAuthLoading(true);
-      setAuthError(null);
-      try {
-        const { data, error } = await supabase.auth.getUser();
-        if (error && (error as any).name !== "AuthSessionMissingError") {
-          console.error("Error obteniendo usuario actual", error);
-        }
-        if (!ignore) {
-          setUser(data?.user ?? null);
-        }
-      } finally {
-        if (!ignore) setAuthLoading(false);
-      }
-    }
-
-    loadUser();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-
-    return () => {
-      ignore = true;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  const handleSignIn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError(null);
-    try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: authEmail.trim(),
-        password: authPassword,
-      });
-      if (error) {
-        console.error("Error en login", error);
-        setAuthError(error.message);
-        return;
-      }
-      setAuthEmail("");
-      setAuthPassword("");
-    } catch {
-      setAuthError("No se pudo iniciar sesión.");
-    }
-  };
-
-  const handleSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError(null);
-    try {
-      const { error } = await supabase.auth.signUp({
-        email: authEmail.trim(),
-        password: authPassword,
-      });
-      if (error) {
-        setAuthError(error.message);
-        return;
-      }
-      alert("Cuenta creada. Revisa tu correo si tienes verificación activada.");
-      setAuthMode("login");
-      setAuthPassword("");
-    } catch {
-      setAuthError("No se pudo crear la cuenta.");
-    }
-  };
-
-  const handleSignOut = async () => {
-    try {
-      await supabase.auth.signOut();
-      setUser(null);
-      setTransactions([]);
-      setAssets([]);
-      setDebts([]);
-      setBudget(null);
-      setIsFamilyOwner(false);
-    } catch (err) {
-      console.error("Error cerrando sesión", err);
-    }
-  };
-
-  // ---------- Detectar si es jefe de familia ----------
-  useEffect(() => {
-    if (!user) {
-      setIsFamilyOwner(false);
-      return;
-    }
-
     let cancelled = false;
-
-    const checkOwner = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("families")
-          .select("id")
-          .eq("user_id", user.id)
-          .limit(1);
-
-        if (error) {
-          console.error("Error revisando si es jefe de familia", error);
-          if (!cancelled) setIsFamilyOwner(false);
-          return;
-        }
-
-        if (!cancelled) {
-          setIsFamilyOwner((data ?? []).length > 0);
-        }
-      } catch (err) {
-        console.error("Error revisando si es jefe de familia", err);
-        if (!cancelled) setIsFamilyOwner(false);
-      }
-    };
-
-    checkOwner();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
-
-  // ---------- Cargar movimientos del mes ----------
-  useEffect(() => {
-    if (!user) {
-      setTransactions([]);
-      return;
-    }
-
-    const userId = user.id;
 
     async function load() {
       setLoading(true);
-      setError(null);
+      setDataError(null);
 
       try {
-        const [year, monthNumber] = month.split("-");
-        const from = `${month}-01`;
-        const to = `${month}-${new Date(
-          Number(year),
-          Number(monthNumber),
-          0
-        )
-          .getDate()
-          .toString()
-          .padStart(2, "0")}`;
+        const { data: userData } = await supabase.auth.getUser();
+        if (!cancelled) setUser(userData?.user ?? null);
 
-        let query = supabase
-          .from("transactions")
-          .select("*")
-          .gte("date", from)
-          .lte("date", to)
-          .order("date", { ascending: false });
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
-        // 👇 Si es jefe de familia, incluye también movimientos donde él es el dueño
-        if (isFamilyOwner) {
-          query = query.or(
-            `user_id.eq.${userId},owner_user_id.eq.${userId}`
-          );
-        } else {
-          query = query.eq("user_id", userId);
+        const monthLabel = monthStart.toLocaleDateString("es-MX", {
+          month: "long",
+          year: "numeric",
+        });
+
+        // ---------- RESUMEN MENSUAL ----------
+        try {
+          const { data: txs } = await supabase
+            .from("transactions")
+            .select("type, amount, date")
+            .gte("date", monthStart.toISOString())
+            .lt("date", nextMonthStart.toISOString());
+
+          let incomes = 0;
+          let expenses = 0;
+
+          (txs ?? []).forEach((tx: any) => {
+            const amt = Number(tx.amount) || 0;
+            if (tx.type === "ingreso") incomes += amt;
+            if (tx.type === "gasto") expenses += amt;
+          });
+
+          if (!cancelled) {
+            setSummary({
+              incomes,
+              expenses,
+              balance: incomes - expenses,
+              monthLabel,
+            });
+          }
+        } catch (err) {
+          console.warn("No se pudo cargar resumen mensual:", err);
+          if (!cancelled) {
+            setSummary({
+              incomes: 0,
+              expenses: 0,
+              balance: 0,
+              monthLabel,
+            });
+            setDataError("No se pudieron cargar algunos datos de este mes.");
+          }
         }
 
-        const { data, error } = await query;
+        // ---------- VALOR PATRIMONIAL ----------
+        try {
+          const [assetsRes, debtsRes] = await Promise.all([
+            supabase.from("assets").select("current_value"),
+            supabase.from("debts").select("current_balance, total_amount"),
+          ]);
 
-        if (error) throw error;
+          const assetsTotal = (assetsRes.data ?? []).reduce(
+            (acc: number, row: any) => acc + (Number(row.current_value) || 0),
+            0
+          );
 
-        setTransactions(
-          (data ?? []).map((t: any) => ({
-            id: t.id,
-            date: t.date,
-            type: t.type,
-            category: t.category,
-            amount: Number(t.amount),
-            method: t.method,
-            notes: t.notes,
-          }))
-        );
-      } catch (err) {
-        console.error(err);
-        setError("No se pudieron cargar los movimientos.");
+          const debtsTotal = (debtsRes.data ?? []).reduce(
+            (acc: number, row: any) =>
+              acc +
+              (Number(row.current_balance ?? row.total_amount ?? 0) || 0),
+            0
+          );
+
+          if (!cancelled) {
+            setNetWorth({
+              assets: assetsTotal,
+              debts: debtsTotal,
+              netWorth: assetsTotal - debtsTotal,
+            });
+          }
+        } catch (err) {
+          console.warn("No se pudo cargar patrimonio:", err);
+          if (!cancelled) {
+            setNetWorth({
+              assets: 0,
+              debts: 0,
+              netWorth: 0,
+            });
+            setDataError("No se pudieron cargar algunos datos de patrimonio.");
+          }
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
     load();
-  }, [month, user, isFamilyOwner]);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  // ---------- Cargar patrimonio (activos + deudas) ----------
-  useEffect(() => {
-    if (!user) {
-      setAssets([]);
-      setDebts([]);
-      return;
-    }
-    const userId = user.id;
+  const balanceTag = useMemo(() => {
+    if (!summary) return null;
+    const { balance } = summary;
+    if (balance > 0)
+      return { label: "Mes superavitario", tone: "positivo" as const };
+    if (balance < 0)
+      return { label: "Mes en rojo", tone: "negativo" as const };
+    return { label: "Mes tablas", tone: "neutro" as const };
+  }, [summary]);
 
-    async function loadPatrimonio() {
-      setLoadingPatrimonio(true);
+  const handleAddGoal = () => {
+    if (!goalTitle.trim() || !goalTarget.trim()) return;
+    const amount = Number(goalTarget.replace(/,/g, "."));
+    if (Number.isNaN(amount) || amount <= 0) return;
 
-      try {
-        const [assetsRes, debtsRes] = await Promise.all([
-          supabase
-            .from("assets")
-            .select(
-              "id,name,category,current_value,owner,notes,created_at"
-            )
-            .eq("user_id", userId),
-          supabase
-            .from("debts")
-            .select(
-              "id,name,type,total_amount,current_balance,notes,created_at"
-            )
-            .eq("user_id", userId),
-        ]);
+    const newGoal: Goal = {
+      id: crypto.randomUUID(),
+      title: goalTitle.trim(),
+      targetAmount: amount,
+      deadline: goalDeadline || undefined,
+      status: "en-proceso",
+    };
 
-        if (assetsRes.error) {
-          console.warn("Error cargando activos", assetsRes.error);
-        } else {
-          setAssets((assetsRes.data ?? []) as Asset[]);
-        }
+    setGoals((prev) => [newGoal, ...prev]);
+    setGoalTitle("");
+    setGoalTarget("");
+    setGoalDeadline("");
+  };
 
-        if (debtsRes.error) {
-          console.warn("Error cargando deudas", debtsRes.error);
-        } else {
-          setDebts((debtsRes.data ?? []) as Debt[]);
-        }
-      } catch (err) {
-        console.error("Error cargando patrimonio en dashboard", err);
-      } finally {
-        setLoadingPatrimonio(false);
-      }
-    }
-
-    loadPatrimonio();
-  }, [user]);
-
-  // ---------- Presupuesto del mes (localStorage) ----------
-  useEffect(() => {
-    const key = `ff-budget-${month}`;
-    const raw =
-      typeof window !== "undefined" ? localStorage.getItem(key) : null;
-    if (raw) {
-      const val = Number(raw);
-      setBudget(Number.isFinite(val) ? val : null);
-    } else {
-      setBudget(null);
-    }
-  }, [month]);
-
-  // ---------- Cálculos ----------
-  const { totalIngresos, totalGastos } = useMemo(() => {
-    let ingresos = 0;
-    let gastos = 0;
-    for (const t of transactions) {
-      if (t.type === "ingreso") ingresos += t.amount;
-      else gastos += t.amount;
-    }
-    return { totalIngresos: ingresos, totalGastos: gastos };
-  }, [transactions]);
-
-  const flujo = totalIngresos - totalGastos;
-  const totalActivos = useMemo(
-    () => assets.reduce((sum, a) => sum + (a.current_value ?? 0), 0),
-    [assets]
-  );
-  const totalDeudas = useMemo(
-    () =>
-      debts.reduce(
-        (sum, d) =>
-          sum + Number(d.current_balance ?? d.total_amount ?? 0),
-        0
-      ),
-    [debts]
-  );
-  const patrimonioNeto = totalActivos - totalDeudas;
-
-  const gastosPorCategoria = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const t of transactions) {
-      if (t.type !== "gasto") continue;
-      const key = t.category || "SIN_CATEGORIA";
-      map.set(key, (map.get(key) ?? 0) + t.amount);
-    }
-    const entries = Array.from(map.entries()).map(([category, total]) => ({
-      category,
-      total,
-    }));
-    entries.sort((a, b) => b.total - a.total);
-    const totalGastosMes = entries.reduce((sum, e) => sum + e.total, 0);
-    return entries.slice(0, 5).map((e) => ({
-      ...e,
-      percent: totalGastosMes ? (e.total * 100) / totalGastosMes : 0,
-    }));
-  }, [transactions]);
-
-  const chartDataCategorias = useMemo(
-    () =>
-      gastosPorCategoria.map((g) => ({
-        category: g.category,
-        total: g.total,
-      })),
-    [gastosPorCategoria]
-  );
-
-  const chartDataLinea = useMemo(() => {
-    const map = new Map<
-      string,
-      { date: string; ingresos: number; gastos: number }
-    >();
-    for (const t of transactions) {
-      const key = (t.date ?? "").slice(0, 10);
-      if (!map.has(key)) {
-        map.set(key, { date: key, ingresos: 0, gastos: 0 });
-      }
-      const item = map.get(key)!;
-      if (t.type === "ingreso") item.ingresos += t.amount;
-      else item.gastos += t.amount;
-    }
-    const arr = Array.from(map.values());
-    arr.sort((a, b) => (a.date < b.date ? -1 : 1));
-    return arr.map((d) => ({
-      ...d,
-      dateLabel: formatDateDisplay(d.date),
-    }));
-  }, [transactions]);
-
-  const lastTransactions = useMemo(
-    () => transactions.slice(0, 5),
-    [transactions]
-  );
-
-  const monthLabel = useMemo(() => {
-    const [y, m] = month.split("-");
-    const date = new Date(Number(y), Number(m) - 1, 1);
-    const raw = date.toLocaleDateString("es-MX", {
-      year: "numeric",
-      month: "long",
-    });
-    return raw.charAt(0).toUpperCase() + raw.slice(1);
-  }, [month]);
-
-  // ---------- UI AUTH ----------
-  if (authLoading) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
-        Cargando sesión...
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div className="flex flex-1 items-center justify-center">
-        <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-lg font-semibold">Finanzas familiares</h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Tu panel para controlar gastos, ingresos y patrimonio.
-              </p>
-            </div>
-            <ThemeToggle />
-          </div>
-
-          <h2 className="text-sm font-medium">
-            {authMode === "login" ? "Inicia sesión" : "Crea tu cuenta"}
-          </h2>
-
-          <form
-            onSubmit={authMode === "login" ? handleSignIn : handleSignUp}
-            className="space-y-3 text-sm"
-          >
-            <div>
-              <label className="mb-1 block text-xs text-gray-600 dark:text-gray-300">
-                Correo electrónico
-              </label>
-              <input
-                type="email"
-                required
-                value={authEmail}
-                onChange={(e) => setAuthEmail(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-                placeholder="tucorreo@ejemplo.com"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs text-gray-600 dark:text-gray-300">
-                Contraseña
-              </label>
-              <input
-                type="password"
-                required
-                value={authPassword}
-                onChange={(e) => setAuthPassword(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-                placeholder="Mínimo 6 caracteres"
-              />
-            </div>
-
-            {authError && (
-              <p className="text-xs text-red-500">{authError}</p>
-            )}
-
-            <button
-              type="submit"
-              className="w-full rounded-lg bg-sky-500 py-2 text-sm font-medium text-white transition hover:bg-sky-600"
-            >
-              {authMode === "login" ? "Entrar" : "Crear cuenta"}
-            </button>
-          </form>
-
-          <div className="text-center text-xs text-gray-600 dark:text-gray-300">
-            {authMode === "login" ? (
-              <>
-                ¿No tienes cuenta?{" "}
-                <button
-                  className="text-sky-600 underline"
-                  onClick={() => {
-                    setAuthMode("signup");
-                    setAuthError(null);
-                  }}
-                >
-                  Crear una nueva
-                </button>
-              </>
-            ) : (
-              <>
-                ¿Ya tienes cuenta?{" "}
-                <button
-                  className="text-sky-600 underline"
-                  onClick={() => {
-                    setAuthMode("login");
-                    setAuthError(null);
-                  }}
-                >
-                  Inicia sesión
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ---------- UI DASHBOARD ----------
   return (
-    <main className="flex flex-1 flex-col gap-4">
+    <main className="flex min-h-screen flex-col pb-16 md:pb-4">
       <AppHeader
-        title="Finanzas familiares – Dashboard"
-        subtitle="Resumen rápido de tus gastos, ingresos y patrimonio. Desde aquí te vas a las secciones de captura."
+        title="Dashboard"
+        subtitle="Una vista rápida de cómo va tu mes y tus objetivos financieros."
         activeTab="dashboard"
-        userEmail={user.email}
-        onSignOut={handleSignOut}
+        userEmail={user?.email ?? undefined}
       />
 
-      {/* Mes / selector */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="text-xs text-gray-500 dark:text-gray-300">
-              Mes que se está analizando
-            </div>
-            <div className="mt-1 flex items-center gap-2">
-              <input
-                type="month"
-                value={month}
-                onChange={(e) => setMonth(e.target.value)}
-                className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-                aria-label={`Mes: ${monthLabel}`}
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2 text-[11px]">
-            <Link
-              href="/gastos"
-              className="rounded-full bg-sky-500 px-3 py-1 font-medium text-white hover:bg-sky-600"
-            >
-              Capturar gastos / ingresos
-            </Link>
-            <Link
-              href="/patrimonio"
-              className="rounded-full bg-emerald-500 px-3 py-1 font-medium text-white hover:bg-emerald-600"
-            >
-              Ver / editar patrimonio
-            </Link>
-            <Link
-              href="/aprende"
-              className="rounded-full bg-amber-500 px-3 py-1 font-medium text-white hover:bg-amber-600"
-            >
-              Aprender finanzas
-            </Link>
-            <Link
-              href="/familia"
-              className="rounded-full bg-indigo-500 px-3 py-1 font-medium text-white hover:bg-indigo-600"
-            >
-              Gestionar familia
-            </Link>
-            {isFamilyOwner && (
-              <Link href="/familia/dashboard">
-                <button className="rounded-full bg-indigo-500 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-600">
-                  Dashboard familiar
-                </button>
-              </Link>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* Tarjetas resumen principales */}
-      <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <div className="flex min-h-[110px] flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="text-xs text-gray-500 dark:text-gray-300">
-            Ingresos del mes
-          </div>
-          <div className="mt-1 text-2xl md:text-3xl font-semibold tracking-tight text-emerald-600 dark:text-emerald-400">
-            {formatMoney(totalIngresos)}
-          </div>
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">
-            Todo lo que ha entrado en este mes.
-          </p>
-        </div>
-
-        <div className="flex min-h-[110px] flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="text-xs text-gray-500 dark:text-gray-300">
-            Gastos del mes
-          </div>
-          <div className="mt-1 text-2xl md:text-3xl font-semibold tracking-tight text-rose-600 dark:text-rose-400">
-            {formatMoney(totalGastos)}
-          </div>
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">
-            Suma de todos tus egresos registrados.
-          </p>
-        </div>
-
-        <div className="flex min-h-[110px] flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="text-xs text-gray-500 dark:text-gray-300">
-            Flujo del mes (Ingresos - Gastos)
-          </div>
-          <div
-            className={`mt-1 text-2xl md:text-3xl font-semibold tracking-tight ${
-              flujo >= 0
-                ? "text-emerald-600 dark:text-emerald-400"
-                : "text-rose-600 dark:text-rose-400"
-            }`}
-          >
-            {formatMoney(flujo)}
-          </div>
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">
-            Si es negativo te estás comiendo ahorros o deuda.
-          </p>
-        </div>
-
-        <div className="flex min-h-[110px] flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="text-xs text-gray-500 dark:text-gray-300">
-            Patrimonio neto estimado
-          </div>
-          <div
-            className={`mt-1 text-2xl md:text-3xl font-semibold tracking-tight ${
-              patrimonioNeto >= 0
-                ? "text-emerald-600 dark:text-emerald-400"
-                : "text-rose-600 dark:text-rose-400"
-            }`}
-          >
-            {formatMoney(patrimonioNeto)}
-          </div>
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">
-            Activos ({formatMoney(totalActivos)}) – Deudas (
-            {formatMoney(totalDeudas)}).
-          </p>
-        </div>
-      </section>
-
-      {/* Gráficas */}
-      <section className="grid gap-4 md:grid-cols-2">
-        <div className="h-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-2 text-xs font-semibold">
-            Top gastos por categoría
-          </h3>
-          {chartDataCategorias.length === 0 ? (
-            <p className="text-xs text-gray-500">
-              Aún no hay gastos registrados este mes.
-            </p>
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={chartDataCategorias}
-                margin={{ top: 10, right: 10, left: 0, bottom: 40 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="category"
-                  tick={{
-                    fontSize: 10,
-                    fill: isDark ? "#e5e7eb" : "#374151",
-                  }}
-                  angle={-30}
-                  textAnchor="end"
-                />
-                <YAxis
-                  tick={{
-                    fontSize: 10,
-                    fill: isDark ? "#e5e7eb" : "#374151",
-                  }}
-                />
-                <Tooltip />
-                <Legend />
-                <Bar
-                  dataKey="total"
-                  name="Gasto"
-                  radius={4}
-                  fill={isDark ? "#38bdf8" : "#0ea5e9"}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="h-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-2 text-xs font-semibold">
-            Ingresos vs gastos por día
-          </h3>
-          {chartDataLinea.length === 0 ? (
-            <p className="text-xs text-gray-500">
-              Aún no hay movimientos suficientes para la gráfica.
-            </p>
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartDataLinea}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="dateLabel"
-                  tick={{
-                    fontSize: 10,
-                    fill: isDark ? "#e5e7eb" : "#374151",
-                  }}
-                />
-                <YAxis
-                  tick={{
-                    fontSize: 10,
-                    fill: isDark ? "#e5e7eb" : "#374151",
-                  }}
-                />
-                <Tooltip />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="ingresos"
-                  name="Ingresos"
-                  dot={false}
-                  stroke={isDark ? "#22c55e" : "#16a34a"}
-                  strokeWidth={2}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="gastos"
-                  name="Gastos"
-                  dot={false}
-                  stroke={isDark ? "#fb7185" : "#ef4444"}
-                  strokeWidth={2}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </section>
-
-      {/* Últimos movimientos + mini patrimonio */}
-      <section className="grid gap-4 md:grid-cols-2">
-        {/* Últimos movimientos */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Últimos movimientos</h2>
-            <Link
-              href="/gastos"
-              className="text-[11px] text-sky-600 hover:underline"
-            >
-              Ver todos en Gastos e ingresos →
-            </Link>
-          </div>
-          {loading ? (
-            <p className="text-xs text-gray-500">Cargando movimientos...</p>
-          ) : lastTransactions.length === 0 ? (
-            <p className="text-xs text-gray-500">
-              No tienes movimientos en este mes.
-            </p>
-          ) : (
-            <ul className="space-y-2 text-xs">
-              {lastTransactions.map((t) => (
-                <li
-                  key={t.id}
-                  className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
-                >
-                  <div>
-                    <div className="font-medium">
-                      {t.type === "ingreso" ? "Ingreso" : "Gasto"} •{" "}
-                      {t.category}
-                    </div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {formatDateDisplay(t.date)} · {t.method}
-                      {t.notes ? ` · ${t.notes}` : ""}
-                    </div>
-                  </div>
-                  <div
-                    className={`text-sm font-semibold ${
-                      t.type === "ingreso"
-                        ? "text-emerald-600"
-                        : "text-rose-600"
+      <section className="px-4 pb-4 pt-3 md:px-6">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+          {/* FILA 1: Resumen mensual + patrimonio */}
+          <div className="grid gap-3 md:grid-cols-[2fr,1.4fr]">
+            {/* Resumen mensual */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                    Resumen de este mes
+                  </h2>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {summary
+                      ? `Movimientos del mes de ${summary.monthLabel}.`
+                      : "Cargando movimientos recientes..."}
+                  </p>
+                </div>
+                {balanceTag && (
+                  <span
+                    className={`rounded-full px-3 py-1 text-[10px] font-semibold ${
+                      balanceTag.tone === "positivo"
+                        ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-100"
+                        : balanceTag.tone === "negativo"
+                        ? "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-100"
+                        : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
                     }`}
                   >
-                    {formatMoney(t.amount)}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+                    {balanceTag.label}
+                  </span>
+                )}
+              </div>
 
-        {/* Mini resumen patrimonio */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">
-              Patrimonio rápido (activos y deudas)
-            </h2>
-            <Link
-              href="/patrimonio"
-              className="text-[11px] text-sky-600 hover:underline"
-            >
-              Ver detalle en Patrimonio →
-            </Link>
-          </div>
-          {loadingPatrimonio ? (
-            <p className="text-xs text-gray-500">Cargando patrimonio...</p>
-          ) : (
-            <>
-              <div className="grid gap-3 text-xs md:grid-cols-3">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/50">
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Activos totales
-                  </div>
-                  <div className="mt-1 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                    {formatMoney(totalActivos)}
-                  </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <SummaryCard
+                  label="Ingresos del mes"
+                  value={summary?.incomes ?? 0}
+                  tone="positive"
+                />
+                <SummaryCard
+                  label="Gastos del mes"
+                  value={summary?.expenses ?? 0}
+                  tone="negative"
+                />
+                <SummaryCard
+                  label="Balance del mes"
+                  value={summary?.balance ?? 0}
+                  tone={
+                    summary && summary.balance >= 0 ? "positive" : "negative"
+                  }
+                />
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                <div>
+                  {dataError
+                    ? dataError
+                    : "Para ver el detalle por categoría, entra a “Gastos e ingresos”."}
                 </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/50">
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Deudas totales
-                  </div>
-                  <div className="mt-1 text-sm font-semibold text-rose-600 dark:text-rose-400">
-                    {formatMoney(totalDeudas)}
-                  </div>
+                <div className="flex gap-2">
+                  <LinkButton href="/gastos">Ver gastos / ingresos</LinkButton>
+                  <LinkButton href="/familia/dashboard">
+                    Ver dashboard familiar
+                  </LinkButton>
                 </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/50">
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Patrimonio neto
-                  </div>
-                  <div
-                    className={`mt-1 text-sm font-semibold ${
-                      patrimonioNeto >= 0
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : "text-rose-600 dark:text-rose-400"
-                    }`}
-                  >
-                    {formatMoney(patrimonioNeto)}
-                  </div>
+              </div>
+            </div>
+
+            {/* Patrimonio */}
+            <div className="flex flex-col gap-3">
+              <div className="flex-1 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  Valor patrimonial
+                </h2>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Suma de tus activos menos tus deudas registradas.
+                </p>
+
+                <div className="mt-3 space-y-2">
+                  <SimpleRow
+                    label="Activos personales"
+                    value={netWorth?.assets ?? 0}
+                  />
+                  <SimpleRow
+                    label="Deudas personales"
+                    value={netWorth?.debts ?? 0}
+                  />
+                  <SimpleRow
+                    label="Valor neto"
+                    value={netWorth?.netWorth ?? 0}
+                    highlight
+                  />
+                </div>
+
+                <div className="mt-3 text-right">
+                  <LinkButton href="/patrimonio">
+                    Ver detalle de activos / deudas
+                  </LinkButton>
                 </div>
               </div>
 
-              <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
-                Revisa y edita activos / deudas en la sección{" "}
-                <span className="font-medium">Patrimonio</span>. Aquí sólo ves
-                el resumen rápido.
+              <div className="rounded-2xl border border-sky-100 bg-sky-50/80 p-3 text-[11px] shadow-sm dark:border-sky-900/50 dark:bg-sky-900/10 dark:text-slate-100">
+                <p className="font-medium text-sky-800 dark:text-sky-100">
+                  Tip rápido:
+                </p>
+                <p className="mt-1 text-slate-600 dark:text-slate-200">
+                  Si este mes tu balance es positivo, decide desde hoy qué
+                  porcentaje se va directo a ahorro o a bajar deudas, antes de
+                  que “se pierda” en gastos chicos.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* FILA 2: Objetivos */}
+          <section className="grid gap-3 md:grid-cols-[1.4fr,2fr]">
+            {/* Formulario de objetivo */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                Define un objetivo financiero
+              </h2>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Puede ser ahorrar para un fondo de emergencia, pagar una deuda
+                o juntar para unas vacaciones.
               </p>
-            </>
-          )}
+
+              <div className="mt-3 space-y-2 text-[12px]">
+                <div>
+                  <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
+                    Nombre del objetivo
+                  </label>
+                  <input
+                    value={goalTitle}
+                    onChange={(e) => setGoalTitle(e.target.value)}
+                    placeholder="Ej. Fondo de emergencia, Pagar tarjeta BBVA..."
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-950"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
+                      Monto meta (MXN)
+                    </label>
+                    <input
+                      value={goalTarget}
+                      onChange={(e) => setGoalTarget(e.target.value)}
+                      placeholder="Ej. 25,000"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-950"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
+                      Fecha objetivo (opcional)
+                    </label>
+                    <input
+                      type="date"
+                      value={goalDeadline}
+                      onChange={(e) => setGoalDeadline(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-950"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleAddGoal}
+                  className="mt-2 w-full rounded-full bg-sky-500 py-2 text-[12px] font-semibold text-white shadow-sm transition hover:bg-sky-600 disabled:bg-sky-300"
+                  disabled={!goalTitle.trim() || !goalTarget.trim()}
+                >
+                  Guardar objetivo (solo en este dispositivo)
+                </button>
+
+                <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                  Próximamente estos objetivos se conectarán con tus datos
+                  reales de gastos y patrimonio para mostrar tu avance
+                  automático.
+                </p>
+              </div>
+            </div>
+
+            {/* Lista de objetivos */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  Tus objetivos
+                </h2>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {goals.length === 0
+                    ? "Empieza creando tu primer objetivo."
+                    : `${goals.length} objetivo(s) activos`}
+                </span>
+              </div>
+
+              {goals.length === 0 ? (
+                <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-3 text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
+                  Aquí verás tus objetivos con su monto meta y fecha. Más
+                  adelante podrás ligar cada uno a categorías específicas de
+                  gastos.
+                </div>
+              ) : (
+                <ul className="mt-3 space-y-2 text-[12px]">
+                  {goals.map((goal) => (
+                    <li
+                      key={goal.id}
+                      className="flex items-start justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
+                    >
+                      <div>
+                        <p className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">
+                          {goal.title}
+                        </p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Meta:{" "}
+                          <span className="font-medium">
+                            {goal.targetAmount.toLocaleString("es-MX", {
+                              style: "currency",
+                              currency: "MXN",
+                              maximumFractionDigits: 0,
+                            })}
+                          </span>
+                          {goal.deadline &&
+                            ` · Para: ${new Date(
+                              goal.deadline
+                            ).toLocaleDateString("es-MX")}`}
+                        </p>
+                      </div>
+                      <span className="mt-0.5 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-100">
+                        En proceso
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
         </div>
       </section>
-
-      {error && (
-        <section className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
-          {error}
-        </section>
-      )}
     </main>
+  );
+}
+
+// ---------- Subcomponentes simples ----------
+
+function SummaryCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "positive" | "negative";
+}) {
+  const isPositive = tone === "positive";
+  const formatted = value.toLocaleString("es-MX", {
+    style: "currency",
+    currency: "MXN",
+    maximumFractionDigits: 0,
+  });
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-[11px] shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <p className="text-slate-500 dark:text-slate-400">{label}</p>
+      <p
+        className={`mt-1 text-base font-semibold ${
+          isPositive
+            ? "text-emerald-600 dark:text-emerald-300"
+            : "text-rose-600 dark:text-rose-300"
+        }`}
+      >
+        {formatted}
+      </p>
+    </div>
+  );
+}
+
+function SimpleRow({
+  label,
+  value,
+  highlight,
+}: {
+  label: string;
+  value: number;
+  highlight?: boolean;
+}) {
+  const formatted = value.toLocaleString("es-MX", {
+    style: "currency",
+    currency: "MXN",
+    maximumFractionDigits: 0,
+  });
+
+  return (
+    <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-300">
+      <span>{label}</span>
+      <span
+        className={`font-semibold ${
+          highlight ? "text-sky-700 dark:text-sky-300" : ""
+        }`}
+      >
+        {formatted}
+      </span>
+    </div>
+  );
+}
+
+function LinkButton({
+  href,
+  children,
+}: {
+  href: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <a
+      href={href}
+      className="inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-medium text-slate-700 shadow-sm transition hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+    >
+      {children}
+    </a>
   );
 }

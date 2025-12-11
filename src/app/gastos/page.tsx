@@ -40,6 +40,9 @@ type Tx = {
   spender_user_id?: string | null; // quién lo registró (normalmente user.id)
   spender_label?: string | null; // "Yo", "Esposa", "Hijo", etc.
 
+  family_group_id?: string | null; // NUEVO: grupo familiar al que pertenece
+  goal_id?: string | null; // NUEVO: meta familiar ligada
+
   localOnly?: boolean;
 };
 
@@ -50,7 +53,8 @@ type FormState = {
   amount: string;
   method: string;
   notes: string;
-  spenderLabel: string; // NUEVO: quién generó
+  spenderLabel: string; // quién generó
+  goalId: string; // NUEVO: meta seleccionada ("" = sin meta)
 };
 
 type Option = { label: string; value: string };
@@ -67,6 +71,21 @@ type FamilyContext = {
     string,
     { userId: string; fullName: string; shortLabel: string }
   >;
+};
+
+// NUEVO: tipo para metas familiares
+type FamilyGoal = {
+  id: string;
+  family_group_id?: string | null;
+  owner_user_id?: string | null;
+  name: string;
+  description?: string | null;
+  target_amount?: number | null;
+  due_date?: string | null;
+  category?: string | null;
+  auto_track?: boolean | null;
+  track_direction?: "ingresos" | "ahorros" | "gastos_reducidos" | null;
+  track_category?: string | null;
 };
 
 const DEFAULT_CATEGORIES: Option[] = [
@@ -160,12 +179,12 @@ export default function GastosPage() {
     method: DEFAULT_METHODS[0]?.value ?? "",
     notes: "",
     spenderLabel: SPENDER_OPTIONS[0]?.value ?? "Yo",
+    goalId: "",
   });
 
   const [editingId, setEditingId] = useState<string | null>(null);
   // Saber si el usuario es jefe de familia
-const [isFamilyOwner, setIsFamilyOwner] = useState(false);
-
+  const [isFamilyOwner, setIsFamilyOwner] = useState(false);
 
   // Presupuesto
   const [budgetInput, setBudgetInput] = useState("");
@@ -190,72 +209,64 @@ const [isFamilyOwner, setIsFamilyOwner] = useState(false);
 
   // 💳 Tarjetas
   type Card = {
-  id: string;
-  name: string;
-  default_method: string | null;
-  owner_id: string;
-  family_id: string | null;
-  shared_with_family: boolean; // ya no null ni opcional
-};
+    id: string;
+    name: string;
+    default_method: string | null;
+    owner_id: string;
+    family_id: string | null;
+    shared_with_family: boolean; // ya no null ni opcional
+  };
 
   const [cards, setCards] = useState<Card[]>([]);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
 
- // Decide qué texto mostrar en la columna "Generó"
-const getSpenderLabel = (tx: Tx): string => {
-  if (!user) return "—";
+  // NUEVO: metas familiares
+  const [goals, setGoals] = useState<FamilyGoal[]>([]);
 
-  // Si tenemos contexto de familia y el spender es un miembro conocido
-  const member =
-    familyCtx?.membersByUserId &&
-    tx.spender_user_id
-      ? familyCtx.membersByUserId[tx.spender_user_id]
-      : null;
+  // Decide qué texto mostrar en la columna "Generó"
+  const getSpenderLabel = (tx: Tx): string => {
+    if (!user) return "—";
 
-  if (member) {
-    // Si yo soy el que gastó → "Yo"
+    const member =
+      familyCtx?.membersByUserId && tx.spender_user_id
+        ? familyCtx.membersByUserId[tx.spender_user_id]
+        : null;
+
+    if (member) {
+      if (tx.spender_user_id === user.id) {
+        return "Yo";
+      }
+      return member.shortLabel || member.fullName || "Miembro";
+    }
+
     if (tx.spender_user_id === user.id) {
       return "Yo";
     }
 
-    // Si fue un miembro (hijo, esposa, muchacha, etc.)
-    return member.shortLabel || member.fullName || "Miembro";
-  }
+    if (tx.spender_label && tx.spender_label !== "Yo") {
+      return tx.spender_label;
+    }
 
-  // Si el spender es el usuario logueado pero no hay contexto de familia
-  if (tx.spender_user_id === user.id) {
-    return "Yo";
-  }
-
-  // Si había un label manual en versiones viejas
-  if (tx.spender_label && tx.spender_label !== "Yo") {
-    return tx.spender_label;
-  }
-
-  return "Miembro";
-};
+    return "Miembro";
+  };
 
   // Cuando cambias la tarjeta en el formulario
   const handleChangeCard = (cardId: string | null) => {
     setSelectedCardId(cardId);
 
-    // Si selecciona "Sin tarjeta específica"
     if (!cardId) return;
 
     const found = cards.find((c) => c.id === cardId);
     if (!found) return;
 
-    // Si la tarjeta tiene default_method lo usamos, si no normalizamos el nombre
     const methodValue =
       found.default_method ?? found.name.toUpperCase().replace(/\s+/g, "_");
 
-    // Actualizamos el formulario
     setForm((prev) => ({
       ...prev,
       method: methodValue,
     }));
 
-    // Nos aseguramos de que ese método exista en la lista de métodos
     setMethods((prev) => {
       if (prev.some((m) => m.value === methodValue)) return prev;
 
@@ -275,7 +286,7 @@ const getSpenderLabel = (tx: Tx): string => {
   const [cardError, setCardError] = useState<string | null>(null);
   const [newCardShared, setNewCardShared] = useState(false);
 
-    const handleAddCard = async (e: React.FormEvent) => {
+  const handleAddCard = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
 
@@ -288,7 +299,6 @@ const getSpenderLabel = (tx: Tx): string => {
     setSavingCard(true);
     setCardError(null);
 
-    // dueño financiero real (si hay familia usamos al owner de la familia)
     const ownerId = familyCtx?.ownerUserId ?? user.id;
     const familyId = familyCtx?.familyId ?? null;
 
@@ -355,7 +365,7 @@ const getSpenderLabel = (tx: Tx): string => {
     }
   };
 
-    const handleToggleShareCard = async (card: Card) => {
+  const handleToggleShareCard = async (card: Card) => {
     if (!user) return;
 
     if (!isFamilyOwner) {
@@ -500,43 +510,47 @@ const getSpenderLabel = (tx: Tx): string => {
       setAuthError("No se pudo iniciar sesión.");
     }
   };
-useEffect(() => {
-  if (!user) {
-    setIsFamilyOwner(false);
-    return;
-  }
 
-  let cancelled = false;
-
-  const checkOwner = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("families")
-        .select("id")
-        .eq("user_id", user.id)
-        .limit(1);
-
-      if (error) {
-        console.error("Error revisando si es jefe de familia en /gastos", error);
-        if (!cancelled) setIsFamilyOwner(false);
-        return;
-      }
-
-      if (!cancelled) {
-        setIsFamilyOwner((data ?? []).length > 0);
-      }
-    } catch (err) {
-      console.error("Error revisando si es jefe de familia en /gastos", err);
-      if (!cancelled) setIsFamilyOwner(false);
+  useEffect(() => {
+    if (!user) {
+      setIsFamilyOwner(false);
+      return;
     }
-  };
 
-  checkOwner();
+    let cancelled = false;
 
-  return () => {
-    cancelled = true;
-  };
-}, [user]);
+    const checkOwner = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("families")
+          .select("id")
+          .eq("user_id", user.id)
+          .limit(1);
+
+        if (error) {
+          console.error(
+            "Error revisando si es jefe de familia en /gastos",
+            error
+          );
+          if (!cancelled) setIsFamilyOwner(false);
+          return;
+        }
+
+        if (!cancelled) {
+          setIsFamilyOwner((data ?? []).length > 0);
+        }
+      } catch (err) {
+        console.error("Error revisando si es jefe de familia en /gastos", err);
+        if (!cancelled) setIsFamilyOwner(false);
+      }
+    };
+
+    checkOwner();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -571,133 +585,126 @@ useEffect(() => {
   };
 
   // --------------------------------------------------
-//   Cargar contexto de familia (si pertenece a una)
-// --------------------------------------------------
-useEffect(() => {
-  const currentUser = user;
-  if (!currentUser) {
-    setFamilyCtx(null);
-    setFamilyCtxError(null);
-    setFamilyCtxLoading(false);
-    return;
-  }
+  //   Cargar contexto de familia (si pertenece a una)
+  // --------------------------------------------------
+  useEffect(() => {
+    const currentUser = user;
+    if (!currentUser) {
+      setFamilyCtx(null);
+      setFamilyCtxError(null);
+      setFamilyCtxLoading(false);
+      return;
+    }
 
-  const userId = currentUser.id;
-  const email = (currentUser.email ?? "").toLowerCase();
-  let cancelled = false;
+    const userId = currentUser.id;
+    const email = (currentUser.email ?? "").toLowerCase();
+    let cancelled = false;
 
-  const loadFamilyCtx = async () => {
-    setFamilyCtxLoading(true);
-    setFamilyCtxError(null);
+    const loadFamilyCtx = async () => {
+      setFamilyCtxLoading(true);
+      setFamilyCtxError(null);
 
-    try {
-      // 1) Buscar mi membresía activa (como jefe o miembro)
-      const { data: memberRows, error: memberError } = await supabase
-        .from("family_members")
-        .select("id,family_id,role,status,user_id,invited_email")
-        .or(`user_id.eq.${userId},invited_email.eq.${email}`)
-        .eq("status", "active")
-        .limit(1);
+      try {
+        const { data: memberRows, error: memberError } = await supabase
+          .from("family_members")
+          .select("id,family_id,role,status,user_id,invited_email")
+          .or(`user_id.eq.${userId},invited_email.eq.${email}`)
+          .eq("status", "active")
+          .limit(1);
 
-      if (memberError) throw memberError;
+        if (memberError) throw memberError;
 
-      if (!memberRows || memberRows.length === 0) {
+        if (!memberRows || memberRows.length === 0) {
+          if (!cancelled) {
+            setFamilyCtx(null);
+          }
+          return;
+        }
+
+        const member = memberRows[0];
+
+        const { data: fam, error: famError } = await supabase
+          .from("families")
+          .select("id,name,user_id")
+          .eq("id", member.family_id)
+          .single();
+
+        if (famError) throw famError;
+
+        let membersByUserId: Record<
+          string,
+          { userId: string; fullName: string; shortLabel: string }
+        > = {};
+
+        const { data: allMembers, error: membersError } = await supabase
+          .from("family_members")
+          .select("user_id, full_name, short_label, status")
+          .eq("family_id", fam.id)
+          .eq("status", "active");
+
+        if (membersError) {
+          console.error("Error cargando miembros:", membersError);
+        } else if (allMembers) {
+          allMembers.forEach((m) => {
+            if (!m.user_id) return;
+
+            const fullName = m.full_name ?? "Miembro";
+            const autoShort = fullName.split(" ")[0] ?? fullName;
+            const shortLabel = m.short_label ?? autoShort;
+
+            membersByUserId[m.user_id] = {
+              userId: m.user_id,
+              fullName,
+              shortLabel,
+            };
+          });
+        }
+
+        const { data: activeMembers, error: activeError } = await supabase
+          .from("family_members")
+          .select("user_id,status")
+          .eq("family_id", fam.id)
+          .eq("status", "active");
+
+        if (activeError) throw activeError;
+
+        let activeIds =
+          (activeMembers ?? [])
+            .map((r: any) => r.user_id)
+            .filter((id: string | null) => !!id) as string[];
+
+        if (!activeIds.includes(fam.user_id)) {
+          activeIds.push(fam.user_id);
+        }
+
         if (!cancelled) {
+          setFamilyCtx({
+            familyId: fam.id,
+            familyName: fam.name,
+            ownerUserId: fam.user_id,
+            memberId: member.id,
+            role: member.role as "owner" | "member",
+            activeMemberUserIds: activeIds,
+            membersByUserId,
+          });
+        }
+      } catch (err: any) {
+        console.error("Error cargando contexto de familia:", err);
+        if (!cancelled) {
+          setFamilyCtxError("No se pudo cargar la información de familia.");
           setFamilyCtx(null);
         }
-        return;
+      } finally {
+        if (!cancelled) setFamilyCtxLoading(false);
       }
-
-      const member = memberRows[0];
-
-      // 2) Cargar la familia (para saber quién es el owner)
-      const { data: fam, error: famError } = await supabase
-        .from("families")
-        .select("id,name,user_id")
-        .eq("id", member.family_id)
-        .single();
-
-      if (famError) throw famError;
-
-      // 2.1) Traer TODOS los miembros activos de esa familia
-let membersByUserId: Record<
-  string,
-  { userId: string; fullName: string; shortLabel: string }
-> = {};
-
-const { data: allMembers, error: membersError } = await supabase
-  .from("family_members")
-  .select("user_id, full_name, short_label, status")  // 👈 AQUI YA METEMOS short_label
-  .eq("family_id", fam.id)
-  .eq("status", "active");
-
-if (membersError) {
-  console.error("Error cargando miembros:", membersError);
-} else if (allMembers) {
-  allMembers.forEach((m) => {
-    if (!m.user_id) return;
-
-    const fullName = m.full_name ?? "Miembro";
-
-    // Si no hay short_label, usamos el primer nombre como fallback
-    const autoShort = fullName.split(" ")[0] ?? fullName;
-    const shortLabel = m.short_label ?? autoShort;
-
-    membersByUserId[m.user_id] = {
-      userId: m.user_id,
-      fullName,
-      shortLabel,
     };
-  });
-}
 
-      // 3) Traer TODOS los miembros activos para obtener sus user_id
-      const { data: activeMembers, error: activeError } = await supabase
-        .from("family_members")
-        .select("user_id,status")
-        .eq("family_id", fam.id)
-        .eq("status", "active");
+    loadFamilyCtx();
 
-      if (activeError) throw activeError;
-
-      let activeIds =
-        (activeMembers ?? [])
-          .map((r: any) => r.user_id)
-          .filter((id: string | null) => !!id) as string[];
-
-      // Asegurarnos de que el dueño esté en la lista
-      if (!activeIds.includes(fam.user_id)) {
-        activeIds.push(fam.user_id);
-      }
-
-      if (!cancelled) {
-        setFamilyCtx({
-          familyId: fam.id,
-          familyName: fam.name,
-          ownerUserId: fam.user_id,
-          memberId: member.id,
-          role: member.role as "owner" | "member",
-          activeMemberUserIds: activeIds,
-          membersByUserId,
-        });
-      }
-    } catch (err: any) {
-      console.error("Error cargando contexto de familia:", err);
-      if (!cancelled) {
-        setFamilyCtxError("No se pudo cargar la información de familia.");
-        setFamilyCtx(null);
-      }
-    } finally {
-      if (!cancelled) setFamilyCtxLoading(false);
-    }
-  };
-
-  loadFamilyCtx();
-
-  return () => {
-    cancelled = true;
-  };
-}, [user]);
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   useEffect(() => {
     if (viewScope === "family" && !isFamilyOwner) {
@@ -782,150 +789,139 @@ if (membersError) {
     loadOffline();
   }, []);
 
- // --------------------------------------------------
-//   Cargar transacciones del mes desde Supabase
-// --------------------------------------------------
-useEffect(() => {
-  const currentUser = user;
-  if (!currentUser) {
-    setTransactions([]);
-    return;
-  }
+  // --------------------------------------------------
+  //   Cargar transacciones del mes desde Supabase
+  // --------------------------------------------------
+  useEffect(() => {
+    const currentUser = user;
+    if (!currentUser) {
+      setTransactions([]);
+      return;
+    }
 
-  const userId = currentUser.id;
+    const userId = currentUser.id;
 
-  async function load() {
-    setLoading(true);
-    setError(null);
+    async function load() {
+      setLoading(true);
+      setError(null);
 
-    try {
-      const [year, monthNumber] = month.split("-");
-      const from = `${month}-01`;
-      const to = `${month}-${new Date(
-        Number(year),
-        Number(monthNumber),
-        0
-      )
-        .getDate()
-        .toString()
-        .padStart(2, "0")}`;
+      try {
+        const [year, monthNumber] = month.split("-");
+        const from = `${month}-01`;
+        const to = `${month}-${new Date(
+          Number(year),
+          Number(monthNumber),
+          0
+        )
+          .getDate()
+          .toString()
+          .padStart(2, "0")}`;
 
-      // Base: rango de fechas
-      let query = supabase
-        .from("transactions")
-        .select("*")
-        .gte("date", from)
-        .lte("date", to);
+        let query = supabase
+          .from("transactions")
+          .select("*")
+          .gte("date", from)
+          .lte("date", to);
 
-      console.log("DEBUG scope", {
-        isFamilyOwner,
-        viewScope,
-        familyCtx,
-      });
+        console.log("DEBUG scope", {
+          isFamilyOwner,
+          viewScope,
+          familyCtx,
+        });
 
-      if (isFamilyOwner) {
-        if (viewScope === "mine") {
-          // 🔵 SOLO YO (jefe):
-          // - movimientos que YO capturé
-          // - + movimientos que paga el jefe (owner_user_id = jefe)
-          query = query.or(
-            [
-              `user_id.eq.${userId}`,
-              `owner_user_id.eq.${userId}`,
-            ].join(",")
-          );
-        } else {
-          // 🟢 FAMILIA (jefe):
-          // - TODOS los movimientos capturados por cualquier miembro activo
-          // - + todos los que paga el jefe, por si algún miembro aún no está bien linkeado
-          if (familyCtx && familyCtx.activeMemberUserIds.length > 0) {
-            const list = familyCtx.activeMemberUserIds.join(",");
+        if (isFamilyOwner) {
+          if (viewScope === "mine") {
             query = query.or(
-              [
-                `user_id.in.(${list})`,
-                `owner_user_id.eq.${userId}`,
-              ].join(",")
+              [`user_id.eq.${userId}`, `owner_user_id.eq.${userId}`].join(",")
             );
           } else {
-            // Fallback: al menos que vea lo mismo que "Solo yo"
-            query = query.or(
-              [
-                `user_id.eq.${userId}`,
-                `owner_user_id.eq.${userId}`,
-              ].join(",")
-            );
+            if (familyCtx && familyCtx.activeMemberUserIds.length > 0) {
+              const list = familyCtx.activeMemberUserIds.join(",");
+              query = query.or(
+                [
+                  `user_id.in.(${list})`,
+                  `owner_user_id.eq.${userId}`,
+                ].join(",")
+              );
+            } else {
+              query = query.or(
+                [`user_id.eq.${userId}`, `owner_user_id.eq.${userId}`].join(",")
+              );
+            }
           }
+        } else {
+          query = query.eq("user_id", userId);
         }
-      } else {
-        // Usuario normal (no jefe): sólo sus propios movimientos
-        query = query.eq("user_id", userId);
-      }
 
-      const { data, error } = await query;
-      if (error) throw error;
+        const { data, error } = await query;
+        if (error) throw error;
 
-      setTransactions(
-        (data ?? []).map((t: any) => ({
-          id: t.id,
-          date: t.date,
-          type: t.type,
-          category: t.category,
-          amount: Number(t.amount),
-          method: t.method,
-          notes: t.notes,
-          owner_user_id: t.owner_user_id ?? null,
-          spender_user_id: t.spender_user_id ?? null,
-          spender_label: t.spender_label ?? null,
-          created_by: t.created_by ?? null,
-          card_id: t.card_id ?? null,
-        }))
-      );
-
-      if (typeof window !== "undefined") {
-        localStorage.setItem(
-          `ff-cache-${month}`,
-          JSON.stringify(data ?? [])
+        setTransactions(
+          (data ?? []).map((t: any) => ({
+            id: t.id,
+            date: t.date,
+            type: t.type,
+            category: t.category,
+            amount: Number(t.amount),
+            method: t.method,
+            notes: t.notes,
+            owner_user_id: t.owner_user_id ?? null,
+            spender_user_id: t.spender_user_id ?? null,
+            spender_label: t.spender_label ?? null,
+            created_by: t.created_by ?? null,
+            card_id: t.card_id ?? null,
+            family_group_id: t.family_group_id ?? null,
+            goal_id: t.goal_id ?? null,
+          }))
         );
-      }
-    } catch (err) {
-      console.error(err);
-      setError("No se pudieron cargar los movimientos.");
 
-      if (typeof window !== "undefined") {
-        const cache = localStorage.getItem(`ff-cache-${month}`);
-        if (cache) {
-          try {
-            const parsed = JSON.parse(cache);
-            setTransactions(
-              (parsed ?? []).map((t: any) => ({
-                id: t.id,
-                date: t.date,
-                type: t.type,
-                category: t.category,
-                amount: Number(t.amount),
-                method: t.method,
-                notes: t.notes,
-                owner_user_id: t.owner_user_id ?? null,
-                spender_user_id: t.spender_user_id ?? null,
-                spender_label: t.spender_label ?? null,
-                created_by: t.created_by ?? null,
-                card_id: t.card_id ?? null,
-              }))
-            );
-          } catch {
-            // ignoramos error de parseo
+        if (typeof window !== "undefined") {
+          localStorage.setItem(
+            `ff-cache-${month}`,
+            JSON.stringify(data ?? [])
+          );
+        }
+      } catch (err) {
+        console.error(err);
+        setError("No se pudieron cargar los movimientos.");
+
+        if (typeof window !== "undefined") {
+          const cache = localStorage.getItem(`ff-cache-${month}`);
+          if (cache) {
+            try {
+              const parsed = JSON.parse(cache);
+              setTransactions(
+                (parsed ?? []).map((t: any) => ({
+                  id: t.id,
+                  date: t.date,
+                  type: t.type,
+                  category: t.category,
+                  amount: Number(t.amount),
+                  method: t.method,
+                  notes: t.notes,
+                  owner_user_id: t.owner_user_id ?? null,
+                  spender_user_id: t.spender_user_id ?? null,
+                  spender_label: t.spender_label ?? null,
+                  created_by: t.created_by ?? null,
+                  card_id: t.card_id ?? null,
+                  family_group_id: t.family_group_id ?? null,
+                  goal_id: t.goal_id ?? null,
+                }))
+              );
+            } catch {
+              // ignoramos error de parseo
+            }
           }
         }
+      } finally {
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
     }
-  }
 
-  if (typeof window !== "undefined") {
-    load();
-  }
-}, [month, user, isFamilyOwner, viewScope, familyCtx]);
+    if (typeof window !== "undefined") {
+      load();
+    }
+  }, [month, user, isFamilyOwner, viewScope, familyCtx]);
 
   // --------------------------------------------------
   //   Sincronizar cola offline al volver internet
@@ -997,7 +993,7 @@ useEffect(() => {
     }
   }, [month]);
 
-   // --------------------------------------------------
+  // --------------------------------------------------
   //   Cargar tarjetas de Supabase (según familia)
   // --------------------------------------------------
   useEffect(() => {
@@ -1007,7 +1003,6 @@ useEffect(() => {
     }
 
     const loadCards = async () => {
-      // dueño financiero real (si hay familia usamos al owner de la familia)
       const ownerId = familyCtx?.ownerUserId ?? user.id;
 
       try {
@@ -1019,7 +1014,6 @@ useEffect(() => {
           .eq("owner_id", ownerId)
           .order("name", { ascending: true });
 
-        // Si eres miembro (NO dueño), sólo ves las tarjetas compartidas
         if (familyCtx && !isFamilyOwner) {
           query = query.eq("shared_with_family", true);
         }
@@ -1048,6 +1042,41 @@ useEffect(() => {
 
     loadCards();
   }, [user, familyCtx, isFamilyOwner]);
+
+  // --------------------------------------------------
+  //   NUEVO: cargar metas familiares
+  // --------------------------------------------------
+  useEffect(() => {
+    if (!user) {
+      setGoals([]);
+      return;
+    }
+
+    const loadGoals = async () => {
+      try {
+        let query = supabase.from("family_goals").select("*");
+
+        if (familyCtx) {
+          query = query.eq("family_group_id", familyCtx.familyId);
+        } else {
+          query = query.eq("owner_user_id", user.id);
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+          console.warn("Error cargando metas familiares:", error);
+          return;
+        }
+
+        setGoals((data ?? []) as FamilyGoal[]);
+      } catch (err) {
+        console.error("Error inesperado cargando metas familiares:", err);
+      }
+    };
+
+    loadGoals();
+  }, [user, familyCtx]);
 
   // --------------------------------------------------
   //   Guardar presupuesto mensual
@@ -1142,6 +1171,17 @@ useEffect(() => {
       }))
       .sort((a, b) => b.total - a.total);
   }, [transactions, user, familyCtx]);
+
+  // --------------------------------------------------
+  //   Mapa de metas por id
+  // --------------------------------------------------
+  const goalsById = useMemo(() => {
+    const map = new Map<string, FamilyGoal>();
+    goals.forEach((g) => {
+      if (g.id) map.set(g.id, g);
+    });
+    return map;
+  }, [goals]);
 
   // --------------------------------------------------
   //   Filtros: lista filtrada de movimientos
@@ -1522,6 +1562,7 @@ useEffect(() => {
       method: methods[0]?.value ?? "",
       notes: "",
       spenderLabel: SPENDER_OPTIONS[0]?.value ?? "Yo",
+      goalId: "",
     });
     setSelectedCardId(null);
     setEditingId(null);
@@ -1530,7 +1571,7 @@ useEffect(() => {
   // --------------------------------------------------
   //   Guardar / editar / borrar movimiento
   // --------------------------------------------------
-    const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -1550,6 +1591,7 @@ useEffect(() => {
     }
 
     const spenderLabel = form.spenderLabel || "Yo";
+    const goalId = form.goalId || "";
 
     const basePayload = {
       date: form.date,
@@ -1559,11 +1601,10 @@ useEffect(() => {
       method: form.method,
       notes: form.notes || null,
       spender_label: spenderLabel,
+      goal_id: goalId || null,
+      family_group_id: familyCtx?.familyId ?? null,
     };
 
-    // 👇 NUEVO: determinar correctamente quién es el dueño financiero
-    // 1) Si hay tarjeta seleccionada → el dueño es el owner_id de la tarjeta
-    // 2) Si NO hay tarjeta → el dueño es el propio usuario que registra
     const selectedCard = selectedCardId
       ? cards.find((c) => c.id === selectedCardId)
       : undefined;
@@ -1583,7 +1624,6 @@ useEffect(() => {
           ...basePayload,
           owner_user_id: ownerUserId,
           spender_user_id: spenderUserId,
-          spender_label: spenderLabel,
           created_by: user.id,
           card_id: selectedCardId ?? null,
           localOnly: true,
@@ -1592,7 +1632,6 @@ useEffect(() => {
         setTransactions((prev) => [localTx, ...prev]);
 
         try {
-          // Offline en disco: sólo guardamos los campos base clásicos
           await saveOfflineTx({
             id: localTx.id,
             date: localTx.date,
@@ -1637,7 +1676,6 @@ useEffect(() => {
                   ...basePayload,
                   owner_user_id: ownerUserId,
                   spender_user_id: spenderUserId,
-                  spender_label: spenderLabel,
                   created_by: user.id,
                   card_id: selectedCardId ?? null,
                 }
@@ -1657,7 +1695,7 @@ useEffect(() => {
             card_id: selectedCardId ?? null,
           })
           .select(
-            "id,date,type,category,amount,method,notes,owner_user_id,spender_user_id,spender_label,created_by,card_id"
+            "id,date,type,category,amount,method,notes,owner_user_id,spender_user_id,spender_label,created_by,card_id,family_group_id,goal_id"
           )
           .single();
 
@@ -1676,6 +1714,8 @@ useEffect(() => {
           spender_label: data.spender_label ?? null,
           created_by: data.created_by ?? null,
           card_id: data.card_id ?? null,
+          family_group_id: data.family_group_id ?? null,
+          goal_id: data.goal_id ?? null,
         };
 
         setTransactions((prev) => [newTx, ...prev]);
@@ -1704,6 +1744,7 @@ useEffect(() => {
       method: tx.method,
       notes: tx.notes ?? "",
       spenderLabel: inferredSpender,
+      goalId: tx.goal_id ?? "",
     });
     setSelectedCardId(tx.card_id ?? null);
     setEditingId(tx.id);
@@ -2075,7 +2116,7 @@ useEffect(() => {
             <div className="text-xs text-gray-500 dark:text-gray-300">
               Ingresos del mes
             </div>
-            <div className="mt-1 text-2xl md:text-3xl font-semibold tracking-tight text-emerald-600 dark:text-emerald-400">
+            <div className="mt-1 text-2xl font-semibold tracking-tight text-emerald-600 dark:text-emerald-400 md:text-3xl">
               {formatMoney(totalIngresos)}
             </div>
           </div>
@@ -2084,7 +2125,7 @@ useEffect(() => {
             <div className="text-xs text-gray-500 dark:text-gray-300">
               Gastos del mes
             </div>
-            <div className="mt-1 text-2xl md:text-3xl font-semibold tracking-tight text-rose-600 dark:text-rose-400">
+            <div className="mt-1 text-2xl font-semibold tracking-tight text-rose-600 dark:text-rose-400 md:text-3xl">
               {formatMoney(totalGastos)}
             </div>
           </div>
@@ -2094,7 +2135,7 @@ useEffect(() => {
               Flujo (Ingresos - Gastos)
             </div>
             <div
-              className={`mt-1 text-2xl md:text-3xl font-semibold tracking-tight ${
+              className={`mt-1 text-2xl font-semibold tracking-tight md:text-3xl ${
                 flujo >= 0
                   ? "text-emerald-600 dark:text-emerald-400"
                   : "text-rose-600 dark:text-rose-400"
@@ -2173,7 +2214,7 @@ useEffect(() => {
         </div>
 
         {/* Formulario para crear tarjeta */}
-                <form
+        <form
           onSubmit={handleAddCard}
           className="mt-4 flex flex-col gap-2 text-sm md:flex-row"
         >
@@ -2223,94 +2264,90 @@ useEffect(() => {
           <p className="mt-1 text-xs text-rose-500">{cardError}</p>
         )}
 
-      {/* Lista de tarjetas existentes */}
-      <div className="mt-4">
-        {cards.length === 0 ? (
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Aún no tienes tarjetas registradas. Empieza agregando una arriba.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {cards.map((card) => (
-              <div
-                key={card.id}
-                className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/40"
-              >
-                <div className="flex flex-col">
-                  <span className="font-medium text-slate-800 dark:text-slate-100">
-                    {card.name}
-                  </span>
-
-                  {/* Etiqueta de estado: compartida o sólo tú */}
-                  <span className="mt-1 inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 ${
-                        card.shared_with_family
-                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
-                          : "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                      }`}
-                    >
-                      {card.shared_with_family
-                        ? "Compartida con familia"
-                        : "Sólo tú la ves"}
+        {/* Lista de tarjetas existentes */}
+        <div className="mt-4">
+          {cards.length === 0 ? (
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Aún no tienes tarjetas registradas. Empieza agregando una arriba.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {cards.map((card) => (
+                <div
+                  key={card.id}
+                  className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/40"
+                >
+                  <div className="flex flex-col">
+                    <span className="font-medium text-slate-800 dark:text-slate-100">
+                      {card.name}
                     </span>
-                  </span>
 
-                  <span className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                    Se puede seleccionar al capturar un movimiento.
-                  </span>
-                </div>
+                    <span className="mt-1 inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 ${
+                          card.shared_with_family
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
+                            : "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        }`}
+                      >
+                        {card.shared_with_family
+                          ? "Compartida con familia"
+                          : "Sólo tú la ves"}
+                      </span>
+                    </span>
 
-                <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center">
-                  {/* Botón para usar en formulario */}
-                  <button
-                    type="button"
-                    onClick={() => setSelectedCardId(card.id)}
-                    className={`rounded-full px-3 py-1 text-[11px] ${
-                      selectedCardId === card.id
-                        ? "bg-sky-500 text-white"
-                        : "bg-white text-slate-700 dark:bg-slate-900 dark:text-slate-200 border border-slate-300 dark:border-slate-700"
-                    }`}
-                  >
-                    Usar en formulario
-                  </button>
+                    <span className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      Se puede seleccionar al capturar un movimiento.
+                    </span>
+                  </div>
 
-                  {/* Switch compartir sólo para el jefe de familia */}
-                  {isFamilyOwner && (
+                  <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center">
                     <button
                       type="button"
-                      onClick={() =>
-                        handleToggleCardSharing(
-                          card.id,
-                          card.shared_with_family
-                        )
-                      }
-                      className={`rounded-full border px-3 py-1 text-[11px] ${
-                        card.shared_with_family
-                          ? "border-emerald-500 text-emerald-600 dark:border-emerald-400 dark:text-emerald-300"
-                          : "border-slate-300 text-slate-600 dark:border-slate-600 dark:text-slate-200"
+                      onClick={() => setSelectedCardId(card.id)}
+                      className={`rounded-full px-3 py-1 text-[11px] ${
+                        selectedCardId === card.id
+                          ? "bg-sky-500 text-white"
+                          : "border border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                       }`}
                     >
-                      {card.shared_with_family
-                        ? "Dejar de compartir"
-                        : "Compartir con familia"}
+                      Usar en formulario
                     </button>
-                  )}
 
-                  {/* Eliminar */}
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteCard(card.id)}
-                    className="text-[11px] text-rose-500 hover:underline"
-                  >
-                    Eliminar
-                  </button>
+                    {isFamilyOwner && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleToggleCardSharing(
+                            card.id,
+                            card.shared_with_family
+                          )
+                        }
+                        className={`rounded-full border px-3 py-1 text-[11px] ${
+                          card.shared_with_family
+                            ? "border-emerald-500 text-emerald-600 dark:border-emerald-400 dark:text-emerald-300"
+                            : "border-slate-300 text-slate-600 dark:border-slate-600 dark:text-slate-200"
+                        }`}
+                      >
+                        {card.shared_with_family
+                          ? "Dejar de compartir"
+                          : "Compartir con familia"}
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteCard(card.id)}
+                      className="text-[11px] text-rose-500 hover:underline"
+                    >
+                      Eliminar
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+              ))}
+            </div>
+          )}
+        </div>
       </section>
 
       {/* Gráficas */}
@@ -2405,7 +2442,7 @@ useEffect(() => {
         </div>
       </section>
 
-      {/* Formulario de movimientos */}
+           {/* Formulario de movimientos */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <h2 className="mb-3 text-sm font-semibold">
           {editingId ? "Editar movimiento" : "Agregar movimiento"}
@@ -2433,11 +2470,11 @@ useEffect(() => {
                   </option>
                 ))}
               </select>
-                <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-    Si eliges una tarjeta compartida, este movimiento se sumará al resumen
-    del jefe de familia.
-  </p>
-</div>
+              <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                Si eliges una tarjeta compartida, este movimiento se sumará al
+                resumen del jefe de familia.
+              </p>
+            </div>
 
             {/* Tipo */}
             <div>
@@ -2552,6 +2589,28 @@ useEffect(() => {
                 ))}
               </select>
             </div>
+          </div>
+          {/* Objetivo familiar (opcional) */}
+          <div>
+            <div className="mb-1 text-xs text-gray-500 dark:text-gray-300">
+              Objetivo familiar (opcional)
+            </div>
+            <select
+              value={form.goalId}
+              onChange={(e) => handleChangeForm("goalId", e.target.value)}
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-sm outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-900"
+            >
+              <option value="">Sin objetivo específico</option>
+              {goals.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+              Si eliges una meta, este movimiento contará para el avance de ese
+              objetivo en el dashboard familiar.
+            </p>
           </div>
 
           {/* Editor rápido de categorías y métodos */}
@@ -2786,8 +2845,7 @@ useEffect(() => {
           </div>
         </div>
       </section>
-
-      {/* Visor mensual: gastos por categoría */}
+            {/* Visor mensual: gastos por categoría */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <h2 className="mb-2 text-sm font-semibold">
           Visor mensual de gastos por categoría
@@ -2888,24 +2946,24 @@ useEffect(() => {
 
         <div className="overflow-x-auto text-sm">
           <table className="min-w-full border border-gray-200 text-left text-xs dark:border-slate-700 md:text-sm">
-<thead className="bg-gray-50 dark:bg-slate-900">
-  <tr>
-    <th className="border-b px-2 py-2">Fecha</th>
-    <th className="border-b px-2 py-2">Tipo</th>
-    <th className="border-b px-2 py-2">Categoría</th>
-    <th className="border-b px-2 py-2 text-right">Monto</th>
-    <th className="border-b px-2 py-2">Método</th>
-    <th className="border-b px-2 py-2">Tarjeta</th>
-    <th className="border-b px-2 py-2">Generó</th>
-    <th className="border-b px-2 py-2">Notas</th>
-    <th className="border-b px-2 py-2 text-center">Acciones</th>
-  </tr>
-</thead>
+            <thead className="bg-gray-50 dark:bg-slate-900">
+              <tr>
+                <th className="border-b px-2 py-2">Fecha</th>
+                <th className="border-b px-2 py-2">Tipo</th>
+                <th className="border-b px-2 py-2">Categoría</th>
+                <th className="border-b px-2 py-2 text-right">Monto</th>
+                <th className="border-b px-2 py-2">Método</th>
+                <th className="border-b px-2 py-2">Tarjeta</th>
+                <th className="border-b px-2 py-2">Generó</th>
+                <th className="border-b px-2 py-2">Notas</th>
+                <th className="border-b px-2 py-2 text-center">Acciones</th>
+              </tr>
+            </thead>
             <tbody>
               {loading && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="py-4 text-center text-gray-500"
                   >
                     Cargando movimientos...
@@ -2916,7 +2974,7 @@ useEffect(() => {
               {!loading && filteredTransactions.length === 0 && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="py-4 text-center text-gray-500"
                   >
                     Sin movimientos registrados con esos filtros.
@@ -2925,122 +2983,135 @@ useEffect(() => {
               )}
 
               {!loading &&
-                filteredTransactions.map((t) => (
-                  <tr
-                    key={t.id}
-                    className={`
-                      odd:bg-white even:bg-gray-50 
-                      dark:odd:bg-slate-800 dark:even:bg-slate-900
-                      hover:bg-sky-50 dark:hover:bg-slate-800/80
-                      transition-colors cursor-default
-                      ${t.localOnly ? "opacity-80" : ""}
-                      ${
-                        t.type === "ingreso"
-                          ? "border-l-4 border-l-emerald-400"
-                          : "border-l-4 border-l-rose-400"
-                      }
-                    `}
-                  >
-                    <td className="border-t px-2 py-1">
-                      {formatDateDisplay(t.date)}
-                    </td>
+  filteredTransactions.map((t) => {
+    // NUEVO: buscamos la meta ligada (si existe)
+    const goal = t.goal_id ? goalsById.get(t.goal_id) : undefined;
 
-                    {/* Tipo con badge */}
-                    <td className="border-t px-2 py-1">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                          t.type === "ingreso"
-                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
-                            : "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
-                        }`}
-                      >
-                        {t.type === "ingreso" ? "Ingreso" : "Gasto"}
-                      </span>
-                    </td>
+    return (
+      <tr
+        key={t.id}
+        className={`
+          odd:bg-white even:bg-gray-50 
+          dark:odd:bg-slate-800 dark:even:bg-slate-900
+          hover:bg-sky-50 dark:hover:bg-slate-800/80
+          transition-colors cursor-default
+          ${t.localOnly ? "opacity-80" : ""}
+          ${
+            t.type === "ingreso"
+              ? "border-l-4 border-l-emerald-400"
+              : "border-l-4 border-l-rose-400"
+          }
+        `}
+      >
+        <td className="border-t px-2 py-1">
+          {formatDateDisplay(t.date)}
+        </td>
 
-                    <td className="border-t px-2 py-1">{t.category}</td>
+        {/* Tipo con badge */}
+        <td className="border-t px-2 py-1">
+          <span
+            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+              t.type === "ingreso"
+                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
+                : "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
+            }`}
+          >
+            {t.type === "ingreso" ? "Ingreso" : "Gasto"}
+          </span>
+        </td>
 
-                    {/* Monto + badge Offline alineados a la derecha */}
-                    {/* Monto + badge Offline alineados a la derecha */}
-<td className="border-t px-2 py-1">
-  <div className="flex items-center justify-end gap-1">
-    <span
-      className={`font-semibold ${
-        t.type === "ingreso"
-          ? "text-emerald-600 dark:text-emerald-400"
-          : "text-rose-600 dark:text-rose-400"
-      }`}
-    >
-      {formatMoney(t.amount)}
-    </span>
-    {t.localOnly && (
-      <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200">
-        Offline
-      </span>
-    )}
-  </div>
-</td>
+        <td className="border-t px-2 py-1">{t.category}</td>
 
-{/* Método como pill */}
-<td className="border-t px-2 py-1">
-  <span className="inline-flex max-w-[160px] items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-    <span className="truncate">{t.method}</span>
-  </span>
-</td>
+        {/* Monto + badge Offline alineados a la derecha */}
+        <td className="border-t px-2 py-1">
+          <div className="flex items-center justify-end gap-1">
+            <span
+              className={`font-semibold ${
+                t.type === "ingreso"
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-rose-600 dark:text-rose-400"
+              }`}
+            >
+              {formatMoney(t.amount)}
+            </span>
+            {t.localOnly && (
+              <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200">
+                Offline
+              </span>
+            )}
+          </div>
+        </td>
 
-{/* Tarjeta */}
-<td className="border-t px-2 py-1">
-  {cards.find((c) => c.id === t.card_id)?.name ? (
-    <span className="inline-flex max-w-[160px] items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
-      <span className="truncate">
-        {cards.find((c) => c.id === t.card_id)?.name}
-      </span>
-    </span>
-  ) : (
-    <span className="text-[11px] text-slate-400">—</span>
-  )}
-</td>
+        {/* Método como pill */}
+        <td className="border-t px-2 py-1">
+          <span className="inline-flex max-w-[160px] items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <span className="truncate">{t.method}</span>
+          </span>
+        </td>
 
-{/* Generó */}
-<td className="border-t px-2 py-1">
-  <span className="text-xs text-slate-600 dark:text-slate-300">
-    {getSpenderLabel(t)}
-  </span>
-</td>
+        {/* Tarjeta */}
+        <td className="border-t px-2 py-1">
+          {cards.find((c) => c.id === t.card_id)?.name ? (
+            <span className="inline-flex max-w-[160px] items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
+              <span className="truncate">
+                {cards.find((c) => c.id === t.card_id)?.name}
+              </span>
+            </span>
+          ) : (
+            <span className="text-[11px] text-slate-400">—</span>
+          )}
+        </td>
 
-                    {/* Notas con tooltip */}
-                    <td className="border-t px-2 py-1">
-                      {t.notes ? (
-                        <span
-                          className="block max-w-xs truncate text-xs text-slate-600 dark:text-slate-300"
-                          title={t.notes}
-                        >
-                          {t.notes}
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-slate-400">—</span>
-                      )}
-                    </td>
+        {/* Generó */}
+        <td className="border-t px-2 py-1">
+          <span className="text-xs text-slate-600 dark:text-slate-300">
+            {getSpenderLabel(t)}
+          </span>
+        </td>
 
-                    {/* Acciones */}
-                    <td className="border-t px-2 py-1 text-center">
-                      <button
-                        type="button"
-                        onClick={() => handleEdit(t)}
-                        className="mr-2 text-xs text-sky-600 hover:underline"
-                      >
-                        Editar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(t)}
-                        className="text-xs text-red-600 hover:underline"
-                      >
-                        Eliminar
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+        {/* Notas + Meta */}
+        <td className="border-t px-2 py-1">
+          {goal && (
+            <span className="mb-0.5 mr-1 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
+              Meta: {goal.name}
+            </span>
+          )}
+
+          {t.notes ? (
+            <span
+              className="mt-0.5 block max-w-xs truncate text-xs text-slate-600 dark:text-slate-300"
+              title={t.notes}
+            >
+              {t.notes}
+            </span>
+          ) : (
+            !goal && (
+              <span className="text-[11px] text-slate-400">—</span>
+            )
+          )}
+        </td>
+
+        {/* Acciones */}
+        <td className="border-t px-2 py-1 text-center">
+          <button
+            type="button"
+            onClick={() => handleEdit(t)}
+            className="mr-2 text-xs text-sky-600 hover:underline"
+          >
+            Editar
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDelete(t)}
+            className="text-xs text-red-600 hover:underline"
+          >
+            Eliminar
+          </button>
+        </td>
+      </tr>
+    );
+  })}
+
             </tbody>
           </table>
         </div>
@@ -3048,3 +3119,4 @@ useEffect(() => {
     </main>
   );
 }
+

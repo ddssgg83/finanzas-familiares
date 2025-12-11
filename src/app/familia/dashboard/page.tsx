@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
-import Link from "next/link";
 import {
   BarChart,
   Bar,
@@ -31,1024 +30,822 @@ type Tx = {
   amount: number;
   method: string;
   notes?: string | null;
+  created_by?: string | null;
   owner_user_id?: string | null;
-  spender_user_id?: string | null;
-  spender_label?: string | null;
+  family_group_id?: string | null;
+  goal_id?: string | null;
 };
 
-type FamilyContext = {
-  familyId: string;
-  familyName: string;
-  ownerUserId: string;
-  activeMembers: number;
+type FamilyGoalType = "ahorro" | "deuda" | "gasto_controlado" | "otro";
+type FamilyGoalStatus =
+  | "pendiente"
+  | "en_progreso"
+  | "completado"
+  | "pausado"
+  | "cancelado";
+
+type FamilyGoal = {
+  id: string;
+  family_group_id?: string | null;
+  name: string;
+  description?: string | null;
+  target_amount: number;
+  current_amount?: number | null;
+  due_date?: string | null;
+  type?: FamilyGoalType | string;
+  status?: FamilyGoalStatus | string;
+  category?: string | null;
+  owner_user_id?: string | null;
+  icon?: string | null;
+  color?: string | null;
+  auto_track?: boolean | null;
+  track_direction?: "ingresos" | "ahorros" | "gastos_reducidos" | null;
+  track_category?: string | null;
+  created_at?: string;
+  updated_at?: string;
 };
 
-type AuthMode = "login" | "signup";
+type FamilyMember = {
+  id: string;
+  full_name: string | null;
+  role: string | null;
+  family_group_id?: string | null;
+};
 
-function getCurrentMonthKey(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
-}
+type GoalWithProgress = FamilyGoal & {
+  totalContributed: number;
+  progressPct: number;
+  last30Amount: number;
+  projectedDaysToGoal: number | null;
+  intensity: "on_track" | "at_risk" | "off_track";
+};
 
-function formatMoney(num: number) {
-  return num.toLocaleString("es-MX", {
+function formatCurrency(monto: number): string {
+  return monto.toLocaleString("es-MX", {
     style: "currency",
     currency: "MXN",
-    minimumFractionDigits: 2,
+    maximumFractionDigits: 0,
   });
 }
 
-function formatDateDisplay(ymd: string) {
-  const s = (ymd ?? "").slice(0, 10);
-  const [y, m, d] = s.split("-");
-  if (!y || !m || !d) return ymd;
-  return `${d}/${m}/${y}`;
+function formatDate(dateStr?: string | null): string {
+  if (!dateStr) return "Sin fecha";
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return "Sin fecha";
+  return d.toLocaleDateString("es-MX", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function daysDiff(from: Date, to: Date): number {
+  const ms = to.getTime() - from.getTime();
+  return Math.round(ms / (1000 * 60 * 60 * 24));
 }
 
 export default function FamilyDashboardPage() {
-  // ---------- AUTH ----------
+  const { theme } = useTheme();
   const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [authMode, setAuthMode] = useState<AuthMode>("login");
-  const [authEmail, setAuthEmail] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
+  const [goals, setGoals] = useState<FamilyGoal[]>([]);
+  const [txs, setTxs] = useState<Tx[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // ---------- FAMILY CONTEXT ----------
-  const [familyCtx, setFamilyCtx] = useState<FamilyContext | null>(null);
-  const [familyLoading, setFamilyLoading] = useState(false);
-  const [familyError, setFamilyError] = useState<string | null>(null);
-
-  // ---------- DATA ----------
-  const [month, setMonth] = useState<string>(() => getCurrentMonthKey());
-  const [transactions, setTransactions] = useState<Tx[]>([]);
-  const [loadingTx, setLoadingTx] = useState(false);
-  const [txError, setTxError] = useState<string | null>(null);
-
-  // ---------- THEME ----------
-  const { theme, systemTheme } = useTheme();
-  const [mountedTheme, setMountedTheme] = useState(false);
-  useEffect(() => setMountedTheme(true), []);
-  const currentTheme = theme === "system" ? systemTheme : theme;
-  const isDark = mountedTheme && currentTheme === "dark";
-
-  // =========================================================
-  //  1. AUTH
-  // =========================================================
   useEffect(() => {
-    let ignore = false;
-
-    async function loadUser() {
-      setAuthLoading(true);
-      setAuthError(null);
+    const fetchData = async () => {
       try {
-        const { data, error } = await supabase.auth.getUser();
-        if (error && (error as any).name !== "AuthSessionMissingError") {
-          console.error("Error obteniendo usuario actual", error);
-          if (!ignore) {
-            setAuthError("Hubo un problema al cargar tu sesión.");
-          }
-        }
-        if (!ignore) {
-          setUser(data?.user ?? null);
-        }
-      } finally {
-        if (!ignore) setAuthLoading(false);
-      }
-    }
+        setLoading(true);
+        setError(null);
 
-    loadUser();
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-
-    return () => {
-      ignore = true;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  const handleSignIn = async (e: FormEvent) => {
-    e.preventDefault();
-    setAuthError(null);
-    try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: authEmail.trim(),
-        password: authPassword,
-      });
-      if (error) {
-        setAuthError(error.message);
-        return;
-      }
-      setAuthEmail("");
-      setAuthPassword("");
-    } catch (err) {
-      console.error(err);
-      setAuthError("No se pudo iniciar sesión.");
-    }
-  };
-
-  const handleSignUp = async (e: FormEvent) => {
-    e.preventDefault();
-    setAuthError(null);
-    try {
-      const { error } = await supabase.auth.signUp({
-        email: authEmail.trim(),
-        password: authPassword,
-      });
-      if (error) {
-        setAuthError(error.message);
-        return;
-      }
-      alert("Cuenta creada. Revisa tu correo si tienes verificación activada.");
-      setAuthMode("login");
-      setAuthPassword("");
-    } catch (err) {
-      console.error(err);
-      setAuthError("No se pudo crear la cuenta.");
-    }
-  };
-
-  const handleSignOut = async () => {
-    try {
-      await supabase.auth.signOut();
-      setUser(null);
-      setFamilyCtx(null);
-      setTransactions([]);
-    } catch (err) {
-      console.error("Error cerrando sesión", err);
-    }
-  };
-
-  // =========================================================
-  //  2. Cargar contexto de familia del usuario
-  // =========================================================
-  useEffect(() => {
-    const currentUser = user;
-    if (!currentUser) {
-      setFamilyCtx(null);
-      setFamilyError(null);
-      setFamilyLoading(false);
-      return;
-    }
-
-    const userId = currentUser.id;
-    const email = (currentUser.email ?? "").toLowerCase();
-    let cancelled = false;
-
-    const loadFamily = async () => {
-      setFamilyLoading(true);
-      setFamilyError(null);
-      try {
-        const { data: memberRows, error: memberError } = await supabase
-          .from("family_members")
-          .select("id,family_id,status,user_id,invited_email")
-          .or(`user_id.eq.${userId},invited_email.eq.${email}`)
-          .eq("status", "active")
-          .limit(1);
-
-        if (memberError) throw memberError;
-
-        if (!memberRows || memberRows.length === 0) {
-          if (!cancelled) {
-            setFamilyCtx(null);
-          }
+        if (userError) throw userError;
+        if (!user) {
+          setError("No se encontró el usuario. Inicia sesión de nuevo.");
+          setLoading(false);
           return;
         }
 
-        const member = memberRows[0];
+        setUser(user);
 
-        const { data: fam, error: famError } = await supabase
-          .from("families")
-          .select("id,name,user_id")
-          .eq("id", member.family_id)
-          .single();
+        // Intentamos leer perfil/familia si existe la tabla `profiles`
+        let familyGroupId: string | null = null;
+        let members: FamilyMember[] = [];
 
-        if (famError) throw famError;
+        try {
+          const { data: profile, error: profileError } = await supabase
+            .from("profiles")
+            .select("id, family_group_id, full_name, role")
+            .eq("id", user.id)
+            .maybeSingle();
 
-        const { data: activeMembers, error: membersError } = await supabase
-          .from("family_members")
-          .select("id,status")
-          .eq("family_id", fam.id)
-          .eq("status", "active");
+          if (!profileError && profile) {
+            familyGroupId = profile.family_group_id ?? null;
 
-        if (membersError) throw membersError;
+            if (familyGroupId) {
+              const { data: membersData, error: membersError } = await supabase
+                .from("profiles")
+                .select("id, full_name, role, family_group_id")
+                .eq("family_group_id", familyGroupId);
 
-        if (!cancelled) {
-          const activeCount = activeMembers?.length ?? 0;
-
-          setFamilyCtx({
-            familyId: fam.id,
-            familyName: fam.name,
-            ownerUserId: fam.user_id,
-            activeMembers: activeCount,
-          });
-        }
-      } catch (err) {
-        console.error("Error cargando familia para dashboard:", err);
-        if (!cancelled) {
-          setFamilyError(
-            "No se pudo cargar la información de tu familia. Revisa la sección Familia."
+              if (!membersError && membersData) {
+                members = membersData as FamilyMember[];
+              }
+            }
+          } else if (profileError) {
+            // Si la tabla no existe o falla, trabajamos en modo individual
+            console.warn(
+              "No se pudo leer 'profiles', se usará modo individual:",
+              profileError.message
+            );
+          }
+        } catch (innerErr: any) {
+          console.warn(
+            "Error intentando leer tabla profiles, modo individual:",
+            innerErr?.message
           );
-          setFamilyCtx(null);
         }
-      } finally {
-        if (!cancelled) setFamilyLoading(false);
-      }
-    };
 
-    loadFamily();
+        // Si no hay miembros, al menos creamos el "grupo" con el propio usuario
+        if (!members.length) {
+          members = [
+            {
+              id: user.id,
+              full_name: user.email ?? "Tu cuenta",
+              role: "jefe",
+              family_group_id: null,
+            },
+          ];
+        }
 
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
+        const now = new Date();
+        const startOfYear = new Date(now.getFullYear(), 0, 1).toISOString();
 
-  const isOwner =
-    !!familyCtx && !!user && familyCtx.ownerUserId === user.id;
-
-  // =========================================================
-  //  3. Cargar transacciones familiares del mes
-  // =========================================================
-  useEffect(() => {
-    if (!user || !familyCtx) {
-      setTransactions([]);
-      return;
-    }
-
-    const ownerId = familyCtx.ownerUserId;
-
-    async function loadTx() {
-      setLoadingTx(true);
-      setTxError(null);
-
-      try {
-        const [year, monthNumber] = month.split("-");
-        const from = `${month}-01`;
-        const to = `${month}-${new Date(
-          Number(year),
-          Number(monthNumber),
-          0
-        )
-          .getDate()
-          .toString()
-          .padStart(2, "0")}`;
-
-        const { data, error } = await supabase
+        // Queries base
+        let goalsQuery = supabase.from("family_goals").select("*");
+        let txsQuery = supabase
           .from("transactions")
-          .select(
-            "id,date,type,category,amount,method,notes,owner_user_id,spender_user_id,spender_label"
-          )
-          .eq("owner_user_id", ownerId)
-          .gte("date", from)
-          .lte("date", to)
-          .order("date", { ascending: true });
+          .select("*")
+          .gte("date", startOfYear);
 
-        if (error) throw error;
+        // Si tenemos family_group_id, filtramos por familia; si no, por usuario
+        if (familyGroupId) {
+          goalsQuery = goalsQuery.eq("family_group_id", familyGroupId);
+          txsQuery = txsQuery.eq("family_group_id", familyGroupId);
+        } else {
+          // Ajusta estos campos según tu schema real:
+          goalsQuery = goalsQuery.eq("owner_user_id", user.id);
+          txsQuery = txsQuery.eq("user_id", user.id);
+        }
 
-        setTransactions(
-          (data ?? []).map((t: any) => ({
-            id: t.id,
-            date: t.date,
-            type: t.type,
-            category: t.category,
-            amount: Number(t.amount),
-            method: t.method,
-            notes: t.notes ?? null,
-            owner_user_id: t.owner_user_id ?? null,
-            spender_user_id: t.spender_user_id ?? null,
-            spender_label: t.spender_label ?? null,
-          }))
+        const [
+          { data: goalsData, error: goalsError },
+          { data: txsData, error: txsError },
+        ] = await Promise.all([goalsQuery, txsQuery]);
+
+        if (goalsError) {
+          console.warn(
+            "Error cargando metas (se asumirá sin metas):",
+            goalsError.message
+          );
+        }
+
+        if (txsError) {
+          console.error("Error cargando movimientos:", txsError.message);
+          throw txsError;
+        }
+
+        setFamilyMembers(members);
+        setGoals((goalsData || []) as FamilyGoal[]);
+        setTxs((txsData || []) as Tx[]);
+      } catch (err: any) {
+        console.error("Error cargando dashboard familiar:", err);
+        setError(
+          err?.message ||
+            "Ocurrió un error al cargar el dashboard familiar. Intenta de nuevo."
         );
-      } catch (err) {
-        console.error("Error cargando movimientos familiares:", err);
-        setTxError("No se pudieron cargar los movimientos familiares.");
       } finally {
-        setLoadingTx(false);
+        setLoading(false);
       }
+    };
+
+    fetchData();
+  }, []);
+
+  const memberMap = useMemo(() => {
+    const map = new Map<string, FamilyMember>();
+    familyMembers.forEach((m) => {
+      if (m.id) map.set(m.id, m);
+    });
+    return map;
+  }, [familyMembers]);
+
+  const goalsWithProgress: GoalWithProgress[] = useMemo(() => {
+    if (!goals.length) return [];
+
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    return goals.map((goal) => {
+      const target = goal.target_amount || 0;
+
+      const relatedTxs = txs.filter((tx) => {
+        const byGoalId = tx.goal_id === goal.id;
+        const byCategory =
+          goal.auto_track &&
+          goal.track_category &&
+          tx.category === goal.track_category;
+
+        if (!byGoalId && !byCategory) return false;
+
+        if (goal.track_direction === "ingresos" || goal.track_direction === "ahorros") {
+          return tx.type === "ingreso";
+        }
+
+        if (goal.track_direction === "gastos_reducidos") {
+          return tx.type === "gasto";
+        }
+
+        return true;
+      });
+
+      const totalContributed = relatedTxs.reduce(
+        (sum, tx) => sum + (tx.amount || 0),
+        0
+      );
+
+      const progressPct =
+        target > 0 ? Math.min((totalContributed / target) * 100, 200) : 0;
+
+      const last30Txs = relatedTxs.filter((tx) => {
+        const d = new Date(tx.date);
+        return d >= thirtyDaysAgo;
+      });
+
+      const last30Amount = last30Txs.reduce(
+        (sum, tx) => sum + (tx.amount || 0),
+        0
+      );
+
+      let projectedDaysToGoal: number | null = null;
+
+      if (target > 0 && totalContributed < target && last30Amount > 0) {
+        const dailyVelocity = last30Amount / 30;
+        const remaining = target - totalContributed;
+        projectedDaysToGoal = remaining / dailyVelocity;
+      }
+
+      let intensity: "on_track" | "at_risk" | "off_track" = "on_track";
+
+      if (goal.due_date) {
+        const due = new Date(goal.due_date);
+        const today = new Date();
+        const daysToDue = daysDiff(today, due);
+
+        if (progressPct >= 100) {
+          intensity = "on_track";
+        } else if (projectedDaysToGoal === null) {
+          intensity = "at_risk";
+        } else if (projectedDaysToGoal > daysToDue) {
+          intensity = "off_track";
+        } else if (projectedDaysToGoal > daysToDue * 0.8) {
+          intensity = "at_risk";
+        } else {
+          intensity = "on_track";
+        }
+      }
+
+      return {
+        ...goal,
+        totalContributed,
+        progressPct,
+        last30Amount,
+        projectedDaysToGoal,
+        intensity,
+      };
+    });
+  }, [goals, txs]);
+
+  const globalSummary = useMemo(() => {
+    if (!goalsWithProgress.length) {
+      return {
+        totalGoals: 0,
+        completedGoals: 0,
+        inProgressGoals: 0,
+        globalTarget: 0,
+        globalContributed: 0,
+        globalProgressPct: 0,
+        monthlyGoalContrib: 0,
+      };
     }
 
-    loadTx();
-  }, [user, familyCtx, month]);
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  // =========================================================
-  //  4. Cálculos agregados
-  // =========================================================
-  const { ingresosFamilia, gastosFamilia } = useMemo(() => {
-    let ingresos = 0;
-    let gastos = 0;
-    for (const t of transactions) {
-      if (t.type === "ingreso") ingresos += t.amount;
-      else gastos += t.amount;
-    }
-    return { ingresosFamilia: ingresos, gastosFamilia: gastos };
-  }, [transactions]);
+    const totalGoals = goalsWithProgress.length;
+    const completedGoals =
+      goalsWithProgress.filter(
+        (g) => (g.status as string) === "completado" || g.progressPct >= 100
+      ).length || 0;
 
-  const flujoFamiliar = ingresosFamilia - gastosFamilia;
+    const inProgressGoals =
+      goalsWithProgress.filter(
+        (g) =>
+          g.progressPct > 0 &&
+          g.progressPct < 100 &&
+          g.status !== "cancelado"
+      ).length || 0;
 
-  const gastosPorCategoria = useMemo(() => {
-    const map = new Map<string, number>();
+    const globalTarget = goalsWithProgress.reduce(
+      (sum, g) => sum + (g.target_amount || 0),
+      0
+    );
+    const globalContributed = goalsWithProgress.reduce(
+      (sum, g) => sum + g.totalContributed,
+      0
+    );
 
-    for (const t of transactions) {
-      if (t.type !== "gasto") continue;
-      const key = t.category || "SIN_CATEGORIA";
-      map.set(key, (map.get(key) ?? 0) + t.amount);
-    }
+    const globalProgressPct =
+      globalTarget > 0 ? Math.min((globalContributed / globalTarget) * 100, 200) : 0;
 
-    const entries = Array.from(map.entries()).map(([category, total]) => ({
-      category,
-      total,
-    }));
+    const monthlyGoalContrib = txs
+      .filter((tx) => {
+        const d = new Date(tx.date);
+        const isThisMonth = d >= startOfMonth && d <= now;
+        return isThisMonth && tx.goal_id != null;
+      })
+      .reduce((sum, tx) => sum + (tx.amount || 0), 0);
 
-    entries.sort((a, b) => b.total - a.total);
-    const totalGastos = entries.reduce((sum, e) => sum + e.total, 0);
+    return {
+      totalGoals,
+      completedGoals,
+      inProgressGoals,
+      globalTarget,
+      globalContributed,
+      globalProgressPct,
+      monthlyGoalContrib,
+    };
+  }, [goalsWithProgress, txs]);
 
-    return entries.map((e) => ({
-      ...e,
-      percent: totalGastos ? (e.total * 100) / totalGastos : 0,
-    }));
-  }, [transactions]);
-
-  const gastosPorPersona = useMemo(() => {
-    const map = new Map<string, number>();
-
-    for (const t of transactions) {
-      if (t.type !== "gasto") continue;
-
-      const label = t.spender_label || "Sin etiqueta";
-      map.set(label, (map.get(label) ?? 0) + t.amount);
-    }
-
-    const arr = Array.from(map.entries()).map(([label, total]) => ({
-      label,
-      total,
-    }));
-
-    const total = arr.reduce((s, x) => s + x.total, 0);
-
-    return arr
-      .map((x) => ({
-        ...x,
-        percent: total ? (x.total * 100) / total : 0,
-      }))
-      .sort((a, b) => b.total - a.total);
-  }, [transactions]);
-
-  const chartDataCategorias = useMemo(
+  const goalsChartData = useMemo(
     () =>
-      gastosPorCategoria.map((g) => ({
-        category: g.category,
-        total: g.total,
+      goalsWithProgress.map((g) => ({
+        name: g.name,
+        progreso: Number(g.progressPct.toFixed(1)),
       })),
-    [gastosPorCategoria]
+    [goalsWithProgress]
   );
 
-  const chartDataLinea = useMemo(() => {
-    const map = new Map<
-      string,
-      { date: string; ingresos: number; gastos: number }
-    >();
+  const memberContributionChartData = useMemo(() => {
+    if (!txs.length) return [];
 
-    for (const t of transactions) {
-      const key = (t.date ?? "").slice(0, 10);
-      if (!map.has(key)) {
-        map.set(key, { date: key, ingresos: 0, gastos: 0 });
-      }
-      const item = map.get(key)!;
-      if (t.type === "ingreso") item.ingresos += t.amount;
-      else item.gastos += t.amount;
-    }
+    const map = new Map<string, number>();
 
-    const arr = Array.from(map.values()).sort((a, b) =>
-      a.date < b.date ? -1 : 1
-    );
-
-    return arr.map((d) => ({
-      ...d,
-      dateLabel: formatDateDisplay(d.date),
-    }));
-  }, [transactions]);
-
-  const monthLabel = useMemo(() => {
-    const [y, m] = month.split("-");
-    const date = new Date(Number(y), Number(m) - 1, 1);
-    const raw = date.toLocaleDateString("es-MX", {
-      year: "numeric",
-      month: "long",
+    txs.forEach((tx) => {
+      if (!tx.goal_id) return;
+      const key = tx.owner_user_id || tx.created_by || "desconocido";
+      map.set(key, (map.get(key) || 0) + (tx.amount || 0));
     });
-    return raw.charAt(0).toUpperCase() + raw.slice(1);
-  }, [month]);
 
-  const recentActivity = useMemo(() => {
-    const sorted = [...transactions].sort((a, b) =>
-      a.date < b.date ? 1 : -1
-    );
-    return sorted.slice(0, 8);
-  }, [transactions]);
+    return Array.from(map.entries()).map(([userId, total]) => {
+      const member = memberMap.get(userId);
+      return {
+        name: member?.full_name || "Miembro",
+        aporte: total,
+      };
+    });
+  }, [txs, memberMap]);
 
-  const smartSummary = useMemo(() => {
-    const lines: string[] = [];
+  const isDark = theme === "dark";
 
-    if (!familyCtx) {
-      lines.push(
-        "Todavía no tienes configurado un grupo familiar. Ve a la sección Familia para crear uno."
-      );
-      return lines;
-    }
-
-    if (!transactions.length) {
-      lines.push(
-        "Este mes aún no hay movimientos familiares. Cuando tú o tu familia registren ingresos y gastos verás el resumen aquí."
-      );
-      return lines;
-    }
-
-    if (ingresosFamilia === 0 && gastosFamilia > 0) {
-      lines.push(
-        "Este mes sólo se han registrado gastos familiares sin ingresos. Revisa si falta capturar sueldos o aportaciones."
-      );
-    }
-
-    if (ingresosFamilia > 0) {
-      const ratio = (gastosFamilia / ingresosFamilia) * 100;
-      lines.push(
-        `La familia ha gastado aproximadamente el ${ratio.toFixed(
-          1
-        )}% de los ingresos registrados en el mes.`
-      );
-
-      if (ratio > 95) {
-        lines.push(
-          "Están prácticamente gastando todo lo que ingresa. Quizá vale la pena frenar un poco los gastos en lo que resta del mes."
-        );
-      } else if (ratio > 75) {
-        lines.push(
-          "El nivel de gasto familiar es alto, pero aún tienen cierto margen. Revisar las principales categorías puede ayudar."
-        );
-      } else if (ratio < 50) {
-        lines.push(
-          "Van muy bien. Están gastando menos de la mitad de lo que entra a la familia este mes."
-        );
-      }
-    }
-
-    if (gastosPorCategoria.length > 0) {
-      const top1 = gastosPorCategoria[0];
-      lines.push(
-        `La categoría con más gasto familiar este mes es "${top1.category}" con ${formatMoney(
-          top1.total
-        )} (${top1.percent.toFixed(1)}% del total de gastos).`
-      );
-      if (gastosPorCategoria.length > 1) {
-        const top2 = gastosPorCategoria[1];
-        lines.push(
-          `La segunda categoría con más peso es "${top2.category}" con ${formatMoney(
-            top2.total
-          )}.`
-        );
-      }
-    }
-
-    if (gastosPorPersona.length > 0) {
-      const top = gastosPorPersona[0];
-      lines.push(
-        `Quien más ha generado gastos familiares este mes es "${top.label}" con ${formatMoney(
-          top.total
-        )} (${top.percent.toFixed(1)}% del gasto familiar).`
-      );
-    }
-
-    return lines;
-  }, [
-    familyCtx,
-    transactions,
-    ingresosFamilia,
-    gastosFamilia,
-    gastosPorCategoria,
-    gastosPorPersona,
-  ]);
-
-  // =========================================================
-  //  RENDER: estados especiales
-  // =========================================================
-  if (authLoading) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
-        Cargando sesión...
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div className="flex flex-1 items-center justify-center">
-        <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h1 className="text-lg font-semibold">Finanzas familiares</h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Inicia sesión para ver el dashboard familiar y conectar tus gastos
-            con tu familia.
-          </p>
-
-          <h2 className="text-sm font-medium">
-            {authMode === "login" ? "Inicia sesión" : "Crea tu cuenta"}
-          </h2>
-
-          <form
-            onSubmit={authMode === "login" ? handleSignIn : handleSignUp}
-            className="space-y-3 text-sm"
-          >
-            <div>
-              <label className="mb-1 block text-xs text-gray-600 dark:text-gray-300">
-                Correo electrónico
-              </label>
-              <input
-                type="email"
-                required
-                value={authEmail}
-                onChange={(e) => setAuthEmail(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-                placeholder="tucorreo@ejemplo.com"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs text-gray-600 dark:text-gray-300">
-                Contraseña
-              </label>
-              <input
-                type="password"
-                required
-                value={authPassword}
-                onChange={(e) => setAuthPassword(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-                placeholder="Mínimo 6 caracteres"
-              />
-            </div>
-
-            {authError && (
-              <p className="text-xs text-red-500">{authError}</p>
-            )}
-
-            <button
-              type="submit"
-              className="w-full rounded-lg bg-sky-500 py-2 text-sm font-medium text-white transition hover:bg-sky-600"
-            >
-              {authMode === "login" ? "Entrar" : "Crear cuenta"}
-            </button>
-          </form>
-
-          <div className="text-center text-xs text-gray-600 dark:text-gray-300">
-            {authMode === "login" ? (
-              <>
-                ¿No tienes cuenta?{" "}
-                <button
-                  className="text-sky-600 underline"
-                  onClick={() => {
-                    setAuthMode("signup");
-                    setAuthError(null);
-                  }}
-                >
-                  Crear una nueva
-                </button>
-              </>
-            ) : (
-              <>
-                ¿Ya tienes cuenta?{" "}
-                <button
-                  className="text-sky-600 underline"
-                  onClick={() => {
-                    setAuthMode("login");
-                    setAuthError(null);
-                  }}
-                >
-                  Inicia sesión
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // =========================================================
-  //  RENDER: DASHBOARD FAMILIAR
-  // =========================================================
   return (
-    <main className="flex flex-1 flex-col gap-4">
+    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
       <AppHeader
-        title="Dashboard familiar"
-        subtitle="Resumen 360° de ingresos y gastos de tu familia."
+        title="Familia"
+        subtitle="Objetivos familiares y actividad del grupo"
         activeTab="familia"
-        userEmail={user.email}
-        onSignOut={handleSignOut}
       />
 
-      <section className="space-y-4">
-        {/* Barra superior */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="space-y-2">
-              <div className="text-xs text-slate-500 dark:text-slate-300">
-                Mes que estás analizando
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="month"
-                  value={month}
-                  onChange={(e) => setMonth(e.target.value)}
-                  className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-                  aria-label={`Mes: ${monthLabel}`}
-                />
-              </div>
-
-              {familyCtx && (
-                <div className="space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
-                  <div>
-                    Familia:{" "}
-                    <span className="font-semibold">
-                      {familyCtx.familyName}
-                    </span>{" "}
-                    {isOwner ? "(jefe de familia)" : "(miembro)"}
-                  </div>
-                  <div>
-                    Miembros activos:{" "}
-                    <span className="font-semibold">
-                      {familyCtx.activeMembers}
-                    </span>
-                  </div>
-                </div>
-              )}
-              {familyError && (
-                <p className="text-[11px] text-rose-500">{familyError}</p>
-              )}
-            </div>
-
-            {/* Navegación rápida */}
-            <div className="flex flex-wrap gap-2 text-xs">
-              <Link
-                href="/gastos"
-                className="rounded-full bg-sky-500 px-3 py-1 font-medium text-white hover:bg-sky-600"
-              >
-                Capturar gastos / ingresos
-              </Link>
-              <Link
-                href="/patrimonio"
-                className="rounded-full bg-emerald-500 px-3 py-1 font-medium text-white hover:bg-emerald-600"
-              >
-                Ver / editar patrimonio
-              </Link>
-              <Link
-                href="/familia"
-                className="rounded-full bg-slate-900 px-3 py-1 font-medium text-white hover:bg-black dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
-              >
-                Configuración de familia
-              </Link>
-            </div>
-          </div>
-        </div>
-
-        {/* Tarjetas principales (alineadas y del mismo alto) */}
-        <div className="mt-2 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          {/* Ingresos */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">
-              Ingresos familiares del mes
-            </h3>
-            <div className="flex h-[110px] flex-col justify-center">
-              <div className="text-xl md:text-2xl font-semibold tracking-tight text-emerald-600 dark:text-emerald-400">
-                {formatMoney(ingresosFamilia)}
-              </div>
-              <p className="mt-2 text-sm leading-tight text-slate-500">
-                Suma de todos los ingresos donde tú eres el dueño financiero.
-              </p>
-            </div>
+      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 pb-10 pt-4 md:px-6 md:pt-6 lg:px-8">
+        <section className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
+              Dashboard familiar
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 md:text-sm">
+              Visualiza el avance de tus objetivos familiares, quién está
+              aportando más y qué tan cerca están de lograrse.
+            </p>
           </div>
 
-          {/* Gastos */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">
-              Gastos familiares del mes
-            </h3>
-            <div className="flex h-[110px] flex-col justify-center">
-              <div className="text-xl md:text-2xl font-semibold tracking-tight text-rose-600 dark:text-rose-400">
-                {formatMoney(gastosFamilia)}
+          {user && (
+            <div className="rounded-full bg-gradient-to-r from-emerald-500/10 via-sky-500/10 to-indigo-500/10 px-4 py-2 text-right text-[11px] text-slate-600 dark:text-slate-300">
+              <div className="text-[10px] uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+                Jefe de familia
               </div>
-              <p className="mt-2 text-sm leading-tight text-slate-500">
-                Incluye tus gastos y los de tus familiares con tus tarjetas.
-              </p>
-            </div>
-          </div>
-
-          {/* Flujo */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">
-              Flujo familiar (Ingresos – Gastos)
-            </h3>
-            <div className="flex h-[110px] flex-col justify-center">
-              <div
-                className={`text-xl md:text-2xl font-semibold tracking-tight ${
-                  flujoFamiliar < 0
-                    ? "text-rose-600 dark:text-rose-400"
-                    : "text-emerald-600 dark:text-emerald-400"
-                }`}
-              >
-                {formatMoney(flujoFamiliar)}
+              <div className="font-medium">
+                {familyMembers.find((m) => m.id === user.id)?.full_name ||
+                  "Tu cuenta"}
               </div>
-              <p className="mt-2 text-sm leading-tight text-slate-500">
-                Si es negativo, la familia está gastando más de lo que ingresa.
-              </p>
             </div>
-          </div>
+          )}
+        </section>
 
-          {/* Miembros activos */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">
-              Miembros activos
-            </h3>
-            <div className="flex h-[110px] flex-col justify-center">
-              <div className="text-xl md:text-2xl font-semibold tracking-tight text-sky-600 dark:text-sky-400">
-                {familyCtx?.activeMembers ?? 0}
-              </div>
-              <p className="mt-2 text-sm leading-tight text-slate-500">
-                Cada miembro puede registrar gastos; el resumen se centra en el
-                dueño financiero.
-              </p>
-            </div>
+        {loading && (
+          <div className="flex items-center justify-center rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            Cargando dashboard familiar…
           </div>
-
-          {/* Tip rápido */}
-          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 shadow-sm dark:border-amber-700 dark:bg-amber-900/30">
-            <h3 className="text-sm font-semibold text-amber-700 dark:text-amber-300">
-              Tip rápido
-            </h3>
-            <div className="flex h-[110px] flex-col justify-center">
-              <p className="text-sm leading-tight text-amber-700 dark:text-amber-300">
-                Pídele a tu familia que use siempre el campo{" "}
-                <strong>“Quién generó”</strong> al capturar gastos. Así este
-                dashboard te dirá quién está gastando más.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Resumen inteligente familiar */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h2 className="mb-2 text-sm font-semibold">
-          Resumen inteligente de tus finanzas familiares
-        </h2>
-        {smartSummary.length === 0 ? (
-          <p className="text-xs text-gray-500">
-            Aún no hay suficiente información para generar un resumen.
-          </p>
-        ) : (
-          <ul className="list-disc space-y-1 pl-5 text-xs">
-            {smartSummary.map((line, idx) => (
-              <li key={idx}>{line}</li>
-            ))}
-          </ul>
         )}
-      </section>
 
-      {/* Gráficas principales */}
-      <section className="grid gap-4 md:grid-cols-2">
-        <div className="h-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-2 text-xs font-semibold">
-            Gastos familiares por categoría (mes actual)
-          </h3>
-          {chartDataCategorias.length === 0 ? (
-            <p className="text-xs text-gray-500">
-              Aún no hay gastos registrados en este mes.
-            </p>
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={chartDataCategorias}
-                margin={{ top: 10, right: 10, left: 0, bottom: 40 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="category"
-                  tick={{
-                    fontSize: 10,
-                    fill: isDark ? "#e5e7eb" : "#374151",
-                  }}
-                  angle={-30}
-                  textAnchor="end"
-                />
-                <YAxis
-                  tick={{
-                    fontSize: 10,
-                    fill: isDark ? "#e5e7eb" : "#374151",
-                  }}
-                />
-                <Tooltip />
-                <Legend />
-                <Bar
-                  dataKey="total"
-                  name="Gasto familiar"
-                  radius={4}
-                  fill={isDark ? "#38bdf8" : "#0ea5e9"}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
+        {error && !loading && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-300">
+            {error}
+          </div>
+        )}
 
-        <div className="h-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-2 text-xs font-semibold">
-            Ingresos vs gastos familiares por día
-          </h3>
-          {chartDataLinea.length === 0 ? (
-            <p className="text-xs text-gray-500">
-              Aún no hay movimientos suficientes para la gráfica.
-            </p>
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartDataLinea}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="dateLabel"
-                  tick={{
-                    fontSize: 10,
-                    fill: isDark ? "#e5e7eb" : "#374151",
-                  }}
-                />
-                <YAxis
-                  tick={{
-                    fontSize: 10,
-                    fill: isDark ? "#e5e7eb" : "#374151",
-                  }}
-                />
-                <Tooltip />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="ingresos"
-                  name="Ingresos"
-                  dot={false}
-                  stroke={isDark ? "#22c55e" : "#16a34a"}
-                  strokeWidth={2}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="gastos"
-                  name="Gastos"
-                  dot={false}
-                  stroke={isDark ? "#fb7185" : "#ef4444"}
-                  strokeWidth={2}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </section>
-
-      {/* Barras por categoría y por persona */}
-      <section className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="mb-2 text-sm font-semibold">
-            Detalle de gastos familiares por categoría
-          </h2>
-          {gastosPorCategoria.length === 0 ? (
-            <p className="text-xs text-gray-500">
-              Aún no hay gastos registrados.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {gastosPorCategoria.map((item) => (
-                <div key={item.category} className="space-y-1">
-                  <div className="flex justify-between text-xs">
-                    <span>{item.category}</span>
-                    <span>
-                      {formatMoney(item.total)}{" "}
-                      <span className="text-gray-400">
-                        ({item.percent.toFixed(1)}%)
-                      </span>
-                    </span>
+        {!loading && !error && (
+          <>
+            {/* RESUMEN GLOBAL */}
+            <section className="grid gap-4 md:grid-cols-3">
+              <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Metas familiares
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <div className="text-2xl font-semibold">
+                    {globalSummary.totalGoals}
                   </div>
-                  <div className="h-2 overflow-hidden rounded bg-gray-200 dark:bg-slate-700">
-                    <div
-                      className="h-2 rounded bg-sky-500"
-                      style={{
-                        width: `${Math.max(item.percent, 2)}%`,
-                      }}
-                    />
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    totales
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+                <div className="mt-2 flex gap-3 text-[11px] text-slate-500 dark:text-slate-400">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    {globalSummary.completedGoals} completadas
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                    {globalSummary.inProgressGoals} en progreso
+                  </span>
+                </div>
+              </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="mb-2 text-sm font-semibold">
-            Gastos familiares por persona
-          </h2>
-          {gastosPorPersona.length === 0 ? (
-            <p className="text-xs text-gray-500">
-              Aún no hay gastos familiares con el campo “Quién generó”
-              registrado.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {gastosPorPersona.map((item) => (
-                <div key={item.label} className="space-y-1">
-                  <div className="flex justify-between text-xs">
-                    <span>{item.label}</span>
-                    <span>
-                      {formatMoney(item.total)}{" "}
-                      <span className="text-gray-400">
-                        ({item.percent.toFixed(1)}%)
-                      </span>
-                    </span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded bg-gray-200 dark:bg-slate-700">
-                    <div
-                      className="h-2 rounded bg-emerald-500"
-                      style={{
-                        width: `${Math.max(item.percent, 2)}%`,
-                      }}
-                    />
+              <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Ahorro enfocado a metas
+                </div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {formatCurrency(globalSummary.globalContributed)} /{" "}
+                  {formatCurrency(globalSummary.globalTarget || 0)}
+                </div>
+                <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-sky-500 to-indigo-500"
+                    style={{
+                      width: `${Math.min(
+                        globalSummary.globalProgressPct,
+                        100
+                      ).toFixed(1)}%`,
+                    }}
+                  />
+                </div>
+                <div className="mt-1 text-right text-[11px] text-slate-500 dark:text-slate-400">
+                  Avance global{" "}
+                  <span className="font-semibold text-slate-800 dark:text-slate-100">
+                    {globalSummary.globalProgressPct.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Aportado a metas este mes
+                </div>
+                <div className="text-2xl font-semibold">
+                  {formatCurrency(globalSummary.monthlyGoalContrib || 0)}
+                </div>
+                <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                  Suma de movimientos ligados a cualquier objetivo familiar
+                  durante el mes actual.
+                </p>
+              </div>
+            </section>
+
+            {/* METAS + ANALÍTICA */}
+            <section className="grid gap-4 lg:grid-cols-3">
+              <div className="lg:col-span-2">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-sm font-semibold">
+                      Objetivos familiares
+                    </h2>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Objetivos vinculados a tus movimientos. El avance se
+                      calcula automáticamente.
+                    </p>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
 
-          <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
-            Estos montos consideran sólo los{" "}
-            <span className="font-semibold">gastos</span> del mes actual y usan
-            el campo <span className="font-semibold">“Quién generó”</span> en
-            tus movimientos. Es ideal para ver quién está gastando más dentro
-            de la familia.
-          </p>
-        </div>
-      </section>
+                {goalsWithProgress.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
+                    Aún no tienes objetivos familiares. Crea metas para
+                    vacaciones, estudios, fondo de emergencia, etc.
+                  </div>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {goalsWithProgress.map((goal) => {
+                      const member =
+                        goal.owner_user_id &&
+                        memberMap.get(goal.owner_user_id);
 
-      {/* Actividad reciente */}
-      <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <h2 className="mb-2 text-sm font-semibold">
-          Actividad reciente de la familia
-        </h2>
-        {loadingTx ? (
-          <p className="text-xs text-slate-500">Cargando movimientos...</p>
-        ) : recentActivity.length === 0 ? (
-          <p className="text-xs text-slate-500">
-            Aún no hay actividad en este mes.
-          </p>
-        ) : (
-          <ul className="space-y-2 text-xs">
-            {recentActivity.map((t) => (
-              <li
-                key={t.id}
-                className="flex items-start justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/40"
-              >
-                <div className="flex flex-col">
-                  <span className="text-[11px] text-slate-500">
-                    {formatDateDisplay(t.date)}
-                  </span>
-                  <span className="font-medium text-slate-800 dark:text-slate-100">
-                    {t.type === "ingreso" ? "Ingreso" : "Gasto"} · {t.category}
-                  </span>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-300">
-                    {t.spender_label
-                      ? `Generó: ${t.spender_label}`
-                      : "Generó: (sin etiqueta)"}
-                  </span>
-                  {t.notes && (
-                    <span className="mt-1 line-clamp-2 text-[11px] text-slate-500 dark:text-slate-300">
-                      {t.notes}
-                    </span>
+                      const progressClamped = Math.min(goal.progressPct, 120);
+                      const overGoal = goal.progressPct >= 100;
+
+                      const intensityBadge =
+                        goal.intensity === "on_track"
+                          ? {
+                              label: "En ruta",
+                              className:
+                                "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+                            }
+                          : goal.intensity === "at_risk"
+                          ? {
+                              label: "En riesgo",
+                              className:
+                                "bg-amber-50 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+                            }
+                          : {
+                              label: "Fuera de ruta",
+                              className:
+                                "bg-rose-50 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
+                            };
+
+                      return (
+                        <article
+                          key={goal.id}
+                          className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
+                        >
+                          <div className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 via-sky-500 to-indigo-500 opacity-70" />
+
+                          <div className="mb-2 flex items-start justify-between gap-2">
+                            <div>
+                              <h3 className="text-sm font-semibold leading-tight">
+                                {goal.name}
+                              </h3>
+                              {goal.description && (
+                                <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-500 dark:text-slate-400">
+                                  {goal.description}
+                                </p>
+                              )}
+                            </div>
+                            <span
+                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${intensityBadge.className}`}
+                            >
+                              {intensityBadge.label}
+                            </span>
+                          </div>
+
+                          <div className="mb-2 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                            <span>
+                              Meta:{" "}
+                              <span className="font-semibold text-slate-800 dark:text-slate-100">
+                                {formatCurrency(goal.target_amount || 0)}
+                              </span>
+                            </span>
+                            <span>
+                              Avance:{" "}
+                              <span className="font-semibold text-slate-800 dark:text-slate-100">
+                                {formatCurrency(goal.totalContributed)}
+                              </span>
+                            </span>
+                          </div>
+
+                          <div className="mb-1 h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                            <div
+                              className={`h-full rounded-full ${
+                                overGoal
+                                  ? "bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-700"
+                                  : "bg-gradient-to-r from-sky-500 via-indigo-500 to-violet-500"
+                              }`}
+                              style={{ width: `${progressClamped}%` }}
+                            />
+                          </div>
+
+                          <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                            <span>
+                              {goal.progressPct.toFixed(1)}% completado
+                              {goal.due_date && (
+                                <>
+                                  {" · "}
+                                  meta al {formatDate(goal.due_date)}
+                                </>
+                              )}
+                            </span>
+                            {member && (
+                              <span className="inline-flex items-center gap-1">
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                Líder:{" "}
+                                <span className="font-medium text-slate-700 dark:text-slate-200">
+                                  {member.full_name}
+                                </span>
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="mt-3 rounded-xl bg-slate-50 p-2 text-[11px] text-slate-500 dark:bg-slate-900/70 dark:text-slate-400">
+                            {goal.last30Amount > 0 ? (
+                              <p>
+                                En los últimos 30 días se han aportado{" "}
+                                <span className="font-semibold text-slate-800 dark:text-slate-100">
+                                  {formatCurrency(goal.last30Amount)}
+                                </span>{" "}
+                                a esta meta.
+                                {goal.projectedDaysToGoal && (
+                                  <>
+                                    {" "}
+                                    Manteniendo este ritmo, podrían completarla
+                                    en{" "}
+                                    <span className="font-semibold text-slate-800 dark:text-slate-100">
+                                      ~
+                                      {Math.round(
+                                        goal.projectedDaysToGoal
+                                      )}{" "}
+                                      días
+                                    </span>
+                                    .
+                                  </>
+                                )}
+                              </p>
+                            ) : (
+                              <p>
+                                Todavía no se registran aportaciones recientes
+                                para esta meta. Vincula movimientos o define una
+                                categoría para que avance automáticamente.
+                              </p>
+                            )}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* PANEL LATERAL */}
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <h3 className="text-xs font-semibold">
+                    Termómetro familiar
+                  </h3>
+                  <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    Resumen rápido del estado de tus objetivos.
+                  </p>
+
+                  <ul className="mt-3 space-y-2 text-[11px] text-slate-600 dark:text-slate-300">
+                    <li className="flex items-start gap-2">
+                      <span className="mt-1 h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      <span>
+                        Tienen{" "}
+                        <span className="font-semibold">
+                          {globalSummary.completedGoals}
+                        </span>{" "}
+                        objetivo(s) completado(s).
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="mt-1 h-1.5 w-1.5 rounded-full bg-amber-500" />
+                      <span>
+                        Hay{" "}
+                        <span className="font-semibold">
+                          {globalSummary.inProgressGoals}
+                        </span>{" "}
+                        objetivo(s) en progreso.
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="mt-1 h-1.5 w-1.5 rounded-full bg-sky-500" />
+                      <span>
+                        Avance global:{" "}
+                        <span className="font-semibold">
+                          {globalSummary.globalProgressPct.toFixed(1)}%
+                        </span>
+                        .
+                      </span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <h3 className="text-xs font-semibold">
+                    Progreso por objetivo
+                  </h3>
+                  <p className="mb-2 mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    Cada barra representa el avance de una meta.
+                  </p>
+                  {goalsChartData.length === 0 ? (
+                    <div className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">
+                      Crea al menos una meta para ver la gráfica.
+                    </div>
+                  ) : (
+                    <div className="h-40">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={goalsChartData}>
+                          <CartesianGrid
+                            strokeDasharray="3 3"
+                            stroke={isDark ? "#1e293b" : "#e2e8f0"}
+                            vertical={false}
+                          />
+                          <XAxis
+                            dataKey="name"
+                            tick={{ fontSize: 10 }}
+                            tickLine={false}
+                            axisLine={{ stroke: isDark ? "#1e293b" : "#e2e8f0" }}
+                          />
+                          <YAxis
+                            tick={{ fontSize: 10 }}
+                            tickLine={false}
+                            axisLine={{ stroke: isDark ? "#1e293b" : "#e2e8f0" }}
+                            domain={[0, 120]}
+                            tickFormatter={(value) => `${value}%`}
+                          />
+                          <Tooltip
+                            contentStyle={{
+                              fontSize: 11,
+                            }}
+                            formatter={(value: any) => `${value}%`}
+                          />
+                          <Bar dataKey="progreso" radius={[6, 6, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
                   )}
                 </div>
-                <div className="ml-3 flex flex-col items-end">
-                  <span
-                    className={`text-sm font-semibold ${
-                      t.type === "ingreso"
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : "text-rose-600 dark:text-rose-400"
-                    }`}
-                  >
-                    {formatMoney(t.amount)}
-                  </span>
-                  <span className="mt-1 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                    {t.method}
-                  </span>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                  <h3 className="text-xs font-semibold">
+                    Aportaciones por miembro
+                  </h3>
+                  <p className="mb-2 mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    Quién está aportando más a las metas (según movimientos
+                    ligados).
+                  </p>
+                  {memberContributionChartData.length === 0 ? (
+                    <div className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">
+                      Aún no hay aportaciones ligadas a metas por miembro.
+                    </div>
+                  ) : (
+                    <div className="h-40">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={memberContributionChartData}>
+                          <CartesianGrid
+                            strokeDasharray="3 3"
+                            stroke={isDark ? "#1e293b" : "#e2e8f0"}
+                            vertical={false}
+                          />
+                          <XAxis
+                            dataKey="name"
+                            tick={{ fontSize: 10 }}
+                            tickLine={false}
+                            axisLine={{ stroke: isDark ? "#1e293b" : "#e2e8f0" }}
+                          />
+                          <YAxis
+                            tick={{ fontSize: 10 }}
+                            tickLine={false}
+                            axisLine={{ stroke: isDark ? "#1e293b" : "#e2e8f0" }}
+                            tickFormatter={(value) =>
+                              formatCurrency(Number(value))
+                            }
+                          />
+                          <Tooltip
+                            contentStyle={{ fontSize: 11 }}
+                            formatter={(value: any) =>
+                              formatCurrency(Number(value))
+                            }
+                          />
+                          <Legend wrapperStyle={{ fontSize: 10 }} />
+                          <Line
+                            type="monotone"
+                            dataKey="aporte"
+                            dot={false}
+                            strokeWidth={2}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
                 </div>
-              </li>
-            ))}
-          </ul>
+              </div>
+            </section>
+          </>
         )}
-        {txError && (
-          <p className="mt-2 text-[11px] text-rose-500">{txError}</p>
-        )}
-      </section>
-    </main>
+      </main>
+    </div>
   );
 }
