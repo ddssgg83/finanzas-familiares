@@ -4,23 +4,29 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Finanzas Familiares",
     short_name: "Finanzas",
-    description:
-      "App para controlar los ingresos y gastos familiares, con soporte offline.",
+    description: "Control familiar de ingresos y gastos.",
     start_url: "/",
+    scope: "/",
     display: "standalone",
     orientation: "portrait",
-    background_color: "#0ea5e9",
+    background_color: "#ffffff",
     theme_color: "#0ea5e9",
     icons: [
+      { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
       {
-        src: "/icons/icon-192x192.png",
-        sizes: "192x192",
-        type: "image/png",
-      },
-      {
-        src: "/icons/icon-512x512.png",
+        src: "/icons/maskable-512.png",
         sizes: "512x512",
         type: "image/png",
+        purpose: "maskable",
+      },
+    ],
+    screenshots: [
+      {
+        src: "/icons/screenshot-1080x1920.png",
+        sizes: "1080x1920",
+        type: "image/png",
+        form_factor: "narrow",
       },
     ],
   };
