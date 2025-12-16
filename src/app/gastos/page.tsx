@@ -150,6 +150,15 @@ function csvEscape(value: string | number | null | undefined): string {
   return str;
 }
 
+type Card = {
+  id: string;
+  name: string;
+  default_method: string | null;
+  owner_id: string;
+  family_id: string | null;
+  shared_with_family: boolean;
+};
+
 export default function GastosPage() {
   // 🔐 AUTH
   const [user, setUser] = useState<User | null>(null);
@@ -183,7 +192,6 @@ export default function GastosPage() {
   });
 
   const [editingId, setEditingId] = useState<string | null>(null);
-  // Saber si el usuario es jefe de familia
   const [isFamilyOwner, setIsFamilyOwner] = useState(false);
 
   // Presupuesto
@@ -208,20 +216,36 @@ export default function GastosPage() {
   const [searchText, setSearchText] = useState<string>("");
 
   // 💳 Tarjetas
-  type Card = {
-    id: string;
-    name: string;
-    default_method: string | null;
-    owner_id: string;
-    family_id: string | null;
-    shared_with_family: boolean; // ya no null ni opcional
-  };
-
   const [cards, setCards] = useState<Card[]>([]);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
 
   // NUEVO: metas familiares
   const [goals, setGoals] = useState<FamilyGoal[]>([]);
+
+  // 👪 CONTEXTO DE FAMILIA
+  const [familyCtx, setFamilyCtx] = useState<FamilyContext | null>(null);
+  const [familyCtxLoading, setFamilyCtxLoading] = useState(false);
+  const [familyCtxError, setFamilyCtxError] = useState<string | null>(null);
+
+  // Scope de vista: solo yo / toda la familia (si es owner)
+  const [viewScope, setViewScope] = useState<"mine" | "family">("mine");
+
+  // Tarjeta nueva
+  const [newCardName, setNewCardName] = useState("");
+  const [savingCard, setSavingCard] = useState(false);
+  const [cardError, setCardError] = useState<string | null>(null);
+  const [newCardShared, setNewCardShared] = useState(false);
+
+  // 🌙 Tema global (para saber si es dark y ajustar gráficos)
+  const { theme, systemTheme } = useTheme();
+  const [mountedTheme, setMountedTheme] = useState(false);
+
+  useEffect(() => {
+    setMountedTheme(true);
+  }, []);
+
+  const currentTheme = theme === "system" ? systemTheme : theme;
+  const isDark = mountedTheme && currentTheme === "dark";
 
   // Decide qué texto mostrar en la columna "Generó"
   const getSpenderLabel = (tx: Tx): string => {
@@ -250,7 +274,6 @@ export default function GastosPage() {
     return "Miembro";
   };
 
-  // Cuando cambias la tarjeta en el formulario
   const handleChangeCard = (cardId: string | null) => {
     setSelectedCardId(cardId);
 
@@ -279,179 +302,6 @@ export default function GastosPage() {
       return updated;
     });
   };
-
-  // Formulario rápido para crear tarjetas
-  const [newCardName, setNewCardName] = useState("");
-  const [savingCard, setSavingCard] = useState(false);
-  const [cardError, setCardError] = useState<string | null>(null);
-  const [newCardShared, setNewCardShared] = useState(false);
-
-  const handleAddCard = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user) return;
-
-    const trimmed = newCardName.trim();
-    if (!trimmed) {
-      alert("Escribe un nombre para la tarjeta (ej. BBVA Negra David).");
-      return;
-    }
-
-    setSavingCard(true);
-    setCardError(null);
-
-    const ownerId = familyCtx?.ownerUserId ?? user.id;
-    const familyId = familyCtx?.familyId ?? null;
-
-    try {
-      const { data, error } = await supabase
-        .from("cards")
-        .insert({
-          owner_id: ownerId,
-          family_id: familyId,
-          name: trimmed,
-          default_method: null,
-          shared_with_family: newCardShared,
-        })
-        .select(
-          "id,name,default_method,owner_id,family_id,shared_with_family"
-        )
-        .single();
-
-      if (error || !data) throw error;
-
-      const newCard: Card = {
-        id: data.id,
-        name: data.name,
-        default_method: data.default_method ?? null,
-        owner_id: data.owner_id,
-        family_id: data.family_id ?? null,
-        shared_with_family: data.shared_with_family ?? false,
-      };
-
-      setCards((prev) => [...prev, newCard]);
-      setNewCardName("");
-      setNewCardShared(false);
-    } catch (err) {
-      console.error("Error creando tarjeta:", err);
-      setCardError("No se pudo crear la tarjeta.");
-    } finally {
-      setSavingCard(false);
-    }
-  };
-
-  const handleDeleteCard = async (cardId: string) => {
-    if (!user) return;
-    const ok = confirm(
-      "¿Seguro que quieres eliminar esta tarjeta? No se borran tus movimientos, sólo la etiqueta."
-    );
-    if (!ok) return;
-
-    try {
-      const { error } = await supabase
-        .from("cards")
-        .delete()
-        .eq("id", cardId)
-        .eq("owner_id", user.id);
-
-      if (error) throw error;
-
-      setCards((prev) => prev.filter((c) => c.id !== cardId));
-      if (selectedCardId === cardId) {
-        setSelectedCardId(null);
-      }
-    } catch (err) {
-      console.error("Error eliminando tarjeta", err);
-      alert("No se pudo eliminar la tarjeta.");
-    }
-  };
-
-  const handleToggleShareCard = async (card: Card) => {
-    if (!user) return;
-
-    if (!isFamilyOwner) {
-      alert(
-        "Sólo el jefe de familia puede cambiar si una tarjeta se comparte con la familia."
-      );
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from("cards")
-        .update({ shared_with_family: !card.shared_with_family })
-        .eq("id", card.id)
-        .eq("owner_id", card.owner_id);
-
-      if (error) throw error;
-
-      setCards((prev) =>
-        prev.map((c) =>
-          c.id === card.id
-            ? { ...c, shared_with_family: !card.shared_with_family }
-            : c
-        )
-      );
-    } catch (err) {
-      console.error("Error actualizando tarjeta:", err);
-      alert("No se pudo actualizar si la tarjeta se comparte o no.");
-    }
-  };
-
-  const handleToggleCardSharing = async (
-    cardId: string,
-    current: boolean | null | undefined
-  ) => {
-    if (!user || !familyCtx) return;
-
-    if (!isFamilyOwner) {
-      alert(
-        "Sólo el jefe de familia puede cambiar si una tarjeta se comparte o no con la familia."
-      );
-      return;
-    }
-
-    const newValue = !current;
-
-    try {
-      const { error } = await supabase
-        .from("cards")
-        .update({ shared_with_family: newValue })
-        .eq("id", cardId)
-        .eq("owner_id", user.id);
-
-      if (error) throw error;
-
-      setCards((prev) =>
-        prev.map((c) =>
-          c.id === cardId ? { ...c, shared_with_family: newValue } : c
-        )
-      );
-    } catch (err) {
-      console.error("Error actualizando tarjeta compartida:", err);
-      alert(
-        "No se pudo actualizar si la tarjeta está compartida con la familia."
-      );
-    }
-  };
-
-  // 🌙 Tema global (para saber si es dark y ajustar gráficos)
-  const { theme, systemTheme } = useTheme();
-  const [mountedTheme, setMountedTheme] = useState(false);
-
-  useEffect(() => {
-    setMountedTheme(true);
-  }, []);
-
-  const currentTheme = theme === "system" ? systemTheme : theme;
-  const isDark = mountedTheme && currentTheme === "dark";
-
-  // 👪 CONTEXTO DE FAMILIA
-  const [familyCtx, setFamilyCtx] = useState<FamilyContext | null>(null);
-  const [familyCtxLoading, setFamilyCtxLoading] = useState(false);
-  const [familyCtxError, setFamilyCtxError] = useState<string | null>(null);
-
-  // Scope de vista: solo yo / toda la familia (si es owner)
-  const [viewScope, setViewScope] = useState<"mine" | "family">("mine");
 
   // --------------------------------------------------
   //   AUTH: usuario actual + listener
@@ -511,6 +361,39 @@ export default function GastosPage() {
     }
   };
 
+  const handleSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    try {
+      const { error } = await supabase.auth.signUp({
+        email: authEmail.trim(),
+        password: authPassword,
+      });
+      if (error) {
+        setAuthError(error.message);
+        return;
+      }
+      alert("Cuenta creada. Revisa tu correo si tienes verificación activada.");
+      setAuthMode("login");
+      setAuthPassword("");
+    } catch {
+      setAuthError("No se pudo crear la cuenta.");
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await supabase.auth.signOut();
+      setTransactions([]);
+      setBudget(null);
+      setBudgetInput("");
+      setFamilyCtx(null);
+    } catch (err) {
+      console.error("Error cerrando sesión", err);
+    }
+  };
+
+  // Saber si el usuario es jefe de familia
   useEffect(() => {
     if (!user) {
       setIsFamilyOwner(false);
@@ -551,38 +434,6 @@ export default function GastosPage() {
       cancelled = true;
     };
   }, [user]);
-
-  const handleSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError(null);
-    try {
-      const { error } = await supabase.auth.signUp({
-        email: authEmail.trim(),
-        password: authPassword,
-      });
-      if (error) {
-        setAuthError(error.message);
-        return;
-      }
-      alert("Cuenta creada. Revisa tu correo si tienes verificación activada.");
-      setAuthMode("login");
-      setAuthPassword("");
-    } catch {
-      setAuthError("No se pudo crear la cuenta.");
-    }
-  };
-
-  const handleSignOut = async () => {
-    try {
-      await supabase.auth.signOut();
-      setTransactions([]);
-      setBudget(null);
-      setBudgetInput("");
-      setFamilyCtx(null);
-    } catch (err) {
-      console.error("Error cerrando sesión", err);
-    }
-  };
 
   // --------------------------------------------------
   //   Cargar contexto de familia (si pertenece a una)
@@ -822,12 +673,6 @@ export default function GastosPage() {
           .select("*")
           .gte("date", from)
           .lte("date", to);
-
-        console.log("DEBUG scope", {
-          isFamilyOwner,
-          viewScope,
-          familyCtx,
-        });
 
         if (isFamilyOwner) {
           if (viewScope === "mine") {
@@ -1210,7 +1055,6 @@ export default function GastosPage() {
     });
   }, [transactions, filterType, filterCategory, filterMethod, searchText]);
 
-  // Totales sobre los movimientos *filtrados*
   const { filteredIngresos, filteredGastos, filteredFlujo } = useMemo(() => {
     let ingresos = 0;
     let gastos = 0;
@@ -1815,6 +1659,123 @@ export default function GastosPage() {
     }
   };
 
+  // Tarjetas: crear / eliminar / compartir
+  const handleAddCard = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+
+    const trimmed = newCardName.trim();
+    if (!trimmed) {
+      alert("Escribe un nombre para la tarjeta (ej. BBVA Negra David).");
+      return;
+    }
+
+    setSavingCard(true);
+    setCardError(null);
+
+    const ownerId = familyCtx?.ownerUserId ?? user.id;
+    const familyId = familyCtx?.familyId ?? null;
+
+    try {
+      const { data, error } = await supabase
+        .from("cards")
+        .insert({
+          owner_id: ownerId,
+          family_id: familyId,
+          name: trimmed,
+          default_method: null,
+          shared_with_family: newCardShared,
+        })
+        .select(
+          "id,name,default_method,owner_id,family_id,shared_with_family"
+        )
+        .single();
+
+      if (error || !data) throw error;
+
+      const newCard: Card = {
+        id: data.id,
+        name: data.name,
+        default_method: data.default_method ?? null,
+        owner_id: data.owner_id,
+        family_id: data.family_id ?? null,
+        shared_with_family: data.shared_with_family ?? false,
+      };
+
+      setCards((prev) => [...prev, newCard]);
+      setNewCardName("");
+      setNewCardShared(false);
+    } catch (err) {
+      console.error("Error creando tarjeta:", err);
+      setCardError("No se pudo crear la tarjeta.");
+    } finally {
+      setSavingCard(false);
+    }
+  };
+
+  const handleDeleteCard = async (cardId: string) => {
+    if (!user) return;
+    const ok = confirm(
+      "¿Seguro que quieres eliminar esta tarjeta? No se borran tus movimientos, sólo la etiqueta."
+    );
+    if (!ok) return;
+
+    try {
+      const { error } = await supabase
+        .from("cards")
+        .delete()
+        .eq("id", cardId)
+        .eq("owner_id", user.id);
+
+      if (error) throw error;
+
+      setCards((prev) => prev.filter((c) => c.id !== cardId));
+      if (selectedCardId === cardId) {
+        setSelectedCardId(null);
+      }
+    } catch (err) {
+      console.error("Error eliminando tarjeta", err);
+      alert("No se pudo eliminar la tarjeta.");
+    }
+  };
+
+  const handleToggleCardSharing = async (
+    cardId: string,
+    current: boolean | null | undefined
+  ) => {
+    if (!user || !familyCtx) return;
+
+    if (!isFamilyOwner) {
+      alert(
+        "Sólo el jefe de familia puede cambiar si una tarjeta se comparte o no con la familia."
+      );
+      return;
+    }
+
+    const newValue = !current;
+
+    try {
+      const { error } = await supabase
+        .from("cards")
+        .update({ shared_with_family: newValue })
+        .eq("id", cardId)
+        .eq("owner_id", user.id);
+
+      if (error) throw error;
+
+      setCards((prev) =>
+        prev.map((c) =>
+          c.id === cardId ? { ...c, shared_with_family: newValue } : c
+        )
+      );
+    } catch (err) {
+      console.error("Error actualizando tarjeta compartida:", err);
+      alert(
+        "No se pudo actualizar si la tarjeta está compartida con la familia."
+      );
+    }
+  };
+
   // --------------------------------------------------
   //   Render: auth
   // --------------------------------------------------
@@ -2275,7 +2236,7 @@ export default function GastosPage() {
               {cards.map((card) => (
                 <div
                   key={card.id}
-                  className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/40"
+                  className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/40 md:flex-row md:items-center md:justify-between"
                 >
                   <div className="flex flex-col">
                     <span className="font-medium text-slate-800 dark:text-slate-100">
@@ -2301,7 +2262,7 @@ export default function GastosPage() {
                     </span>
                   </div>
 
-                  <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
                     <button
                       type="button"
                       onClick={() => setSelectedCardId(card.id)}
@@ -2442,7 +2403,7 @@ export default function GastosPage() {
         </div>
       </section>
 
-           {/* Formulario de movimientos */}
+      {/* Formulario de movimientos */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <h2 className="mb-3 text-sm font-semibold">
           {editingId ? "Editar movimiento" : "Agregar movimiento"}
@@ -2590,6 +2551,7 @@ export default function GastosPage() {
               </select>
             </div>
           </div>
+
           {/* Objetivo familiar (opcional) */}
           <div>
             <div className="mb-1 text-xs text-gray-500 dark:text-gray-300">
@@ -2845,7 +2807,8 @@ export default function GastosPage() {
           </div>
         </div>
       </section>
-            {/* Visor mensual: gastos por categoría */}
+
+      {/* Visor mensual: gastos por categoría */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <h2 className="mb-2 text-sm font-semibold">
           Visor mensual de gastos por categoría
@@ -2983,135 +2946,135 @@ export default function GastosPage() {
               )}
 
               {!loading &&
-  filteredTransactions.map((t) => {
-    // NUEVO: buscamos la meta ligada (si existe)
-    const goal = t.goal_id ? goalsById.get(t.goal_id) : undefined;
+                filteredTransactions.map((t) => {
+                  const goal = t.goal_id ? goalsById.get(t.goal_id) : undefined;
 
-    return (
-      <tr
-        key={t.id}
-        className={`
-          odd:bg-white even:bg-gray-50 
-          dark:odd:bg-slate-800 dark:even:bg-slate-900
-          hover:bg-sky-50 dark:hover:bg-slate-800/80
-          transition-colors cursor-default
-          ${t.localOnly ? "opacity-80" : ""}
-          ${
-            t.type === "ingreso"
-              ? "border-l-4 border-l-emerald-400"
-              : "border-l-4 border-l-rose-400"
-          }
-        `}
-      >
-        <td className="border-t px-2 py-1">
-          {formatDateDisplay(t.date)}
-        </td>
+                  return (
+                    <tr
+                      key={t.id}
+                      className={`
+                        odd:bg-white even:bg-gray-50 
+                        dark:odd:bg-slate-800 dark:even:bg-slate-900
+                        hover:bg-sky-50 dark:hover:bg-slate-800/80
+                        transition-colors cursor-default
+                        ${t.localOnly ? "opacity-80" : ""}
+                        ${
+                          t.type === "ingreso"
+                            ? "border-l-4 border-l-emerald-400"
+                            : "border-l-4 border-l-rose-400"
+                        }
+                      `}
+                    >
+                      <td className="border-t px-2 py-1">
+                        {formatDateDisplay(t.date)}
+                      </td>
 
-        {/* Tipo con badge */}
-        <td className="border-t px-2 py-1">
-          <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
-              t.type === "ingreso"
-                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
-                : "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
-            }`}
-          >
-            {t.type === "ingreso" ? "Ingreso" : "Gasto"}
-          </span>
-        </td>
+                      {/* Tipo con badge */}
+                      <td className="border-t px-2 py-1">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                            t.type === "ingreso"
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
+                              : "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
+                          }`}
+                        >
+                          {t.type === "ingreso" ? "Ingreso" : "Gasto"}
+                        </span>
+                      </td>
 
-        <td className="border-t px-2 py-1">{t.category}</td>
+                      <td className="border-t px-2 py-1">{t.category}</td>
 
-        {/* Monto + badge Offline alineados a la derecha */}
-        <td className="border-t px-2 py-1">
-          <div className="flex items-center justify-end gap-1">
-            <span
-              className={`font-semibold ${
-                t.type === "ingreso"
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : "text-rose-600 dark:text-rose-400"
-              }`}
-            >
-              {formatMoney(t.amount)}
-            </span>
-            {t.localOnly && (
-              <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200">
-                Offline
-              </span>
-            )}
-          </div>
-        </td>
+                      {/* Monto + badge Offline alineados a la derecha */}
+                      <td className="border-t px-2 py-1">
+                        <div className="flex items-center justify-end gap-1">
+                          <span
+                            className={`font-semibold ${
+                              t.type === "ingreso"
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : "text-rose-600 dark:text-rose-400"
+                            }`}
+                          >
+                            {formatMoney(t.amount)}
+                          </span>
+                          {t.localOnly && (
+                            <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200">
+                              Offline
+                            </span>
+                          )}
+                        </div>
+                      </td>
 
-        {/* Método como pill */}
-        <td className="border-t px-2 py-1">
-          <span className="inline-flex max-w-[160px] items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-            <span className="truncate">{t.method}</span>
-          </span>
-        </td>
+                      {/* Método como pill */}
+                      <td className="border-t px-2 py-1">
+                        <span className="inline-flex max-w-[160px] items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                          <span className="truncate">{t.method}</span>
+                        </span>
+                      </td>
 
-        {/* Tarjeta */}
-        <td className="border-t px-2 py-1">
-          {cards.find((c) => c.id === t.card_id)?.name ? (
-            <span className="inline-flex max-w-[160px] items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
-              <span className="truncate">
-                {cards.find((c) => c.id === t.card_id)?.name}
-              </span>
-            </span>
-          ) : (
-            <span className="text-[11px] text-slate-400">—</span>
-          )}
-        </td>
+                      {/* Tarjeta */}
+                      <td className="border-t px-2 py-1">
+                        {cards.find((c) => c.id === t.card_id)?.name ? (
+                          <span className="inline-flex max-w-[160px] items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
+                            <span className="truncate">
+                              {cards.find((c) => c.id === t.card_id)?.name}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-slate-400">—</span>
+                        )}
+                      </td>
 
-        {/* Generó */}
-        <td className="border-t px-2 py-1">
-          <span className="text-xs text-slate-600 dark:text-slate-300">
-            {getSpenderLabel(t)}
-          </span>
-        </td>
+                      {/* Generó */}
+                      <td className="border-t px-2 py-1">
+                        <span className="text-xs text-slate-600 dark:text-slate-300">
+                          {getSpenderLabel(t)}
+                        </span>
+                      </td>
 
-        {/* Notas + Meta */}
-        <td className="border-t px-2 py-1">
-          {goal && (
-            <span className="mb-0.5 mr-1 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
-              Meta: {goal.name}
-            </span>
-          )}
+                      {/* Notas + Meta */}
+                      <td className="border-t px-2 py-1">
+                        {goal && (
+                          <span className="mb-0.5 mr-1 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
+                            Meta: {goal.name}
+                          </span>
+                        )}
 
-          {t.notes ? (
-            <span
-              className="mt-0.5 block max-w-xs truncate text-xs text-slate-600 dark:text-slate-300"
-              title={t.notes}
-            >
-              {t.notes}
-            </span>
-          ) : (
-            !goal && (
-              <span className="text-[11px] text-slate-400">—</span>
-            )
-          )}
-        </td>
+                        {t.notes ? (
+                          <span
+                            className="mt-0.5 block max-w-xs truncate text-xs text-slate-600 dark:text-slate-300"
+                            title={t.notes}
+                          >
+                            {t.notes}
+                          </span>
+                        ) : (
+                          !goal && (
+                            <span className="text-[11px] text-slate-400">
+                              —
+                            </span>
+                          )
+                        )}
+                      </td>
 
-        {/* Acciones */}
-        <td className="border-t px-2 py-1 text-center">
-          <button
-            type="button"
-            onClick={() => handleEdit(t)}
-            className="mr-2 text-xs text-sky-600 hover:underline"
-          >
-            Editar
-          </button>
-          <button
-            type="button"
-            onClick={() => handleDelete(t)}
-            className="text-xs text-red-600 hover:underline"
-          >
-            Eliminar
-          </button>
-        </td>
-      </tr>
-    );
-  })}
-
+                      {/* Acciones */}
+                      <td className="border-t px-2 py-1 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleEdit(t)}
+                          className="mr-2 text-xs text-sky-600 hover:underline"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(t)}
+                          className="text-xs text-red-600 hover:underline"
+                        >
+                          Eliminar
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
             </tbody>
           </table>
         </div>
@@ -3119,4 +3082,3 @@ export default function GastosPage() {
     </main>
   );
 }
-

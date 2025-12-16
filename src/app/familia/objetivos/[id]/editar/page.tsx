@@ -1,6 +1,7 @@
 // src/app/familia/objetivos/[id]/editar/page.tsx
 "use client";
 
+import type React from "react"; 
 import { useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";

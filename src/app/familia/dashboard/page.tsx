@@ -17,6 +17,7 @@ import {
   Line,
 } from "recharts";
 import { useTheme } from "next-themes";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
@@ -193,15 +194,28 @@ export default function FamilyDashboardPage() {
           .select("*")
           .gte("date", startOfYear);
 
-        // Si tenemos family_group_id, filtramos por familia; si no, por usuario
-        if (familyGroupId) {
-          goalsQuery = goalsQuery.eq("family_group_id", familyGroupId);
-          txsQuery = txsQuery.eq("family_group_id", familyGroupId);
-        } else {
-          // Ajusta estos campos según tu schema real:
-          goalsQuery = goalsQuery.eq("owner_user_id", user.id);
-          txsQuery = txsQuery.eq("user_id", user.id);
-        }
+        // Si tenemos family_group_id, filtramos por familia PERO también aceptamos metas
+// que por bug hayan quedado sin family_group_id pero sí son del owner.
+// Esto evita que "desaparezcan" al navegar.
+if (familyGroupId) {
+  goalsQuery = goalsQuery.or(
+    `family_group_id.eq.${familyGroupId},owner_user_id.eq.${user.id}`
+  );
+
+  // Para txs mantenemos familiar como principal; y por compatibilidad agregamos owner/created_by.
+  // (Esto no agrega features, solo evita quedarnos sin datos por esquemas mezclados.)
+  txsQuery = txsQuery.or(
+    `family_group_id.eq.${familyGroupId},owner_user_id.eq.${user.id},created_by.eq.${user.id}`
+  );
+} else {
+  // Modo individual
+  goalsQuery = goalsQuery.eq("owner_user_id", user.id);
+
+  // Compatibilidad: algunos esquemas usan user_id, otros created_by/owner_user_id
+  txsQuery = txsQuery.or(
+    `user_id.eq.${user.id},owner_user_id.eq.${user.id},created_by.eq.${user.id}`
+  );
+}
 
         const [
           { data: goalsData, error: goalsError },
@@ -434,28 +448,43 @@ export default function FamilyDashboardPage() {
 
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 pb-10 pt-4 md:px-6 md:pt-6 lg:px-8">
         <section className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
-              Dashboard familiar
-            </h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400 md:text-sm">
-              Visualiza el avance de tus objetivos familiares, quién está
-              aportando más y qué tan cerca están de lograrse.
-            </p>
-          </div>
+  <div>
+    <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
+      Dashboard familiar
+    </h1>
+    <p className="text-xs text-slate-500 dark:text-slate-400 md:text-sm">
+      Visualiza el avance de tus objetivos familiares, quién está
+      aportando más y qué tan cerca están de lograrse.
+    </p>
 
-          {user && (
-            <div className="rounded-full bg-gradient-to-r from-emerald-500/10 via-sky-500/10 to-indigo-500/10 px-4 py-2 text-right text-[11px] text-slate-600 dark:text-slate-300">
-              <div className="text-[10px] uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
-                Jefe de familia
-              </div>
-              <div className="font-medium">
-                {familyMembers.find((m) => m.id === user.id)?.full_name ||
-                  "Tu cuenta"}
-              </div>
-            </div>
-          )}
-        </section>
+    {/* 👇 NUEVO: Botones para metas familiares */}
+    <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+      <Link href="/familia/objetivos">
+        <button className="rounded-full border border-slate-300 bg-white px-3 py-1 font-medium text-slate-700 shadow-sm transition hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800">
+          Ver metas familiares
+        </button>
+      </Link>
+
+      <Link href="/familia/objetivos/nuevo">
+        <button className="rounded-full bg-sky-500 px-3 py-1 font-medium text-white shadow-sm transition hover:bg-sky-600">
+          Crear nueva meta
+        </button>
+      </Link>
+    </div>
+  </div>
+
+  {user && (
+    <div className="rounded-full bg-gradient-to-r from-emerald-500/10 via-sky-500/10 to-indigo-500/10 px-4 py-2 text-right text-[11px] text-slate-600 dark:text-slate-300">
+      <div className="text-[10px] uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+        Jefe de familia
+      </div>
+      <div className="font-medium">
+        {familyMembers.find((m) => m.id === user.id)?.full_name ||
+          "Tu cuenta"}
+      </div>
+    </div>
+  )}
+</section>
 
         {loading && (
           <div className="flex items-center justify-center rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-900">

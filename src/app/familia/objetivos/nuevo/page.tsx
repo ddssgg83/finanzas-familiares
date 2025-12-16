@@ -1,7 +1,6 @@
-// src/app/familia/objetivos/nuevo/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import type { User } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -12,7 +11,10 @@ type GoalFormState = {
   description: string;
   target_amount: string;
   due_date: string;
+
+  // UI solamente (NO existe columna `category` en DB)
   category: string;
+
   type: string;
   auto_track: boolean;
   track_direction: "ingresos" | "ahorros" | "gastos_reducidos" | "";
@@ -39,81 +41,88 @@ export default function NewFamilyGoalPage() {
 
   useEffect(() => {
     const getUser = async () => {
-      const {
-        data: { user },
-        error,
-      } = await supabase.auth.getUser();
+      const { data, error } = await supabase.auth.getUser();
       if (error) {
         console.error(error);
         setError("No se pudo obtener el usuario.");
+        return;
       }
-      setUser(user);
+      setUser(data.user);
     };
     getUser();
   }, []);
 
   const handleChange = (
-    e:
-      | React.ChangeEvent<HTMLInputElement>
-      | React.ChangeEvent<HTMLTextAreaElement>
-      | React.ChangeEvent<HTMLSelectElement>
+    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
-    const { name, value, type, checked } = e.target as any;
-    setForm((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? checked : value,
-    }));
+    const target = e.target as HTMLInputElement;
+    const name = target.name as keyof GoalFormState;
+
+    const value =
+      target.type === "checkbox"
+        ? (target as HTMLInputElement).checked
+        : target.value;
+
+    setForm((prev) => ({ ...prev, [name]: value as any }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user) return;
+  e.preventDefault();
+  if (!user) return;
+
+  try {
+    setSaving(true);
+    setError(null);
+
+    let familyGroupId: string | null = null;
 
     try {
-      setSaving(true);
-      setError(null);
-
-      let familyGroupId: string | null = null;
-
-      try {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("family_group_id")
-          .eq("id", user.id)
-          .maybeSingle();
-        if (profile) familyGroupId = profile.family_group_id ?? null;
-      } catch {
-        // modo individual
-      }
-
-      const { error: insertError } = await supabase.from("family_goals").insert({
-        name: form.name.trim(),
-        description: form.description.trim() || null,
-        target_amount: Number(form.target_amount || 0),
-        due_date: form.due_date || null,
-        category: form.category.trim() || null,
-        type: form.type.trim() || null,
-        auto_track: form.auto_track,
-        track_direction: form.auto_track ? form.track_direction || null : null,
-        track_category: form.auto_track
-          ? form.track_category.trim() || null
-          : null,
-        owner_user_id: user.id,
-        family_group_id: familyGroupId,
-      });
-
-      if (insertError) throw insertError;
-
-      router.push("/familia/objetivos");
-    } catch (err: any) {
-      console.error("Error creando meta:", err);
-      setError(
-        err?.message || "Ocurrió un error al crear la meta. Intenta de nuevo."
-      );
-    } finally {
-      setSaving(false);
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("family_group_id")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (profile) familyGroupId = profile.family_group_id ?? null;
+    } catch {
+      // modo individual
     }
-  };
+
+    const baseCategory = form.category.trim();
+    const effectiveTrackCategory = form.auto_track
+      ? form.track_category.trim()
+      : baseCategory;
+
+    const payload = {
+      name: form.name.trim(),
+      target_amount: Number(form.target_amount || 0),
+      due_date: form.due_date || null,
+
+      type: form.type.trim() || null,
+
+      auto_track: form.auto_track,
+      track_direction: form.auto_track ? form.track_direction || null : null,
+      track_category: effectiveTrackCategory ? effectiveTrackCategory : null,
+
+      owner_user_id: user.id,
+      family_group_id: familyGroupId,
+    };
+
+    const { error: insertError } = await supabase
+      .from("family_goals")
+      .insert(payload);
+
+    if (insertError) throw insertError;
+
+    router.push("/familia/objetivos");
+  } catch (err: any) {
+    console.error("Error creando meta:", err);
+    setError(
+      err?.message || "Ocurrió un error al crear la meta. Intenta de nuevo."
+    );
+  } finally {
+    setSaving(false);
+  }
+};
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
@@ -156,7 +165,7 @@ export default function NewFamilyGoalPage() {
               value={form.name}
               onChange={handleChange}
               placeholder="Ej. Fondo de emergencia, Viaje a Europa, Enganche casa"
-              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
             />
           </div>
 
@@ -170,7 +179,7 @@ export default function NewFamilyGoalPage() {
               onChange={handleChange}
               rows={3}
               placeholder="Cuenta a tu familia de qué trata esta meta."
-              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
             />
           </div>
 
@@ -188,7 +197,7 @@ export default function NewFamilyGoalPage() {
                 value={form.target_amount}
                 onChange={handleChange}
                 placeholder="Ej. 50000"
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
               />
             </div>
 
@@ -201,7 +210,7 @@ export default function NewFamilyGoalPage() {
                 name="due_date"
                 value={form.due_date}
                 onChange={handleChange}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
               />
             </div>
           </div>
@@ -216,7 +225,7 @@ export default function NewFamilyGoalPage() {
                 value={form.category}
                 onChange={handleChange}
                 placeholder="Ej. Vacaciones, Casa, Educación"
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
               />
             </div>
 
@@ -228,7 +237,7 @@ export default function NewFamilyGoalPage() {
                 name="type"
                 value={form.type}
                 onChange={handleChange}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
               >
                 <option value="">Selecciona un tipo</option>
                 <option value="ahorro">Ahorro</option>
@@ -244,8 +253,8 @@ export default function NewFamilyGoalPage() {
               <div>
                 <p className="font-medium">Actualizar esta meta automáticamente</p>
                 <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                  Si activas esta opción, la meta se actualizará cada que
-                  registres un movimiento con cierta categoría.
+                  Si activas esta opción, la meta se actualizará cada que registres
+                  un movimiento con cierta categoría.
                 </p>
               </div>
               <label className="inline-flex cursor-pointer items-center gap-2">
@@ -270,16 +279,12 @@ export default function NewFamilyGoalPage() {
                     name="track_direction"
                     value={form.track_direction}
                     onChange={handleChange}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
                   >
                     <option value="">Selecciona</option>
                     <option value="ingresos">Ingresos (aportes)</option>
-                    <option value="ahorros">
-                      Ahorros (monto apartado como ahorro)
-                    </option>
-                    <option value="gastos_reducidos">
-                      Gastos reducidos (control de gasto)
-                    </option>
+                    <option value="ahorros">Ahorros</option>
+                    <option value="gastos_reducidos">Gastos reducidos</option>
                   </select>
                 </div>
 
@@ -292,7 +297,7 @@ export default function NewFamilyGoalPage() {
                     value={form.track_category}
                     onChange={handleChange}
                     placeholder="Debe coincidir con la categoría de tus movimientos"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none ring-0 transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-1 focus:ring-emerald-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
                   />
                 </div>
               </div>
@@ -310,7 +315,7 @@ export default function NewFamilyGoalPage() {
             <button
               type="submit"
               disabled={saving}
-              className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-70 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+              className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {saving ? "Guardando…" : "Guardar meta"}
             </button>
