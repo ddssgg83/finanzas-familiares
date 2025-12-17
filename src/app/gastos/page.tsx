@@ -669,34 +669,27 @@ export default function GastosPage() {
           .padStart(2, "0")}`;
 
         let query = supabase
-          .from("transactions")
-          .select("*")
-          .gte("date", from)
-          .lte("date", to);
+  .from("transactions")
+  .select("*")
+  .gte("date", from)
+  .lte("date", to)
+  .order("date", { ascending: false })       // 🔑 orden real por día
+  .order("created_at", { ascending: false }); // 🔑 desempate visual
 
         if (isFamilyOwner) {
-          if (viewScope === "mine") {
-            query = query.or(
-              [`user_id.eq.${userId}`, `owner_user_id.eq.${userId}`].join(",")
-            );
-          } else {
-            if (familyCtx && familyCtx.activeMemberUserIds.length > 0) {
-              const list = familyCtx.activeMemberUserIds.join(",");
-              query = query.or(
-                [
-                  `user_id.in.(${list})`,
-                  `owner_user_id.eq.${userId}`,
-                ].join(",")
-              );
-            } else {
-              query = query.or(
-                [`user_id.eq.${userId}`, `owner_user_id.eq.${userId}`].join(",")
-              );
-            }
-          }
-        } else {
-          query = query.eq("user_id", userId);
-        }
+  // 👑 JEFE DE FAMILIA
+  if (viewScope === "mine") {
+    // Solo gastos cuyo dinero es del jefe
+    query = query.eq("owner_user_id", userId);
+  } else {
+    // Vista familia: TODOS los gastos cuyo dinero pertenece al jefe
+    query = query.eq("owner_user_id", userId);
+  }
+} else {
+  // 👤 MIEMBRO
+  // Solo ve gastos que él generó o que son suyos (si aplica)
+  query = query.eq("spender_user_id", userId);
+}
 
         const { data, error } = await query;
         if (error) throw error;
@@ -1028,11 +1021,11 @@ export default function GastosPage() {
     return map;
   }, [goals]);
 
-  // --------------------------------------------------
-  //   Filtros: lista filtrada de movimientos
+ // --------------------------------------------------
+  //   Filtros + ORDEN DEFINITIVO de movimientos
   // --------------------------------------------------
   const filteredTransactions = useMemo(() => {
-    return transactions.filter((t) => {
+    const filtered = transactions.filter((t) => {
       if (filterType !== "todos" && t.type !== filterType) return false;
       if (filterCategory !== "TODAS" && t.category !== filterCategory)
         return false;
@@ -1052,6 +1045,24 @@ export default function GastosPage() {
       }
 
       return true;
+    });
+
+    // 🔑 ORDEN FINAL Y ESTABLE
+    return filtered.sort((a, b) => {
+      // 1️⃣ Fecha real del gasto (yyyy-mm-dd)
+      if (a.date !== b.date) {
+        return a.date > b.date ? -1 : 1;
+      }
+
+      // 2️⃣ created_at si existe (fallback)
+      const aCreated = (a as any).created_at ?? "";
+      const bCreated = (b as any).created_at ?? "";
+
+      if (aCreated && bCreated && aCreated !== bCreated) {
+        return aCreated > bCreated ? -1 : 1;
+      }
+
+      return 0;
     });
   }, [transactions, filterType, filterCategory, filterMethod, searchText]);
 
