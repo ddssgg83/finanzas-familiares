@@ -349,19 +349,20 @@ export default function DashboardPage() {
                 </div>
 
                 <button
-                  type="button"
-                  onClick={handleAddGoal}
-                  className="mt-2 w-full rounded-full bg-sky-500 py-2 text-[12px] font-semibold text-white shadow-sm transition hover:bg-sky-600 disabled:bg-sky-300"
-                  disabled={!goalTitle.trim() || !goalTarget.trim()}
-                >
-                  Guardar objetivo (solo en este dispositivo)
-                </button>
+  type="button"
+  onClick={handleAddGoal}
+  className="mt-2 w-full rounded-full bg-sky-500 py-2 text-[12px] font-semibold text-white shadow-sm transition hover:bg-sky-600 disabled:bg-sky-300"
+  disabled={!goalTitle.trim() || !goalTarget.trim()}
+>
+  Guardar objetivo rápido
+</button>
 
-                <p className="text-[10px] text-slate-400 dark:text-slate-500">
-                  Próximamente estos objetivos se conectarán con tus datos
-                  reales de gastos y patrimonio para mostrar tu avance
-                  automático.
-                </p>
+<p className="text-[10px] text-slate-400 dark:text-slate-500">
+  Objetivo rápido para referencia personal.  
+  Las metas familiares con seguimiento automático se gestionan
+  desde el módulo de Familia.
+</p>
+
               </div>
             </div>
 
