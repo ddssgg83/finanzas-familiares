@@ -207,6 +207,10 @@ export default function GastosPage() {
   const [exportIncludeCategorySummary, setExportIncludeCategorySummary] =
     useState(true);
 
+    // UI: colapsables
+const [showCardsList, setShowCardsList] = useState(false);
+const [showCharts, setShowCharts] = useState(false);
+
   // Filtros de movimientos
   const [filterType, setFilterType] = useState<"todos" | "ingreso" | "gasto">(
     "todos"
@@ -2171,248 +2175,250 @@ export default function GastosPage() {
       </section>
 
       {/* Gestión de tarjetas para tus gastos */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 className="text-sm font-semibold">
-              Tarjetas ligadas a tus gastos
-            </h2>
-            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-              Aquí sólo tú ves tus tarjetas (BBVA, Amex, etc.). Más adelante
-              las podrás compartir con tu familia para que sus gastos con esa
-              tarjeta también se reflejen en tu resumen.
-            </p>
-          </div>
-        </div>
+<section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <div>
+      <h2 className="text-sm font-semibold">Tarjetas ligadas a tus gastos</h2>
+      <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+        Aquí sólo tú ves tus tarjetas (BBVA, Amex, etc.). Más adelante las podrás
+        compartir con tu familia para que sus gastos con esa tarjeta también se
+        reflejen en tu resumen.
+      </p>
+    </div>
 
-        {/* Formulario para crear tarjeta */}
-        <form
-          onSubmit={handleAddCard}
-          className="mt-4 flex flex-col gap-2 text-sm md:flex-row"
-        >
-          <div className="flex-1">
-            <label className="mb-1 block text-xs text-slate-500 dark:text-slate-300">
-              Nombre de la tarjeta
-            </label>
-            <input
-              type="text"
-              value={newCardName}
-              onChange={(e) => setNewCardName(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              placeholder="Ej. BBVA Negra David, Amex Platino, etc."
-            />
+    {/* Toggle lista tarjetas */}
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => setShowCardsList((v) => !v)}
+        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+      >
+        {showCardsList ? "Ocultar mis tarjetas" : `Ver mis tarjetas (${cards.length})`}
+      </button>
+    </div>
+  </div>
 
-            {familyCtx && (
-              <label className="mt-2 flex items-start gap-2 text-[11px] text-slate-600 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={newCardShared}
-                  onChange={(e) => setNewCardShared(e.target.checked)}
-                  className="mt-[2px]"
-                />
-                <span>
-                  Compartir esta tarjeta con mi familia
-                  <span className="block text-[10px] text-slate-400 dark:text-slate-500">
-                    Los miembros podrán usarla al capturar sus gastos y se
-                    verán en tu resumen.
-                  </span>
-                </span>
-              </label>
-            )}
-          </div>
+  {/* Formulario para crear tarjeta */}
+  <form
+    onSubmit={handleAddCard}
+    className="mt-4 flex flex-col gap-2 text-sm md:flex-row"
+  >
+    <div className="flex-1">
+      <label className="mb-1 block text-xs text-slate-500 dark:text-slate-300">
+        Nombre de la tarjeta
+      </label>
+      <input
+        type="text"
+        value={newCardName}
+        onChange={(e) => setNewCardName(e.target.value)}
+        className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+        placeholder="Ej. BBVA Negra David, Amex Platino, etc."
+      />
 
-          <div className="flex items-end">
-            <button
-              type="submit"
-              disabled={savingCard}
-              className="w-full rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600 disabled:opacity-60 md:w-auto"
-            >
-              {savingCard ? "Guardando..." : "Agregar tarjeta"}
-            </button>
-          </div>
-        </form>
+      {familyCtx && (
+        <label className="mt-2 flex items-start gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+          <input
+            type="checkbox"
+            checked={newCardShared}
+            onChange={(e) => setNewCardShared(e.target.checked)}
+            className="mt-[2px]"
+          />
+          <span>
+            Compartir esta tarjeta con mi familia
+            <span className="block text-[10px] text-slate-400 dark:text-slate-500">
+              Los miembros podrán usarla al capturar sus gastos y se verán en tu resumen.
+            </span>
+          </span>
+        </label>
+      )}
+    </div>
 
-        {cardError && (
-          <p className="mt-1 text-xs text-rose-500">{cardError}</p>
-        )}
+    <div className="flex items-end">
+      <button
+        type="submit"
+        disabled={savingCard}
+        className="w-full rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600 disabled:opacity-60 md:w-auto"
+      >
+        {savingCard ? "Guardando..." : "Agregar tarjeta"}
+      </button>
+    </div>
+  </form>
 
-        {/* Lista de tarjetas existentes */}
-        <div className="mt-4">
-          {cards.length === 0 ? (
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Aún no tienes tarjetas registradas. Empieza agregando una arriba.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {cards.map((card) => (
-                <div
-                  key={card.id}
-                  className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/40 md:flex-row md:items-center md:justify-between"
+  {cardError && <p className="mt-1 text-xs text-rose-500">{cardError}</p>}
+
+  {/* Lista de tarjetas existentes (colapsable) */}
+  <div className="mt-4">
+    {!showCardsList ? (
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Lista de tarjetas oculta para mantener la pantalla limpia.
+      </p>
+    ) : cards.length === 0 ? (
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Aún no tienes tarjetas registradas. Empieza agregando una arriba.
+      </p>
+    ) : (
+      <div className="space-y-2">
+        {cards.map((card) => (
+          <div
+            key={card.id}
+            className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/40 md:flex-row md:items-center md:justify-between"
+          >
+            <div className="flex flex-col">
+              <span className="font-medium text-slate-800 dark:text-slate-100">
+                {card.name}
+              </span>
+
+              <span className="mt-1 inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                <span
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 ${
+                    card.shared_with_family
+                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
+                      : "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  }`}
                 >
-                  <div className="flex flex-col">
-                    <span className="font-medium text-slate-800 dark:text-slate-100">
-                      {card.name}
-                    </span>
+                  {card.shared_with_family ? "Compartida con familia" : "Sólo tú la ves"}
+                </span>
+              </span>
 
-                    <span className="mt-1 inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 ${
-                          card.shared_with_family
-                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
-                            : "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                        }`}
-                      >
-                        {card.shared_with_family
-                          ? "Compartida con familia"
-                          : "Sólo tú la ves"}
-                      </span>
-                    </span>
-
-                    <span className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                      Se puede seleccionar al capturar un movimiento.
-                    </span>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedCardId(card.id)}
-                      className={`rounded-full px-3 py-1 text-[11px] ${
-                        selectedCardId === card.id
-                          ? "bg-sky-500 text-white"
-                          : "border border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-                      }`}
-                    >
-                      Usar en formulario
-                    </button>
-
-                    {isFamilyOwner && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleToggleCardSharing(
-                            card.id,
-                            card.shared_with_family
-                          )
-                        }
-                        className={`rounded-full border px-3 py-1 text-[11px] ${
-                          card.shared_with_family
-                            ? "border-emerald-500 text-emerald-600 dark:border-emerald-400 dark:text-emerald-300"
-                            : "border-slate-300 text-slate-600 dark:border-slate-600 dark:text-slate-200"
-                        }`}
-                      >
-                        {card.shared_with_family
-                          ? "Dejar de compartir"
-                          : "Compartir con familia"}
-                      </button>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteCard(card.id)}
-                      className="text-[11px] text-rose-500 hover:underline"
-                    >
-                      Eliminar
-                    </button>
-                  </div>
-                </div>
-              ))}
+              <span className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                Se puede seleccionar al capturar un movimiento.
+              </span>
             </div>
-          )}
-        </div>
-      </section>
 
-      {/* Gráficas */}
-      <section className="grid gap-4 md:grid-cols-2">
-        <div className="h-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-2 text-xs font-semibold">Gastos por categoría</h3>
-          {chartDataCategorias.length === 0 ? (
-            <p className="text-xs text-gray-500">
-              Aún no hay gastos registrados.
-            </p>
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={chartDataCategorias}
-                margin={{ top: 10, right: 10, left: 0, bottom: 40 }}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedCardId(card.id)}
+                className={`rounded-full px-3 py-1 text-[11px] ${
+                  selectedCardId === card.id
+                    ? "bg-sky-500 text-white"
+                    : "border border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                }`}
               >
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="category"
-                  tick={{
-                    fontSize: 10,
-                    fill: isDark ? "#e5e7eb" : "#374151",
-                  }}
-                  angle={-30}
-                  textAnchor="end"
-                />
-                <YAxis
-                  tick={{
-                    fontSize: 10,
-                    fill: isDark ? "#e5e7eb" : "#374151",
-                  }}
-                />
-                <Tooltip />
-                <Legend />
-                <Bar
-                  dataKey="total"
-                  name="Gasto"
-                  radius={4}
-                  fill={isDark ? "#38bdf8" : "#0ea5e9"}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
+                Usar en formulario
+              </button>
 
-        <div className="h-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-2 text-xs font-semibold">
-            Ingresos vs Gastos por día
-          </h3>
-          {chartDataLinea.length === 0 ? (
-            <p className="text-xs text-gray-500">
-              Aún no hay movimientos suficientes para la gráfica.
-            </p>
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartDataLinea}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="dateLabel"
-                  tick={{
-                    fontSize: 10,
-                    fill: isDark ? "#e5e7eb" : "#374151",
-                  }}
-                />
-                <YAxis
-                  tick={{
-                    fontSize: 10,
-                    fill: isDark ? "#e5e7eb" : "#374151",
-                  }}
-                />
-                <Tooltip />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="ingresos"
-                  name="Ingresos"
-                  dot={false}
-                  stroke={isDark ? "#22c55e" : "#16a34a"}
-                  strokeWidth={2}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="gastos"
-                  name="Gastos"
-                  dot={false}
-                  stroke={isDark ? "#fb7185" : "#ef4444"}
-                  strokeWidth={2}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </section>
+              {isFamilyOwner && (
+                <button
+                  type="button"
+                  onClick={() => handleToggleCardSharing(card.id, card.shared_with_family)}
+                  className={`rounded-full border px-3 py-1 text-[11px] ${
+                    card.shared_with_family
+                      ? "border-emerald-500 text-emerald-600 dark:border-emerald-400 dark:text-emerald-300"
+                      : "border-slate-300 text-slate-600 dark:border-slate-600 dark:text-slate-200"
+                  }`}
+                >
+                  {card.shared_with_family ? "Dejar de compartir" : "Compartir con familia"}
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => handleDeleteCard(card.id)}
+                className="text-[11px] text-rose-500 hover:underline"
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+</section>
+
+{/* Gráficas (colapsables) */}
+<section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <div className="flex items-center justify-between gap-2">
+    <div>
+      <h2 className="text-sm font-semibold">Gráficas</h2>
+      <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+        Visualiza tendencias del mes sin saturar la pantalla.
+      </p>
+    </div>
+
+    <button
+      type="button"
+      onClick={() => setShowCharts((v) => !v)}
+      className="rounded-lg bg-sky-500 px-3 py-2 text-xs font-medium text-white transition hover:bg-sky-600"
+    >
+      {showCharts ? "Ocultar gráficas" : "Ver gráficas"}
+    </button>
+  </div>
+
+  {!showCharts ? null : (
+    <div className="mt-4 grid gap-4 md:grid-cols-2">
+      <div className="h-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <h3 className="mb-2 text-xs font-semibold">Gastos por categoría</h3>
+        {chartDataCategorias.length === 0 ? (
+          <p className="text-xs text-gray-500">Aún no hay gastos registrados.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={chartDataCategorias}
+              margin={{ top: 10, right: 10, left: 0, bottom: 40 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis
+                dataKey="category"
+                tick={{ fontSize: 10, fill: isDark ? "#e5e7eb" : "#374151" }}
+                angle={-30}
+                textAnchor="end"
+              />
+              <YAxis tick={{ fontSize: 10, fill: isDark ? "#e5e7eb" : "#374151" }} />
+              <Tooltip />
+              <Legend />
+              <Bar
+                dataKey="total"
+                name="Gasto"
+                radius={4}
+                fill={isDark ? "#38bdf8" : "#0ea5e9"}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      <div className="h-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <h3 className="mb-2 text-xs font-semibold">Ingresos vs Gastos por día</h3>
+        {chartDataLinea.length === 0 ? (
+          <p className="text-xs text-gray-500">
+            Aún no hay movimientos suficientes para la gráfica.
+          </p>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartDataLinea}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis
+                dataKey="dateLabel"
+                tick={{ fontSize: 10, fill: isDark ? "#e5e7eb" : "#374151" }}
+              />
+              <YAxis tick={{ fontSize: 10, fill: isDark ? "#e5e7eb" : "#374151" }} />
+              <Tooltip />
+              <Legend />
+              <Line
+                type="monotone"
+                dataKey="ingresos"
+                name="Ingresos"
+                dot={false}
+                stroke={isDark ? "#22c55e" : "#16a34a"}
+                strokeWidth={2}
+              />
+              <Line
+                type="monotone"
+                dataKey="gastos"
+                name="Gastos"
+                dot={false}
+                stroke={isDark ? "#fb7185" : "#ef4444"}
+                strokeWidth={2}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  )}
+</section>
 
       {/* Formulario de movimientos */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
