@@ -1957,9 +1957,9 @@ useEffect(() => {
 
           {showExportOptions && (
             <div className="mt-4 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900">
-              <div className="mb-1 font-semibold text-gray-700 dark:text-gray-200">
-                Opciones de exportación
-              </div>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+  Exportar movimientos
+</div>
 
               <div className="flex flex-col gap-1">
                 <span className="text-[11px] text-gray-600 dark:text-gray-300">
@@ -2082,12 +2082,14 @@ useEffect(() => {
                 className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
                 placeholder="Ej. 20000"
               />
-              <button
-                onClick={handleSaveBudget}
-                className="rounded-lg bg-sky-500 px-3 py-1 text-xs font-medium text-white hover:bg-sky-600"
-              >
-                Guardar
-              </button>
+              {String(budget ?? "") !== budgetInput && (
+  <button
+    onClick={handleSaveBudget}
+    className="rounded-lg bg-sky-500 px-3 py-1 text-xs font-medium text-white hover:bg-sky-600"
+  >
+    Guardar
+  </button>
+)}
             </div>
             {budget != null && (
               <div
@@ -2236,18 +2238,7 @@ useEffect(() => {
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setSelectedCardId(card.id)}
-                className={`rounded-full px-3 py-1 text-[11px] ${
-                  selectedCardId === card.id
-                    ? "bg-sky-500 text-white"
-                    : "border border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-                }`}
-              >
-                Usar en formulario
-              </button>
-
+             
               {canUseFamilyScope && (
                 <button
                   type="button"
