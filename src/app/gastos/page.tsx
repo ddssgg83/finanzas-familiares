@@ -2279,7 +2279,7 @@ useEffect(() => {
 
 {/* Gráficas (colapsables) */}
 <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-  <div className="flex items-center justify-between gap-2">
+  <div className="flex items-center justify-between gap-3">
     <div>
       <h2 className="text-sm font-semibold">Gráficas</h2>
       <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
@@ -2296,7 +2296,11 @@ useEffect(() => {
     </button>
   </div>
 
-  {!showCharts ? null : (
+  {!showCharts ? (
+    <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
+      Gráficas ocultas. Ábrelas cuando quieras revisar categorías y tendencia por día.
+    </div>
+  ) : (
     <div className="mt-4 grid gap-4 md:grid-cols-2">
       <div className="h-72 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <h3 className="mb-2 text-xs font-semibold">Gastos por categoría</h3>
@@ -2369,6 +2373,7 @@ useEffect(() => {
     </div>
   )}
 </section>
+
 
       {/* Formulario de movimientos */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
