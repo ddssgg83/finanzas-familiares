@@ -192,7 +192,6 @@ export default function GastosPage() {
   });
 
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [isFamilyOwner, setIsFamilyOwner] = useState(false);
 
   // Presupuesto
   const [budgetInput, setBudgetInput] = useState("");
@@ -207,9 +206,9 @@ export default function GastosPage() {
   const [exportIncludeCategorySummary, setExportIncludeCategorySummary] =
     useState(true);
 
-    // UI: colapsables
-const [showCardsList, setShowCardsList] = useState(false);
-const [showCharts, setShowCharts] = useState(false);
+  // UI: colapsables
+  const [showCardsList, setShowCardsList] = useState(false);
+  const [showCharts, setShowCharts] = useState(false);
 
   // Filtros de movimientos
   const [filterType, setFilterType] = useState<"todos" | "ingreso" | "gasto">(
@@ -227,12 +226,16 @@ const [showCharts, setShowCharts] = useState(false);
   const [goals, setGoals] = useState<FamilyGoal[]>([]);
 
   // 👪 CONTEXTO DE FAMILIA
-  const [familyCtx, setFamilyCtx] = useState<FamilyContext | null>(null);
-  const [familyCtxLoading, setFamilyCtxLoading] = useState(false);
-  const [familyCtxError, setFamilyCtxError] = useState<string | null>(null);
+const [familyCtx, setFamilyCtx] = useState<FamilyContext | null>(null);
+const [familyCtxLoading, setFamilyCtxLoading] = useState(false);
+const [familyCtxError, setFamilyCtxError] = useState<string | null>(null);
 
-  // Scope de vista: solo yo / toda la familia (si es owner)
-  const [viewScope, setViewScope] = useState<"mine" | "family">("mine");
+// ✅ Derivados (NO states)
+const canUseFamilyScope = familyCtx?.role === "owner";
+
+// Scope de vista: solo yo / familia
+const [viewScope, setViewScope] = useState<"mine" | "family">("mine");
+
 
   // Tarjeta nueva
   const [newCardName, setNewCardName] = useState("");
@@ -397,48 +400,6 @@ const [showCharts, setShowCharts] = useState(false);
     }
   };
 
-  // Saber si el usuario es jefe de familia
-  useEffect(() => {
-    if (!user) {
-      setIsFamilyOwner(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    const checkOwner = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("families")
-          .select("id")
-          .eq("user_id", user.id)
-          .limit(1);
-
-        if (error) {
-          console.error(
-            "Error revisando si es jefe de familia en /gastos",
-            error
-          );
-          if (!cancelled) setIsFamilyOwner(false);
-          return;
-        }
-
-        if (!cancelled) {
-          setIsFamilyOwner((data ?? []).length > 0);
-        }
-      } catch (err) {
-        console.error("Error revisando si es jefe de familia en /gastos", err);
-        if (!cancelled) setIsFamilyOwner(false);
-      }
-    };
-
-    checkOwner();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
-
   // --------------------------------------------------
   //   Cargar contexto de familia (si pertenece a una)
   // --------------------------------------------------
@@ -561,11 +522,11 @@ const [showCharts, setShowCharts] = useState(false);
     };
   }, [user]);
 
-  useEffect(() => {
-    if (viewScope === "family" && !isFamilyOwner) {
-      setViewScope("mine");
-    }
-  }, [viewScope, isFamilyOwner]);
+useEffect(() => {
+  if (viewScope === "family" && !canUseFamilyScope) {
+    setViewScope("mine");
+  }
+}, [viewScope, canUseFamilyScope]);
 
   // --------------------------------------------------
   //   Cargar listas personalizadas de categorías/métodos
@@ -644,126 +605,121 @@ const [showCharts, setShowCharts] = useState(false);
     loadOffline();
   }, []);
 
-  // --------------------------------------------------
-  //   Cargar transacciones del mes desde Supabase
-  // --------------------------------------------------
   useEffect(() => {
-    const currentUser = user;
-    if (!currentUser) {
-      setTransactions([]);
-      return;
-    }
+  const currentUser = user;
+  if (!currentUser) {
+    setTransactions([]);
+    return;
+  }
 
-    const userId = currentUser.id;
+  const userId = currentUser.id;
 
-    async function load() {
-      setLoading(true);
-      setError(null);
+  async function load() {
+    setLoading(true);
+    setError(null);
 
-      try {
-        const [year, monthNumber] = month.split("-");
-        const from = `${month}-01`;
-        const to = `${month}-${new Date(
-          Number(year),
-          Number(monthNumber),
-          0
-        )
-          .getDate()
-          .toString()
-          .padStart(2, "0")}`;
+    try {
+      const [year, monthNumber] = month.split("-");
+      const from = `${month}-01`;
+      const to = `${month}-${new Date(Number(year), Number(monthNumber), 0)
+        .getDate()
+        .toString()
+        .padStart(2, "0")}`;
 
-        let query = supabase
-  .from("transactions")
-  .select("*")
-  .gte("date", from)
-  .lte("date", to)
-  .order("date", { ascending: false })       // 🔑 orden real por día
-  .order("created_at", { ascending: false }); // 🔑 desempate visual
+      let query = supabase
+        .from("transactions")
+        .select("*")
+        .gte("date", from)
+        .lte("date", to)
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false });
 
-        if (isFamilyOwner) {
+      if (canUseFamilyScope) {
   // 👑 JEFE DE FAMILIA
+
   if (viewScope === "mine") {
-    // Solo gastos cuyo dinero es del jefe
+    // ✅ SOLO YO (pero incluye también lo que la familia hizo con MIS tarjetas compartidas)
+    // Regla: todo lo que "pertenece" al jefe (owner_user_id = jefe)
     query = query.eq("owner_user_id", userId);
   } else {
-    // Vista familia: TODOS los gastos cuyo dinero pertenece al jefe
-    query = query.eq("owner_user_id", userId);
+    // ✅ FAMILIA (todos los movimientos de los miembros activos + el jefe)
+    const ids = familyCtx?.activeMemberUserIds ?? [userId];
+
+    // IMPORTANTE: Para que no falle si ids está vacío
+    if (!ids.length) {
+      query = query.eq("user_id", userId);
+    } else {
+      // Esto asume que cada movimiento tiene user_id = quien lo creó/registró
+      query = query.in("user_id", ids);
+    }
   }
 } else {
-  // 👤 MIEMBRO
-  // Solo ve gastos que él generó o que son suyos (si aplica)
-  query = query.eq("spender_user_id", userId);
+  // 👤 MIEMBRO (solo ve lo que él registró)
+  query = query.eq("user_id", userId);
 }
 
-        const { data, error } = await query;
-        if (error) throw error;
+      const { data, error } = await query;
+      if (error) throw error;
 
-        setTransactions(
-          (data ?? []).map((t: any) => ({
-            id: t.id,
-            date: t.date,
-            type: t.type,
-            category: t.category,
-            amount: Number(t.amount),
-            method: t.method,
-            notes: t.notes,
-            owner_user_id: t.owner_user_id ?? null,
-            spender_user_id: t.spender_user_id ?? null,
-            spender_label: t.spender_label ?? null,
-            created_by: t.created_by ?? null,
-            card_id: t.card_id ?? null,
-            family_group_id: t.family_group_id ?? null,
-            goal_id: t.goal_id ?? null,
-          }))
-        );
+      setTransactions(
+        (data ?? []).map((t: any) => ({
+          id: t.id,
+          date: t.date,
+          type: t.type,
+          category: t.category,
+          amount: Number(t.amount),
+          method: t.method,
+          notes: t.notes,
+          owner_user_id: t.owner_user_id ?? null,
+          spender_user_id: t.spender_user_id ?? null,
+          spender_label: t.spender_label ?? null,
+          created_by: t.created_by ?? null,
+          card_id: t.card_id ?? null,
+          family_group_id: t.family_group_id ?? null,
+          goal_id: t.goal_id ?? null,
+        }))
+      );
 
-        if (typeof window !== "undefined") {
-          localStorage.setItem(
-            `ff-cache-${month}`,
-            JSON.stringify(data ?? [])
-          );
-        }
-      } catch (err) {
-        console.error(err);
-        setError("No se pudieron cargar los movimientos.");
-
-        if (typeof window !== "undefined") {
-          const cache = localStorage.getItem(`ff-cache-${month}`);
-          if (cache) {
-            try {
-              const parsed = JSON.parse(cache);
-              setTransactions(
-                (parsed ?? []).map((t: any) => ({
-                  id: t.id,
-                  date: t.date,
-                  type: t.type,
-                  category: t.category,
-                  amount: Number(t.amount),
-                  method: t.method,
-                  notes: t.notes,
-                  owner_user_id: t.owner_user_id ?? null,
-                  spender_user_id: t.spender_user_id ?? null,
-                  spender_label: t.spender_label ?? null,
-                  created_by: t.created_by ?? null,
-                  card_id: t.card_id ?? null,
-                  family_group_id: t.family_group_id ?? null,
-                  goal_id: t.goal_id ?? null,
-                }))
-              );
-            } catch {
-              // ignoramos error de parseo
-            }
-          }
-        }
-      } finally {
-        setLoading(false);
+      if (typeof window !== "undefined") {
+        localStorage.setItem(`ff-cache-${month}`, JSON.stringify(data ?? []));
       }
-    }
+    } catch (err) {
+      console.error(err);
+      setError("No se pudieron cargar los movimientos.");
 
-    if (typeof window !== "undefined") {
-      load();
+      if (typeof window !== "undefined") {
+        const cache = localStorage.getItem(`ff-cache-${month}`);
+        if (cache) {
+          try {
+            const parsed = JSON.parse(cache);
+            setTransactions(
+              (parsed ?? []).map((t: any) => ({
+                id: t.id,
+                date: t.date,
+                type: t.type,
+                category: t.category,
+                amount: Number(t.amount),
+                method: t.method,
+                notes: t.notes,
+                owner_user_id: t.owner_user_id ?? null,
+                spender_user_id: t.spender_user_id ?? null,
+                spender_label: t.spender_label ?? null,
+                created_by: t.created_by ?? null,
+                card_id: t.card_id ?? null,
+                family_group_id: t.family_group_id ?? null,
+                goal_id: t.goal_id ?? null,
+              }))
+            );
+          } catch {}
+        }
+      }
+    } finally {
+      setLoading(false);
     }
-  }, [month, user, isFamilyOwner, viewScope, familyCtx]);
+  }
+
+  if (typeof window !== "undefined") load();
+}, [month, user, viewScope, canUseFamilyScope]);
 
   // --------------------------------------------------
   //   Sincronizar cola offline al volver internet
@@ -856,9 +812,9 @@ const [showCharts, setShowCharts] = useState(false);
           .eq("owner_id", ownerId)
           .order("name", { ascending: true });
 
-        if (familyCtx && !isFamilyOwner) {
-          query = query.eq("shared_with_family", true);
-        }
+        if (familyCtx && !canUseFamilyScope) {
+  query = query.eq("shared_with_family", true);
+}
 
         const { data, error } = await query;
 
@@ -883,7 +839,7 @@ const [showCharts, setShowCharts] = useState(false);
     };
 
     loadCards();
-  }, [user, familyCtx, isFamilyOwner]);
+  }, [user, familyCtx, canUseFamilyScope]);
 
   // --------------------------------------------------
   //   NUEVO: cargar metas familiares
@@ -1760,12 +1716,13 @@ const [showCharts, setShowCharts] = useState(false);
   ) => {
     if (!user || !familyCtx) return;
 
-    if (!isFamilyOwner) {
-      alert(
-        "Sólo el jefe de familia puede cambiar si una tarjeta se comparte o no con la familia."
-      );
-      return;
-    }
+    if (!canUseFamilyScope) {
+  alert(
+    "Sólo el jefe de familia puede cambiar si una tarjeta se comparte o no con la familia."
+  );
+  return;
+}
+
 
     const newValue = !current;
 
@@ -1938,56 +1895,54 @@ const [showCharts, setShowCharts] = useState(false);
                 </button>
               </div>
 
-              {/* Info de familia */}
-              {familyCtxLoading && !familyCtx && (
-                <p className="mt-2 text-[11px] text-slate-500">
-                  Cargando información de familia...
-                </p>
-              )}
-              {familyCtx && (
-                <div className="mt-2 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
-                  <div>
-                    Familia:{" "}
-                    <span className="font-semibold">
-                      {familyCtx.familyName}
-                    </span>{" "}
-                    {isFamilyOwner ? "(jefe de familia)" : "(miembro)"}
-                  </div>
-                  {isFamilyOwner && (
-                    <div className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 dark:bg-slate-800">
-                      <button
-                        type="button"
-                        className={
-                          "rounded-full px-2 py-0.5 " +
-                          (viewScope === "mine"
-                            ? "bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-50"
-                            : "text-slate-500")
-                        }
-                        onClick={() => setViewScope("mine")}
-                      >
-                        Solo yo
-                      </button>
-                      <button
-                        type="button"
-                        className={
-                          "rounded-full px-2 py-0.5 " +
-                          (viewScope === "family"
-                            ? "bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-50"
-                            : "text-slate-500")
-                        }
-                        onClick={() => setViewScope("family")}
-                      >
-                        Familia
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-              {familyCtxError && (
-                <p className="mt-2 text-[11px] text-rose-500">
-                  {familyCtxError}
-                </p>
-              )}
+              {/* Toggle de vista */}
+<div className="mt-2 inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 dark:bg-slate-800">
+  <button
+    type="button"
+    className={
+      "rounded-full px-2 py-0.5 transition " +
+      (viewScope === "mine"
+        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-50"
+        : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-200")
+    }
+    onClick={() => setViewScope("mine")}
+  >
+    Solo yo
+  </button>
+
+  <button
+    type="button"
+    disabled={!canUseFamilyScope}
+    title={
+      canUseFamilyScope
+        ? "Ver vista familiar"
+        : "Solo el jefe de familia puede ver la vista familiar"
+    }
+    className={
+      "rounded-full px-2 py-0.5 transition " +
+      (viewScope === "family"
+        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-50"
+        : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-200") +
+      (!canUseFamilyScope ? " cursor-not-allowed opacity-50" : "")
+    }
+    onClick={() => {
+      if (!canUseFamilyScope) return;
+      setViewScope("family");
+    }}
+  >
+    Familia
+  </button>
+</div>
+
+{!canUseFamilyScope && (
+  <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+    La vista “Familia” solo está disponible para el jefe de familia.
+  </p>
+)}
+
+{familyCtxError && (
+  <p className="mt-2 text-[11px] text-rose-500">{familyCtxError}</p>
+)}
             </div>
 
             <div
@@ -2215,7 +2170,8 @@ const [showCharts, setShowCharts] = useState(false);
         placeholder="Ej. BBVA Negra David, Amex Platino, etc."
       />
 
-      {familyCtx && (
+      {familyCtx && canUseFamilyScope && (
+
         <label className="mt-2 flex items-start gap-2 text-[11px] text-slate-600 dark:text-slate-300">
           <input
             type="checkbox"
@@ -2298,7 +2254,7 @@ const [showCharts, setShowCharts] = useState(false);
                 Usar en formulario
               </button>
 
-              {isFamilyOwner && (
+              {canUseFamilyScope && (
                 <button
                   type="button"
                   onClick={() => handleToggleCardSharing(card.id, card.shared_with_family)}
@@ -2862,50 +2818,30 @@ const [showCharts, setShowCharts] = useState(false);
       </section>
 
       {/* Gastos por persona (modo familia) */}
-      {familyCtx && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h2 className="mb-2 text-sm font-semibold">
-            Gastos por persona (familia)
-          </h2>
+{viewScope === "family" && canUseFamilyScope && (
+  <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <h2 className="mb-2 text-sm font-semibold">Gastos por persona (familia)</h2>
 
-          {gastosPorPersona.length === 0 ? (
-            <p className="text-xs text-gray-500">
-              Aún no hay gastos registrados por persona en este mes.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {gastosPorPersona.map((item) => (
-                <div key={item.label} className="space-y-1">
-                  <div className="flex justify-between text-xs">
-                    <span>{item.label}</span>
-                    <span>
-                      {formatMoney(item.total)}{" "}
-                      <span className="text-gray-400">
-                        ({item.percent.toFixed(1)}%)
-                      </span>
-                    </span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded bg-gray-200 dark:bg-slate-700">
-                    <div
-                      className="h-2 rounded bg-emerald-500"
-                      style={{
-                        width: `${Math.max(item.percent, 2)}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+    {gastosPorPersona.length === 0 ? (
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Aún no hay gastos familiares para mostrar.
+      </p>
+    ) : (
+      <div className="space-y-2">
+        {gastosPorPersona.map((item) => (
+          <div
+            key={item.label}
+            className="flex items-center justify-between text-sm"
+          >
+            <span>{item.label}</span>
+            <span className="font-medium">{formatMoney(item.total)}</span>
+          </div>
+        ))}
+      </div>
+    )}
+  </section>
+)}
 
-          <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
-            Estos montos consideran sólo los{" "}
-            <span className="font-semibold">gastos</span> del mes actual y usan
-            el campo <span className="font-semibold">“Quién generó”</span> del
-            formulario de movimientos.
-          </p>
-        </section>
-      )}
 
       {/* Tabla de movimientos */}
       <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
