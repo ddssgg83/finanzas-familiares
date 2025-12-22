@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
+import { PageShell } from "@/components/ui/PageShell";
+import { SectionCard } from "@/components/ui/SectionCard";
+import { ScopeToggle } from "@/components/ui/ScopeToggle";
 
 export const dynamic = "force-dynamic";
 
@@ -679,17 +682,17 @@ export default function PatrimonioPage() {
   }
 
   // =========================================================
-  //  7. RENDER PRINCIPAL
-  // =========================================================
-  return (
-    <main className="flex flex-1 flex-col gap-4">
-      <AppHeader
-        title="Patrimonio (activos y deudas)"
-        subtitle="Foto completa de lo que tienes y lo que debes. Desde aquí alimentas tu valor patrimonial."
-        activeTab="patrimonio"
-        userEmail={user.email}
-        onSignOut={handleSignOut}
-      />
+//  7. RENDER PRINCIPAL
+// =========================================================
+return (
+  <PageShell>
+    <AppHeader
+      title="Patrimonio (activos y deudas)"
+      subtitle="Foto completa de lo que tienes y lo que debes. Desde aquí alimentas tu valor patrimonial."
+      activeTab="patrimonio"
+      userEmail={user.email}
+      onSignOut={handleSignOut}
+    />
 
       {/* Resumen + contexto familiar */}
       <section className="space-y-4">
@@ -1257,6 +1260,6 @@ export default function PatrimonioPage() {
           {patrimonioError}
         </section>
       )}
-    </main>
-  );
+     </PageShell>
+);
 }
