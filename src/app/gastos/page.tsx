@@ -209,6 +209,8 @@ export default function GastosPage() {
   // UI: colapsables
   const [showCardsList, setShowCardsList] = useState(false);
   const [showCharts, setShowCharts] = useState(false);
+  const [showFamilyPeople, setShowFamilyPeople] = useState(false);
+  const [showGastosPorPersona, setShowGastosPorPersona] = useState(false);
 
   // Filtros de movimientos
   const [filterType, setFilterType] = useState<"todos" | "ingreso" | "gasto">(
@@ -523,8 +525,8 @@ const [viewScope, setViewScope] = useState<"mine" | "family">("mine");
   }, [user]);
 
 useEffect(() => {
-  if (viewScope === "family" && !canUseFamilyScope) {
-    setViewScope("mine");
+  if (viewScope === "family" && canUseFamilyScope) {
+    setShowGastosPorPersona(true);
   }
 }, [viewScope, canUseFamilyScope]);
 
@@ -1895,44 +1897,36 @@ useEffect(() => {
                 </button>
               </div>
 
-              {/* Toggle de vista */}
-<div className="mt-2 inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 dark:bg-slate-800">
-  <button
-    type="button"
-    className={
-      "rounded-full px-2 py-0.5 transition " +
-      (viewScope === "mine"
-        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-50"
-        : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-200")
-    }
-    onClick={() => setViewScope("mine")}
-  >
-    Solo yo
-  </button>
+            {/* Toggle de vista (solo para jefe de familia y solo si hay familyCtx) */}
+{familyCtx && canUseFamilyScope && (
+  <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 dark:bg-slate-800">
+    <button
+      type="button"
+      className={
+        "rounded-full px-2 py-0.5 transition " +
+        (viewScope === "mine"
+          ? "bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-50"
+          : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-200")
+      }
+      onClick={() => setViewScope("mine")}
+    >
+      Solo yo
+    </button>
 
-  <button
-    type="button"
-    disabled={!canUseFamilyScope}
-    title={
-      canUseFamilyScope
-        ? "Ver vista familiar"
-        : "Solo el jefe de familia puede ver la vista familiar"
-    }
-    className={
-      "rounded-full px-2 py-0.5 transition " +
-      (viewScope === "family"
-        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-50"
-        : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-200") +
-      (!canUseFamilyScope ? " cursor-not-allowed opacity-50" : "")
-    }
-    onClick={() => {
-      if (!canUseFamilyScope) return;
-      setViewScope("family");
-    }}
-  >
-    Familia
-  </button>
-</div>
+    <button
+      type="button"
+      className={
+        "rounded-full px-2 py-0.5 transition " +
+        (viewScope === "family"
+          ? "bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-50"
+          : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-200")
+      }
+      onClick={() => setViewScope("family")}
+    >
+      Familia
+    </button>
+  </div>
+)}
 
 {!canUseFamilyScope && (
   <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
@@ -2385,30 +2379,26 @@ useEffect(() => {
         <form onSubmit={handleSubmit} className="space-y-3 text-sm">
           {/* Fila principal */}
           <div className="grid gap-3 md:grid-cols-7">
-            {/* Tarjeta */}
-            <div>
-              <div className="mb-1 text-xs text-gray-500 dark:text-gray-300">
-                Tarjeta
-              </div>
-              <select
-                value={selectedCardId ?? ""}
-                onChange={(e) =>
-                  handleChangeCard(e.target.value ? e.target.value : null)
-                }
-                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-              >
-                <option value="">Sin tarjeta específica</option>
-                {cards.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                Si eliges una tarjeta compartida, este movimiento se sumará al
-                resumen del jefe de familia.
-              </p>
-            </div>
+           {/* Tarjeta */}
+<div>
+  <div className="mb-1 text-xs text-gray-500 dark:text-gray-300">
+    Tarjeta
+  </div>
+  <select
+    value={selectedCardId ?? ""}
+    onChange={(e) =>
+      handleChangeCard(e.target.value ? e.target.value : null)
+    }
+    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+  >
+    <option value="">Sin tarjeta específica</option>
+    {cards.map((c) => (
+      <option key={c.id} value={c.id}>
+        {c.name}
+      </option>
+    ))}
+  </select>
+</div>
 
             {/* Tipo */}
             <div>
@@ -2817,31 +2807,64 @@ useEffect(() => {
         )}
       </section>
 
-      {/* Gastos por persona (modo familia) */}
-{viewScope === "family" && canUseFamilyScope && (
+      {/* Gastos por persona (solo cuando estás en vista FAMILIA y eres jefe) */}
+{viewScope === "family" && canUseFamilyScope && familyCtx && (
   <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-    <h2 className="mb-2 text-sm font-semibold">Gastos por persona (familia)</h2>
+    <div className="mb-2 flex items-center justify-between">
+      <h2 className="text-sm font-semibold">
+        Gastos por persona (familia)
+      </h2>
 
-    {gastosPorPersona.length === 0 ? (
-      <p className="text-xs text-slate-500 dark:text-slate-400">
-        Aún no hay gastos familiares para mostrar.
-      </p>
-    ) : (
-      <div className="space-y-2">
-        {gastosPorPersona.map((item) => (
-          <div
-            key={item.label}
-            className="flex items-center justify-between text-sm"
-          >
-            <span>{item.label}</span>
-            <span className="font-medium">{formatMoney(item.total)}</span>
+      <button
+        type="button"
+        onClick={() => setShowGastosPorPersona((v) => !v)}
+        className="text-[11px] font-medium text-sky-600 hover:underline"
+      >
+        {showGastosPorPersona ? "Ocultar" : "Ver"}
+      </button>
+    </div>
+
+    {showGastosPorPersona && (
+      <>
+        {gastosPorPersona.length === 0 ? (
+          <p className="text-xs text-gray-500">
+            Aún no hay gastos registrados por persona en este mes.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {gastosPorPersona.map((item) => (
+              <div key={item.label} className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span>{item.label}</span>
+                  <span>
+                    {formatMoney(item.total)}{" "}
+                    <span className="text-gray-400">
+                      ({item.percent.toFixed(1)}%)
+                    </span>
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded bg-gray-200 dark:bg-slate-700">
+                  <div
+                    className="h-2 rounded bg-emerald-500"
+                    style={{
+                      width: `${Math.max(item.percent, 2)}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        )}
+
+        <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
+          Estos montos consideran sólo los{" "}
+          <span className="font-semibold">gastos</span> del mes actual y usan el
+          campo <span className="font-semibold">“Quién generó”</span>.
+        </p>
+      </>
     )}
   </section>
 )}
-
 
       {/* Tabla de movimientos */}
       <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
