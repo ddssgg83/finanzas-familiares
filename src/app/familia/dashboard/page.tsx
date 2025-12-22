@@ -18,6 +18,9 @@ import {
 } from "recharts";
 import { useTheme } from "next-themes";
 import Link from "next/link";
+import { PageShell } from "@/components/ui/PageShell";
+import { SectionCard } from "@/components/ui/SectionCard";
+import { Collapsible } from "@/components/ui/Collapsible";
 
 export const dynamic = "force-dynamic";
 
@@ -113,6 +116,7 @@ export default function FamilyDashboardPage() {
   const [txs, setTxs] = useState<Tx[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showGoalsChart, setShowGoalsChart] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -439,12 +443,12 @@ if (familyGroupId) {
   const isDark = theme === "dark";
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
-      <AppHeader
-        title="Familia"
-        subtitle="Objetivos familiares y actividad del grupo"
-        activeTab="familia"
-      />
+  <PageShell>
+    <AppHeader
+      title="Familia"
+      subtitle="Objetivos familiares y actividad del grupo"
+      activeTab="familia"
+    />
 
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 pb-10 pt-4 md:px-6 md:pt-6 lg:px-8">
         <section className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -771,51 +775,58 @@ if (familyGroupId) {
                   </ul>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <h3 className="text-xs font-semibold">
-                    Progreso por objetivo
-                  </h3>
-                  <p className="mb-2 mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                    Cada barra representa el avance de una meta.
-                  </p>
-                  {goalsChartData.length === 0 ? (
-                    <div className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">
-                      Crea al menos una meta para ver la gráfica.
-                    </div>
-                  ) : (
-                    <div className="h-40">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={goalsChartData}>
-                          <CartesianGrid
-                            strokeDasharray="3 3"
-                            stroke={isDark ? "#1e293b" : "#e2e8f0"}
-                            vertical={false}
-                          />
-                          <XAxis
-                            dataKey="name"
-                            tick={{ fontSize: 10 }}
-                            tickLine={false}
-                            axisLine={{ stroke: isDark ? "#1e293b" : "#e2e8f0" }}
-                          />
-                          <YAxis
-                            tick={{ fontSize: 10 }}
-                            tickLine={false}
-                            axisLine={{ stroke: isDark ? "#1e293b" : "#e2e8f0" }}
-                            domain={[0, 120]}
-                            tickFormatter={(value) => `${value}%`}
-                          />
-                          <Tooltip
-                            contentStyle={{
-                              fontSize: 11,
-                            }}
-                            formatter={(value: any) => `${value}%`}
-                          />
-                          <Bar dataKey="progreso" radius={[6, 6, 0, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
-                </div>
+               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <div className="flex items-center justify-between">
+    <div>
+      <h3 className="text-xs font-semibold">Progreso por objetivo</h3>
+      <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+        Cada barra representa el avance de una meta.
+      </p>
+    </div>
+
+    <button
+      type="button"
+      onClick={() => setShowGoalsChart((v) => !v)}
+      className="text-[11px] font-medium text-sky-600 hover:underline"
+    >
+      {showGoalsChart ? "Ocultar" : "Ver gráfica"}
+    </button>
+  </div>
+
+  {showGoalsChart && (
+    <>
+      {goalsChartData.length === 0 ? (
+        <div className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">
+          Crea al menos una meta para ver la gráfica.
+        </div>
+      ) : (
+        <div className="mt-3 h-40">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={goalsChartData}>
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke={isDark ? "#1e293b" : "#e2e8f0"}
+                vertical={false}
+              />
+              <XAxis
+                dataKey="name"
+                tick={{ fontSize: 10 }}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fontSize: 10 }}
+                domain={[0, 120]}
+                tickFormatter={(v) => `${v}%`}
+              />
+              <Tooltip formatter={(v: any) => `${v}%`} />
+              <Bar dataKey="progreso" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </>
+  )}
+</div>
 
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <h3 className="text-xs font-semibold">
@@ -875,6 +886,6 @@ if (familyGroupId) {
           </>
         )}
       </main>
-    </div>
-  );
+  </PageShell>
+);
 }
