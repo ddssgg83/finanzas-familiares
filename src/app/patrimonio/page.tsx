@@ -5,8 +5,6 @@ import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
 import { PageShell } from "@/components/ui/PageShell";
-import { SectionCard } from "@/components/ui/SectionCard";
-import { ScopeToggle } from "@/components/ui/ScopeToggle";
 
 export const dynamic = "force-dynamic";
 
@@ -90,8 +88,8 @@ const DEBT_TYPES = [
 ];
 
 // =========================================================
- //  Helpers
- // =========================================================
+//  Helpers
+// =========================================================
 
 function formatMoney(num: number) {
   return num.toLocaleString("es-MX", {
@@ -108,6 +106,48 @@ function formatDateDisplay(ymd?: string | null) {
   if (!y || !m || !d) return ymd;
   return `${d}/${m}/${y}`;
 }
+
+// =========================================================
+//  UI helpers (Minimal Premium)
+// =========================================================
+
+const UI = {
+  card:
+    "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900",
+  cardTight:
+    "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900",
+  title: "text-sm font-semibold tracking-tight text-slate-900 dark:text-slate-100",
+  sub: "text-xs text-slate-500 dark:text-slate-400",
+  label: "mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300",
+  helper: "mt-1 text-[10px] text-slate-500 dark:text-slate-400",
+  field:
+    "h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm leading-normal text-slate-900 outline-none transition " +
+    "focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500/20 " +
+    "dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100",
+  textarea:
+    "min-h-[96px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-normal text-slate-900 outline-none transition " +
+    "focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500/20 " +
+    "dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100",
+  btnPrimary:
+    "h-10 w-full rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-black disabled:opacity-60 " +
+    "dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white",
+  btnSecondary:
+    "h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 " +
+    "dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800",
+  btnChip:
+    "rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50 " +
+    "dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200",
+  btnLink: "text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400",
+  btnDanger: "text-[11px] font-medium text-rose-600 hover:underline dark:text-rose-400",
+  pill:
+    "inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-[11px] dark:border-slate-700 dark:bg-slate-900",
+  pillOn:
+    "rounded-full bg-slate-900 px-3 py-1 text-white dark:bg-slate-200 dark:text-slate-900",
+  pillOff: "rounded-full px-3 py-1 text-slate-700 dark:text-slate-200",
+  listItem:
+    "flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 " +
+    "dark:border-slate-800 dark:bg-slate-900",
+};
 
 // =========================================================
 //  Página principal
@@ -170,13 +210,9 @@ export default function PatrimonioPage() {
         const { data, error } = await supabase.auth.getUser();
         if (error && (error as any).name !== "AuthSessionMissingError") {
           console.error("Error obteniendo usuario actual", error);
-          if (!ignore) {
-            setAuthError("Hubo un problema al cargar tu sesión.");
-          }
+          if (!ignore) setAuthError("Hubo un problema al cargar tu sesión.");
         }
-        if (!ignore) {
-          setUser(data?.user ?? null);
-        }
+        if (!ignore) setUser(data?.user ?? null);
       } finally {
         if (!ignore) setAuthLoading(false);
       }
@@ -209,7 +245,7 @@ export default function PatrimonioPage() {
   };
 
   // =========================================================
-  //  2. FAMILY CONTEXT (saber si eres jefe de familia)
+  //  2. FAMILY CONTEXT
   // =========================================================
   useEffect(() => {
     const currentUser = user;
@@ -228,7 +264,6 @@ export default function PatrimonioPage() {
       setFamilyLoading(true);
       setFamilyError(null);
       try {
-        // 1) Buscar membresía activa por user_id o invited_email
         const { data: memberRows, error: memberError } = await supabase
           .from("family_members")
           .select("id,family_id,status,user_id,invited_email")
@@ -245,7 +280,6 @@ export default function PatrimonioPage() {
 
         const member = memberRows[0];
 
-        // 2) Cargar familia
         const { data: fam, error: famError } = await supabase
           .from("families")
           .select("id,name,user_id")
@@ -254,7 +288,6 @@ export default function PatrimonioPage() {
 
         if (famError) throw famError;
 
-        // 3) Cargar todos los miembros activos para saber sus user_id
         const { data: activeMembers, error: membersError } = await supabase
           .from("family_members")
           .select("id,status,user_id")
@@ -299,7 +332,6 @@ export default function PatrimonioPage() {
   const isFamilyOwner =
     !!familyCtx && !!user && familyCtx.ownerUserId === user.id;
 
-  // Si NO eres jefe de familia, la vista efectiva siempre es "personal"
   const effectiveScope: ViewScope =
     familyCtx && isFamilyOwner ? viewScope : "personal";
 
@@ -358,7 +390,7 @@ export default function PatrimonioPage() {
           setDebts((debtsRes.data ?? []) as Debt[]);
         }
       } catch (err) {
-        console.error("Error cargando patrimonio (familia):", err);
+        console.error("Error cargando patrimonio:", err);
         setPatrimonioError(
           "No se pudo cargar el patrimonio. Intenta de nuevo más tarde."
         );
@@ -441,7 +473,6 @@ export default function PatrimonioPage() {
       setSavingAsset(true);
 
       if (editingAssetId) {
-        // UPDATE
         const { data, error } = await supabase
           .from("assets")
           .update({
@@ -464,7 +495,6 @@ export default function PatrimonioPage() {
         );
         resetAssetForm();
       } else {
-        // INSERT
         const { data, error } = await supabase
           .from("assets")
           .insert([
@@ -540,7 +570,6 @@ export default function PatrimonioPage() {
       setSavingDebt(true);
 
       if (editingDebtId) {
-        // UPDATE
         const { data, error } = await supabase
           .from("debts")
           .update({
@@ -563,7 +592,6 @@ export default function PatrimonioPage() {
         );
         resetDebtForm();
       } else {
-        // INSERT
         const { data, error } = await supabase
           .from("debts")
           .insert([
@@ -610,9 +638,7 @@ export default function PatrimonioPage() {
       const { error } = await supabase.from("assets").delete().eq("id", id);
       if (error) throw error;
       setAssets((prev) => prev.filter((a) => a.id !== id));
-      if (editingAssetId === id) {
-        resetAssetForm();
-      }
+      if (editingAssetId === id) resetAssetForm();
     } catch (err) {
       console.error("Error eliminando activo:", err);
       alert("No se pudo eliminar el activo.");
@@ -625,9 +651,7 @@ export default function PatrimonioPage() {
       const { error } = await supabase.from("debts").delete().eq("id", id);
       if (error) throw error;
       setDebts((prev) => prev.filter((d) => d.id !== id));
-      if (editingDebtId === id) {
-        resetDebtForm();
-      }
+      if (editingDebtId === id) resetDebtForm();
     } catch (err) {
       console.error("Error eliminando deuda:", err);
       alert("No se pudo eliminar la deuda.");
@@ -652,9 +676,7 @@ export default function PatrimonioPage() {
       type: DEBT_TYPES.includes(debt.type) ? debt.type : DEBT_TYPES[0],
       total_amount: debt.total_amount?.toString() ?? "",
       current_balance:
-        debt.current_balance != null
-          ? debt.current_balance.toString()
-          : "",
+        debt.current_balance != null ? debt.current_balance.toString() : "",
       notes: debt.notes ?? "",
     });
   };
@@ -674,55 +696,45 @@ export default function PatrimonioPage() {
     return (
       <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
         Necesitas iniciar sesión para ver y editar tu patrimonio.
-        {authError && (
-          <p className="mt-2 text-xs text-rose-500">{authError}</p>
-        )}
+        {authError && <p className="mt-2 text-xs text-rose-500">{authError}</p>}
       </div>
     );
   }
 
   // =========================================================
-//  7. RENDER PRINCIPAL
-// =========================================================
-return (
-  <PageShell>
-    <AppHeader
-      title="Patrimonio (activos y deudas)"
-      subtitle="Foto completa de lo que tienes y lo que debes. Desde aquí alimentas tu valor patrimonial."
-      activeTab="patrimonio"
-      userEmail={user.email}
-      onSignOut={handleSignOut}
-    />
+  //  7. RENDER PRINCIPAL
+  // =========================================================
+  return (
+    <PageShell>
+      <AppHeader
+        title="Patrimonio (activos y deudas)"
+        subtitle="Foto completa de lo que tienes y lo que debes. Desde aquí alimentas tu valor patrimonial."
+        activeTab="patrimonio"
+        userEmail={user.email}
+        onSignOut={handleSignOut}
+      />
 
       {/* Resumen + contexto familiar */}
       <section className="space-y-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className={UI.card}>
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="space-y-1">
-              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                Resumen de patrimonio
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Aquí ves tus activos, deudas y patrimonio neto. Si eres jefe de
-                familia, puedes cambiar la vista a patrimonio familiar.
+              <h2 className={UI.title}>Resumen</h2>
+              <p className={UI.sub}>
+                Aquí ves tus activos, deudas y patrimonio neto. Si eres jefe de familia,
+                puedes cambiar la vista a patrimonio familiar.
               </p>
 
               {familyCtx && (
                 <div className="mt-2 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
                   <div>
                     Familia:{" "}
-                    <span className="font-semibold">
-                      {familyCtx.familyName}
-                    </span>{" "}
-                    {isFamilyOwner
-                      ? "(jefe de familia)"
-                      : "(miembro de familia)"}
+                    <span className="font-semibold">{familyCtx.familyName}</span>{" "}
+                    {isFamilyOwner ? "(jefe de familia)" : "(miembro)"}
                   </div>
                   <div>
                     Miembros activos:{" "}
-                    <span className="font-semibold">
-                      {familyCtx.activeMembers}
-                    </span>
+                    <span className="font-semibold">{familyCtx.activeMembers}</span>
                   </div>
                   {familyLoading && (
                     <div className="text-[10px] text-slate-400">
@@ -733,9 +745,7 @@ return (
               )}
 
               {familyError && (
-                <p className="mt-1 text-[11px] text-rose-500">
-                  {familyError}
-                </p>
+                <p className="mt-1 text-[11px] text-rose-500">{familyError}</p>
               )}
             </div>
 
@@ -743,85 +753,70 @@ return (
             {familyCtx && isFamilyOwner ? (
               <div className="flex flex-col items-start gap-2 text-xs md:items-end">
                 <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Vista de patrimonio
+                  Vista
                 </div>
-                <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-[11px] dark:border-slate-700 dark:bg-slate-900">
+
+                <div className={UI.pill}>
                   <button
                     type="button"
                     onClick={() => setViewScope("personal")}
-                    className={`rounded-full px-3 py-1 ${
-                      effectiveScope === "personal"
-                        ? "bg-sky-500 text-white"
-                        : "text-slate-700 dark:text-slate-200"
-                    }`}
+                    className={
+                      effectiveScope === "personal" ? UI.pillOn : UI.pillOff
+                    }
                   >
-                    Sólo mi patrimonio
+                    Sólo yo
                   </button>
                   <button
                     type="button"
                     onClick={() => setViewScope("family")}
-                    className={`rounded-full px-3 py-1 ${
-                      effectiveScope === "family"
-                        ? "bg-sky-500 text-white"
-                        : "text-slate-700 dark:text-slate-200"
-                    }`}
+                    className={effectiveScope === "family" ? UI.pillOn : UI.pillOff}
                   >
-                    Patrimonio familiar
+                    Familiar
                   </button>
                 </div>
+
                 <p className="max-w-xs text-[11px] text-slate-500 dark:text-slate-400">
-                  En modo familiar se suman tus activos y deudas más las de tus
-                  familiares activos en la app.
+                  En modo familiar se suman tus activos y deudas más las de tus familiares
+                  activos en la app.
                 </p>
               </div>
             ) : (
               <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
-                Vista actual:{" "}
-                <span className="font-semibold">Sólo tu patrimonio.</span>
+                Vista actual: <span className="font-semibold">Sólo tu patrimonio.</span>
                 {familyCtx && !isFamilyOwner && (
-                  <>
-                    {" "}
-                    El modo familiar sólo está disponible para el jefe de
-                    familia.
-                  </>
+                  <> El modo familiar sólo está disponible para el jefe de familia.</>
                 )}
               </div>
             )}
           </div>
         </div>
 
-        {/* Tarjetas resumen */}
+        {/* Tarjetas resumen (premium minimal: negro + color sólo en números) */}
         <div className="grid gap-4 md:grid-cols-3">
-          <div className="flex min-h-[110px] flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <div className="text-xs text-slate-500 dark:text-slate-400">
-              Activos totales
-            </div>
-            <div className="mt-1 text-2xl md:text-3xl font-semibold tracking-tight text-emerald-600 dark:text-emerald-400">
+          <div className={UI.cardTight}>
+            <div className="text-xs text-slate-500 dark:text-slate-400">Activos</div>
+            <div className="mt-1 text-2xl font-semibold tracking-tight text-emerald-600 dark:text-emerald-400">
               {formatMoney(totalActivos)}
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
               Todo lo que tienes a valor aproximado actual.
             </p>
           </div>
 
-          <div className="flex min-h-[110px] flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <div className="text-xs text-slate-500 dark:text-slate-400">
-              Deudas totales
-            </div>
-            <div className="mt-1 text-2xl md:text-3xl font-semibold tracking-tight text-rose-600 dark:text-rose-400">
+          <div className={UI.cardTight}>
+            <div className="text-xs text-slate-500 dark:text-slate-400">Deudas</div>
+            <div className="mt-1 text-2xl font-semibold tracking-tight text-rose-600 dark:text-rose-400">
               {formatMoney(totalDeudas)}
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
               Saldo pendiente considerando tarjetas, créditos y préstamos.
             </p>
           </div>
 
-          <div className="flex min-h-[110px] flex-col justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <div className="text-xs text-slate-500 dark:text-slate-400">
-              Patrimonio neto estimado
-            </div>
+          <div className={UI.cardTight}>
+            <div className="text-xs text-slate-500 dark:text-slate-400">Neto</div>
             <div
-              className={`mt-1 text-2xl md:text-3xl font-semibold tracking-tight ${
+              className={`mt-1 text-2xl font-semibold tracking-tight ${
                 patrimonioNeto >= 0
                   ? "text-emerald-600 dark:text-emerald-400"
                   : "text-rose-600 dark:text-rose-400"
@@ -829,64 +824,53 @@ return (
             >
               {formatMoney(patrimonioNeto)}
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Activos – Deudas. Este es el número clave que vas a querer ver
-              subir con el tiempo.
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+              Activos – Deudas. Número clave para ver crecer.
             </p>
           </div>
         </div>
       </section>
 
-      {/* Formularios de captura */}
+      {/* Formularios */}
       <section className="grid gap-4 md:grid-cols-2">
-        {/* Form Activos */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        {/* Activos */}
+        <div className={UI.card}>
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            <h2 className={UI.title}>
               {editingAssetId ? "Editar activo" : "Agregar activo"}
             </h2>
+
             {editingAssetId && (
-              <button
-                type="button"
-                onClick={resetAssetForm}
-                className="text-[11px] text-slate-500 hover:underline"
-              >
-                Cancelar edición
+              <button type="button" onClick={resetAssetForm} className={UI.btnLink}>
+                Cancelar
               </button>
             )}
           </div>
-          <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
-            Usa esto para cuentas bancarias, inversiones, propiedades, autos,
-            negocios, etc.
+
+          <p className={UI.sub}>
+            Cuentas bancarias, inversiones, propiedades, autos, negocios, etc.
           </p>
-          <form onSubmit={handleSubmitAsset} className="space-y-3 text-xs">
+
+          <form onSubmit={handleSubmitAsset} className="mt-4 space-y-3">
             <div>
-              <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
-                Nombre del activo
-              </label>
+              <label className={UI.label}>Nombre</label>
               <input
                 type="text"
                 value={assetForm.name}
-                onChange={(e) =>
-                  handleChangeAssetForm("name", e.target.value)
-                }
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-                placeholder="Ej. Cuenta BBVA, Casa Monterrey, Tesla, etc."
+                onChange={(e) => handleChangeAssetForm("name", e.target.value)}
+                className={UI.field}
+                placeholder="Ej. Cuenta BBVA, Casa Monterrey, Tesla…"
                 required
               />
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
               <div>
-                <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
-                  Categoría
-                </label>
+                <label className={UI.label}>Categoría</label>
                 <select
                   value={assetForm.category}
-                  onChange={(e) =>
-                    handleChangeAssetForm("category", e.target.value)
-                  }
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                  onChange={(e) => handleChangeAssetForm("category", e.target.value)}
+                  className={UI.field}
                 >
                   {ASSET_CATEGORIES.map((c) => (
                     <option key={c} value={c}>
@@ -897,9 +881,7 @@ return (
               </div>
 
               <div>
-                <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
-                  Valor aproximado actual
-                </label>
+                <label className={UI.label}>Valor aproximado</label>
                 <input
                   type="number"
                   min="0"
@@ -908,7 +890,7 @@ return (
                   onChange={(e) =>
                     handleChangeAssetForm("current_value", e.target.value)
                   }
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                  className={UI.field}
                   placeholder="Ej. 250000"
                   required
                 />
@@ -916,99 +898,76 @@ return (
             </div>
 
             <div>
-              <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
-                ¿A nombre de quién está?
-              </label>
+              <label className={UI.label}>A nombre de</label>
               <input
                 type="text"
                 value={assetForm.owner}
-                onChange={(e) =>
-                  handleChangeAssetForm("owner", e.target.value)
-                }
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-                placeholder="Ej. David, Dibri, Hijo, etc."
+                onChange={(e) => handleChangeAssetForm("owner", e.target.value)}
+                className={UI.field}
+                placeholder="Ej. David, Dibri, Empresa…"
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
-                Notas (opcional)
-              </label>
+              <label className={UI.label}>Notas (opcional)</label>
               <textarea
                 value={assetForm.notes}
-                onChange={(e) =>
-                  handleChangeAssetForm("notes", e.target.value)
-                }
-                className="h-16 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-                placeholder="Ej. Esta cuenta es para emergencias, esta casa aún tiene hipoteca, etc."
+                onChange={(e) => handleChangeAssetForm("notes", e.target.value)}
+                className={UI.textarea}
+                placeholder="Ej. Emergencias, valuación aproximada, etc."
               />
             </div>
 
-            <button
-              type="submit"
-              disabled={savingAsset}
-              className="w-full rounded-lg bg-emerald-500 py-2 text-xs font-medium text-white transition hover:bg-emerald-600 disabled:opacity-60"
-            >
+            <button type="submit" disabled={savingAsset} className={UI.btnPrimary}>
               {savingAsset
                 ? editingAssetId
                   ? "Actualizando..."
                   : "Guardando..."
                 : editingAssetId
-                ? "Actualizar activo"
+                ? "Guardar cambios"
                 : "Guardar activo"}
             </button>
           </form>
         </div>
 
-        {/* Form Deudas */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        {/* Deudas */}
+        <div className={UI.card}>
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            <h2 className={UI.title}>
               {editingDebtId ? "Editar deuda" : "Agregar deuda"}
             </h2>
+
             {editingDebtId && (
-              <button
-                type="button"
-                onClick={resetDebtForm}
-                className="text-[11px] text-slate-500 hover:underline"
-              >
-                Cancelar edición
+              <button type="button" onClick={resetDebtForm} className={UI.btnLink}>
+                Cancelar
               </button>
             )}
           </div>
-          <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
-            Registra tarjetas de crédito, préstamos, créditos de auto, casa,
-            etc. Lo importante es el saldo actual.
+
+          <p className={UI.sub}>
+            Tarjetas, préstamos, créditos de auto/casa. Lo importante es el saldo actual.
           </p>
 
-          <form onSubmit={handleSubmitDebt} className="space-y-3 text-xs">
+          <form onSubmit={handleSubmitDebt} className="mt-4 space-y-3">
             <div>
-              <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
-                Nombre de la deuda
-              </label>
+              <label className={UI.label}>Nombre</label>
               <input
                 type="text"
                 value={debtForm.name}
-                onChange={(e) =>
-                  handleChangeDebtForm("name", e.target.value)
-                }
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-                placeholder="Ej. Tarjeta BBVA Azul, Crédito casa, etc."
+                onChange={(e) => handleChangeDebtForm("name", e.target.value)}
+                className={UI.field}
+                placeholder="Ej. Tarjeta BBVA Azul, Crédito casa…"
                 required
               />
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
               <div>
-                <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
-                  Tipo de deuda
-                </label>
+                <label className={UI.label}>Tipo</label>
                 <select
                   value={debtForm.type}
-                  onChange={(e) =>
-                    handleChangeDebtForm("type", e.target.value)
-                  }
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                  onChange={(e) => handleChangeDebtForm("type", e.target.value)}
+                  className={UI.field}
                 >
                   {DEBT_TYPES.map((t) => (
                     <option key={t} value={t}>
@@ -1019,9 +978,7 @@ return (
               </div>
 
               <div>
-                <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
-                  Monto total autorizado o original
-                </label>
+                <label className={UI.label}>Monto total</label>
                 <input
                   type="number"
                   min="0"
@@ -1030,7 +987,7 @@ return (
                   onChange={(e) =>
                     handleChangeDebtForm("total_amount", e.target.value)
                   }
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                  className={UI.field}
                   placeholder="Ej. 100000"
                   required
                 />
@@ -1038,9 +995,7 @@ return (
             </div>
 
             <div>
-              <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
-                Saldo actual aproximado
-              </label>
+              <label className={UI.label}>Saldo actual (opcional)</label>
               <input
                 type="number"
                 min="0"
@@ -1049,39 +1004,31 @@ return (
                 onChange={(e) =>
                   handleChangeDebtForm("current_balance", e.target.value)
                 }
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                className={UI.field}
                 placeholder="Ej. 45000"
               />
-              <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+              <div className={UI.helper}>
                 Si lo dejas vacío, se tomará el monto total como saldo.
-              </p>
+              </div>
             </div>
 
             <div>
-              <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
-                Notas (opcional)
-              </label>
+              <label className={UI.label}>Notas (opcional)</label>
               <textarea
                 value={debtForm.notes}
-                onChange={(e) =>
-                  handleChangeDebtForm("notes", e.target.value)
-                }
-                className="h-16 w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-                placeholder="Ej. Esta tarjeta se paga el 5 de cada mes, crédito a 15 años, etc."
+                onChange={(e) => handleChangeDebtForm("notes", e.target.value)}
+                className={UI.textarea}
+                placeholder="Ej. Se paga el 5 de cada mes, tasa, plazo, etc."
               />
             </div>
 
-            <button
-              type="submit"
-              disabled={savingDebt}
-              className="w-full rounded-lg bg-rose-500 py-2 text-xs font-medium text-white transition hover:bg-rose-600 disabled:opacity-60"
-            >
+            <button type="submit" disabled={savingDebt} className={UI.btnPrimary}>
               {savingDebt
                 ? editingDebtId
                   ? "Actualizando..."
                   : "Guardando..."
                 : editingDebtId
-                ? "Actualizar deuda"
+                ? "Guardar cambios"
                 : "Guardar deuda"}
             </button>
           </form>
@@ -1090,14 +1037,12 @@ return (
 
       {/* Listados */}
       <section className="grid gap-4 md:grid-cols-2">
-        {/* Lista activos */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-              Lista de activos
-            </h2>
+        {/* Activos */}
+        <div className={UI.card}>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className={UI.title}>Activos</h2>
             <span className="text-[11px] text-slate-500 dark:text-slate-400">
-              {assets.length} registro(s)
+              {assets.length} activos
             </span>
           </div>
 
@@ -1108,61 +1053,65 @@ return (
               Aún no has registrado activos en esta vista.
             </p>
           ) : (
-            <ul className="space-y-2 text-xs">
+            <ul className="space-y-2">
               {assets.map((a) => (
-                <li
-                  key={a.id}
-                  className="flex items-start justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/40"
-                >
-                  <div className="flex flex-col">
-                    <span className="font-medium text-slate-800 dark:text-slate-100">
+                <li key={a.id} className={UI.listItem}>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
                       {a.name}
-                    </span>
-                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {a.category || "Sin categoría"} ·{" "}
+                    </div>
+
+                    <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                      {(a.category || "Sin categoría") + " · "}
                       {a.owner ? `A nombre de: ${a.owner}` : "Propietario: N/D"}
-                    </span>
-                    {a.created_at && (
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                        Registrado: {formatDateDisplay(a.created_at)}
-                      </span>
-                    )}
-                    {effectiveScope === "family" && (
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                        Registrado por:{" "}
-                        {a.user_id === user.id
-                          ? "Tú"
-                          : "Otro miembro de tu familia"}
-                      </span>
-                    )}
-                    {a.notes && (
-                      <span className="mt-1 text-[11px] text-slate-500 dark:text-slate-300">
-                        {a.notes}
-                      </span>
+                    </div>
+
+                    {(a.created_at || effectiveScope === "family" || a.notes) && (
+                      <div className="mt-1 space-y-1">
+                        {a.created_at && (
+                          <div className="text-[10px] text-slate-400 dark:text-slate-500">
+                            {formatDateDisplay(a.created_at)}
+                          </div>
+                        )}
+
+                        {effectiveScope === "family" && (
+                          <div className="text-[10px] text-slate-400 dark:text-slate-500">
+                            Registrado por:{" "}
+                            {a.user_id === user.id ? "Tú" : "Otro miembro"}
+                          </div>
+                        )}
+
+                        {a.notes && (
+                          <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                            {a.notes}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
-                  <div className="ml-3 flex flex-col items-end gap-1">
-                    <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
                       {formatMoney(a.current_value ?? 0)}
-                    </span>
-                    {/* Por ahora sólo puedes editar/eliminar lo que tú capturaste */}
+                    </div>
+
                     {a.user_id === user.id && (
-                      <>
+                      <div className="flex items-center gap-3">
                         <button
                           type="button"
                           onClick={() => startEditAsset(a)}
-                          className="text-[10px] text-sky-600 hover:underline"
+                          className={UI.btnLink}
                         >
                           Editar
                         </button>
                         <button
                           type="button"
                           onClick={() => handleDeleteAsset(a.id)}
-                          className="text-[10px] text-rose-500 hover:underline"
+                          className={UI.btnDanger}
                         >
                           Eliminar
                         </button>
-                      </>
+                      </div>
                     )}
                   </div>
                 </li>
@@ -1171,14 +1120,12 @@ return (
           )}
         </div>
 
-        {/* Lista deudas */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-              Lista de deudas
-            </h2>
+        {/* Deudas */}
+        <div className={UI.card}>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className={UI.title}>Deudas</h2>
             <span className="text-[11px] text-slate-500 dark:text-slate-400">
-              {debts.length} registro(s)
+              {debts.length} deudas
             </span>
           </div>
 
@@ -1189,63 +1136,65 @@ return (
               Aún no has registrado deudas en esta vista.
             </p>
           ) : (
-            <ul className="space-y-2 text-xs">
+            <ul className="space-y-2">
               {debts.map((d) => (
-                <li
-                  key={d.id}
-                  className="flex items-start justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/40"
-                >
-                  <div className="flex flex-col">
-                    <span className="font-medium text-slate-800 dark:text-slate-100">
+                <li key={d.id} className={UI.listItem}>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
                       {d.name}
-                    </span>
-                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {d.type || "Sin tipo"} · Total:{" "}
+                    </div>
+
+                    <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                      {(d.type || "Sin tipo") + " · Total: "}
                       {formatMoney(d.total_amount ?? 0)}
-                    </span>
-                    {d.created_at && (
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                        Registrada: {formatDateDisplay(d.created_at)}
-                      </span>
-                    )}
-                    {effectiveScope === "family" && (
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                        Registrada por:{" "}
-                        {d.user_id === user.id
-                          ? "Tú"
-                          : "Otro miembro de tu familia"}
-                      </span>
-                    )}
-                    {d.notes && (
-                      <span className="mt-1 text-[11px] text-slate-500 dark:text-slate-300">
-                        {d.notes}
-                      </span>
+                    </div>
+
+                    {(d.created_at || effectiveScope === "family" || d.notes) && (
+                      <div className="mt-1 space-y-1">
+                        {d.created_at && (
+                          <div className="text-[10px] text-slate-400 dark:text-slate-500">
+                            {formatDateDisplay(d.created_at)}
+                          </div>
+                        )}
+
+                        {effectiveScope === "family" && (
+                          <div className="text-[10px] text-slate-400 dark:text-slate-500">
+                            Registrada por:{" "}
+                            {d.user_id === user.id ? "Tú" : "Otro miembro"}
+                          </div>
+                        )}
+
+                        {d.notes && (
+                          <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                            {d.notes}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
-                  <div className="ml-3 flex flex-col items-end gap-1">
-                    <span className="text-sm font-semibold text-rose-600 dark:text-rose-400">
-                      {formatMoney(
-                        Number(d.current_balance ?? d.total_amount ?? 0)
-                      )}
-                    </span>
-                    {/* Por ahora sólo puedes editar/eliminar lo que tú capturaste */}
+
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="text-sm font-semibold text-rose-600 dark:text-rose-400">
+                      {formatMoney(Number(d.current_balance ?? d.total_amount ?? 0))}
+                    </div>
+
                     {d.user_id === user.id && (
-                      <>
+                      <div className="flex items-center gap-3">
                         <button
                           type="button"
                           onClick={() => startEditDebt(d)}
-                          className="text-[10px] text-sky-600 hover:underline"
+                          className={UI.btnLink}
                         >
                           Editar
                         </button>
                         <button
                           type="button"
                           onClick={() => handleDeleteDebt(d.id)}
-                          className="text-[10px] text-rose-500 hover:underline"
+                          className={UI.btnDanger}
                         >
                           Eliminar
                         </button>
-                      </>
+                      </div>
                     )}
                   </div>
                 </li>
@@ -1260,6 +1209,6 @@ return (
           {patrimonioError}
         </section>
       )}
-     </PageShell>
-);
+    </PageShell>
+  );
 }
