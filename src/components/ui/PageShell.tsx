@@ -1,19 +1,17 @@
+// src/components/ui/PageShell.tsx
 "use client";
 
-import { ReactNode } from "react";
+import * as React from "react";
 
-export function PageShell({
-  children,
-  maxWidth = "max-w-6xl",
-}: {
-  children: ReactNode;
-  maxWidth?: string;
-}) {
+type Props = {
+  children: React.ReactNode;
+  className?: string;
+};
+
+export function PageShell({ children, className = "" }: Props) {
   return (
-    <main className="flex flex-1 flex-col">
-      <div className={`mx-auto w-full ${maxWidth} px-4 pb-10 pt-4 md:px-6 md:pt-6`}>
-        <div className="flex flex-col gap-4">{children}</div>
-      </div>
-    </main>
+    <div className={`mx-auto w-full max-w-6xl px-4 pb-16 pt-4 md:px-6 ${className}`}>
+      <div className="space-y-4">{children}</div>
+    </div>
   );
 }

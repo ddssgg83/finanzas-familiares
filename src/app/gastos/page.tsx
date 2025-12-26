@@ -19,10 +19,32 @@ import {
 import { useTheme } from "next-themes";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AppHeader } from "@/components/AppHeader";
+import { PageShell } from "@/components/ui/PageShell";
+
+import { formatMoney as fmtMoney, formatDateDisplay, toNumberSafe } from "@/lib/format";
+import { useFamilyContext } from "@/hooks/useFamilyContext";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+
+import {
+  Button,
+  Card,
+  EmptyState,
+  Help,
+  Input,
+  Label,
+  LinkButton,
+  ListItem,
+  Section,
+  SegmentedControl,
+  Select,
+  StatCard,
+  Textarea,
+} from "@/components/ui/kit";
 
 export const dynamic = "force-dynamic";
 
 type TxType = "ingreso" | "gasto";
+type ExportType = "todos" | "ingresos" | "gastos";
 
 type Tx = {
   id: string;
@@ -35,7 +57,6 @@ type Tx = {
   created_by?: string | null;
   card_id?: string | null;
 
-  // opcionales
   owner_user_id?: string | null;
   spender_user_id?: string | null;
   spender_label?: string | null;
@@ -44,6 +65,7 @@ type Tx = {
   goal_id?: string | null;
 
   localOnly?: boolean;
+  created_at?: string | null;
 };
 
 type FormState = {
@@ -58,20 +80,6 @@ type FormState = {
 };
 
 type Option = { label: string; value: string };
-type ExportType = "todos" | "ingresos" | "gastos";
-
-type FamilyContext = {
-  familyId: string;
-  familyName: string;
-  ownerUserId: string;
-  memberId: string;
-  role: "owner" | "member";
-  activeMemberUserIds: string[];
-  membersByUserId?: Record<
-    string,
-    { userId: string; fullName: string; shortLabel: string }
-  >;
-};
 
 type FamilyGoal = {
   id: string;
@@ -85,6 +93,15 @@ type FamilyGoal = {
   auto_track?: boolean | null;
   track_direction?: "ingresos" | "ahorros" | "gastos_reducidos" | null;
   track_category?: string | null;
+};
+
+type CardType = {
+  id: string;
+  name: string;
+  default_method: string | null;
+  owner_id: string;
+  family_id: string | null;
+  shared_with_family: boolean;
 };
 
 const DEFAULT_CATEGORIES: Option[] = [
@@ -117,25 +134,21 @@ const SPENDER_OPTIONS: Option[] = [
 const CUSTOM_CATEGORIES_KEY = "ff-custom-categories";
 const CUSTOM_METHODS_KEY = "ff-custom-methods";
 
+const DRAFT_KEY = "ff-gastos-draft-v1";
+const PREFS_KEY = "ff-gastos-prefs-v1";
+
 function getCurrentMonthKey(date = new Date()) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
 }
 
-function formatMoney(num: number) {
-  return num.toLocaleString("es-MX", {
-    style: "currency",
-    currency: "MXN",
-    minimumFractionDigits: 2,
-  });
-}
-
-function formatDateDisplay(ymd: string) {
-  const s = (ymd ?? "").slice(0, 10);
-  const [y, m, d] = s.split("-");
-  if (!y || !m || !d) return ymd;
-  return `${d}/${m}/${y}`;
+function todayYMD() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function csvEscape(value: string | number | null | undefined): string {
@@ -147,66 +160,43 @@ function csvEscape(value: string | number | null | undefined): string {
   return str;
 }
 
-type Card = {
+type QuickTemplate = {
   id: string;
-  name: string;
-  default_method: string | null;
-  owner_id: string;
-  family_id: string | null;
-  shared_with_family: boolean;
+  label: string;
+  type: TxType;
+  category: string;
+  method?: string;
+  amount?: number;
+  notes?: string;
 };
 
+const QUICK_TEMPLATES: QuickTemplate[] = [
+  { id: "gasolina", label: "Gasolina", type: "gasto", category: "GASOLINA", amount: 800, method: "TARJETA" },
+  { id: "super", label: "Super", type: "gasto", category: "SUPER", amount: 1500, method: "TARJETA" },
+  { id: "servicios", label: "Servicios", type: "gasto", category: "SERVICIOS", amount: 1200, method: "DOMICILIADO" },
+  { id: "renta", label: "Renta", type: "gasto", category: "RENTA", amount: 20000, method: "TRANSFERENCIA" },
+  { id: "sueldo", label: "Sueldo", type: "ingreso", category: "SUELDO", amount: 50000, method: "TRANSFERENCIA" },
+];
+
+function inferFromNotes(raw: string): { category?: string; method?: string } {
+  const t = (raw || "").toLowerCase();
+
+  if (/(gasolina|pemex|shell|bp|mobil)/.test(t)) return { category: "GASOLINA" };
+  if (/(super|walmart|heb|costco|sams|soriana)/.test(t)) return { category: "SUPER" };
+  if (/(colegiatura|escuela|inscrip|uniforme|libros)/.test(t)) return { category: "ESCUELA" };
+  if (/(renta|arrend|cas(a|ita))/i.test(t)) return { category: "RENTA" };
+  if (/(luz|cfe|agua|aydm|gas|internet|izzi|totalplay|telmex|netflix|spotify)/.test(t)) return { category: "SERVICIOS" };
+  if (/(cine|rest|restaurant|bar|uber eats|rappi|didifood)/.test(t)) return { category: "ENTRETENIMIENTO" };
+
+  if (/(spei|transfer|tranferencia|bbva|banorte|hsbc)/.test(t)) return { method: "TRANSFERENCIA" };
+  if (/(efectivo|cash)/.test(t)) return { method: "EFECTIVO" };
+  if (/(domiciliad|auto ?pago)/.test(t)) return { method: "DOMICILIADO" };
+  if (/(tarjeta|tdc|tdd|amex|visa|mastercard)/.test(t)) return { method: "TARJETA" };
+
+  return {};
+}
+
 export default function GastosPage() {
-  // =========================================================
-  //  UI (estándar único)
-  // =========================================================
-  const UI = useMemo(() => {
-    const baseField =
-      "h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-[15px] leading-none text-slate-900 outline-none transition " +
-      "focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500/20 " +
-      "dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
-
-    return {
-      page: "flex flex-1 flex-col gap-4",
-      card:
-        "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900",
-      cardSoft:
-        "rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/40",
-      cardInset:
-        "rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900",
-      label: "mb-1 block text-xs text-slate-500 dark:text-slate-300",
-      help: "mt-1 text-[11px] text-slate-500 dark:text-slate-400",
-      input: baseField,
-      select: baseField + " pr-9 truncate",
-      textarea:
-        "min-h-[96px] w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition " +
-        "focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 " +
-        "dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100",
-      checkbox:
-        "h-4 w-4 rounded border border-slate-300 text-slate-900 " +
-        "focus:ring-2 focus:ring-sky-500/30 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-200",
-      btnPrimary:
-        "h-10 rounded-xl bg-slate-900 px-5 text-sm font-semibold text-white shadow-sm transition " +
-        "hover:bg-black disabled:opacity-60 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white",
-      btnSecondary:
-        "h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm " +
-        "hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200",
-      btnPill:
-        "rounded-full border border-slate-200 bg-white px-3 py-1 font-medium text-slate-700 shadow-sm " +
-        "hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200",
-      btnSky:
-        "rounded-lg bg-sky-500 px-3 py-2 text-xs font-medium text-white transition hover:bg-sky-600",
-      btnEmerald:
-        "rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-emerald-700",
-      btnDangerPill:
-        "h-9 rounded-full border border-slate-200 bg-white px-3 text-[11px] font-medium text-rose-600 hover:bg-slate-50 " +
-        "dark:border-slate-700 dark:bg-slate-900 dark:text-rose-400",
-      chip:
-        "rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-600 " +
-        "dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300",
-    };
-  }, []);
-
   // 🔐 AUTH
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -215,17 +205,77 @@ export default function GastosPage() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
 
+  // 🌙 Tema (solo para colores de recharts)
+  const { theme, systemTheme } = useTheme();
+  const [mountedTheme, setMountedTheme] = useState(false);
+  useEffect(() => setMountedTheme(true), []);
+  const currentTheme = theme === "system" ? systemTheme : theme;
+  const isDark = mountedTheme && currentTheme === "dark";
+
+  // 👨‍👩‍👧‍👦 Familia (CAPA A)
+  const { familyCtx, familyLoading, familyError, isFamilyOwner } = useFamilyContext(user);
+  const canUseFamilyScope = Boolean(familyCtx && isFamilyOwner);
+  const [viewScope, setViewScope] = useState<"mine" | "family">("mine");
+
+  // (extra) miembros para labels bonitos
+  const [membersByUserId, setMembersByUserId] = useState<
+    Record<string, { userId: string; fullName: string; shortLabel: string }>
+  >({});
+
+  useEffect(() => {
+    if (!familyCtx) {
+      setMembersByUserId({});
+      return;
+    }
+
+    let cancelled = false;
+    const loadMembers = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("family_members")
+          .select("user_id, full_name, short_label, status")
+          .eq("family_id", familyCtx.familyId)
+          .eq("status", "active");
+
+        if (error) throw error;
+
+        const map: Record<string, { userId: string; fullName: string; shortLabel: string }> = {};
+        (data ?? []).forEach((m: any) => {
+          if (!m.user_id) return;
+          const fullName = m.full_name ?? "Miembro";
+          const autoShort = (fullName.split(" ")[0] ?? fullName).trim();
+          const shortLabel = (m.short_label ?? autoShort).trim();
+          map[m.user_id] = { userId: m.user_id, fullName, shortLabel };
+        });
+
+        if (!cancelled) setMembersByUserId(map);
+      } catch (err) {
+        console.warn("No se pudieron cargar miembros:", err);
+      }
+    };
+
+    loadMembers();
+    return () => {
+      cancelled = true;
+    };
+  }, [familyCtx?.familyId]);
+
+  // 📶 Online status (CAPA A)
+  const isOnline = useOnlineStatus();
+
   // 💰 Movimientos
   const [transactions, setTransactions] = useState<Tx[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Cat / methods
   const [categories, setCategories] = useState<Option[]>(DEFAULT_CATEGORIES);
   const [methods, setMethods] = useState<Option[]>(DEFAULT_METHODS);
   const [newCategory, setNewCategory] = useState("");
   const [newMethod, setNewMethod] = useState("");
 
+  // Mes + form
   const [month, setMonth] = useState<string>(() => getCurrentMonthKey());
   const [form, setForm] = useState<FormState>({
     date: "",
@@ -237,165 +287,32 @@ export default function GastosPage() {
     spenderLabel: SPENDER_OPTIONS[0]?.value ?? "Yo",
     goalId: "",
   });
-
   const [editingId, setEditingId] = useState<string | null>(null);
 
   // Presupuesto
   const [budgetInput, setBudgetInput] = useState("");
   const [budget, setBudget] = useState<number | null>(null);
 
-  // Online / offline
-  const [isOnline, setIsOnline] = useState<boolean>(true);
-
   // Export
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [exportType, setExportType] = useState<ExportType>("todos");
-  const [exportIncludeCategorySummary, setExportIncludeCategorySummary] =
-    useState(true);
+  const [exportIncludeCategorySummary, setExportIncludeCategorySummary] = useState(true);
 
-  // UI: colapsables
+  // UI collapsibles
   const [showCardsList, setShowCardsList] = useState(false);
   const [showCharts, setShowCharts] = useState(false);
   const [showGastosPorPersona, setShowGastosPorPersona] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Filtros
-  const [filterType, setFilterType] = useState<"todos" | "ingreso" | "gasto">(
-    "todos"
-  );
+  const [filterType, setFilterType] = useState<"todos" | "ingreso" | "gasto">("todos");
   const [filterCategory, setFilterCategory] = useState<string>("TODAS");
   const [filterMethod, setFilterMethod] = useState<string>("TODOS");
   const [searchText, setSearchText] = useState<string>("");
 
   // 💳 Tarjetas
-  const [cards, setCards] = useState<Card[]>([]);
+  const [cards, setCards] = useState<CardType[]>([]);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
-
-  // =========================================================
-  //  FASE 3 PRO (GASTOS)
-  // =========================================================
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
-
-  type QuickTemplate = {
-    id: string;
-    label: string;
-    type: TxType;
-    category: string;
-    method?: string;
-    amount?: number;
-    notes?: string;
-  };
-
-  const QUICK_TEMPLATES: QuickTemplate[] = [
-    {
-      id: "gasolina",
-      label: "Gasolina",
-      type: "gasto",
-      category: "GASOLINA",
-      amount: 800,
-      method: "TARJETA",
-    },
-    {
-      id: "super",
-      label: "Super",
-      type: "gasto",
-      category: "SUPER",
-      amount: 1500,
-      method: "TARJETA",
-    },
-    {
-      id: "servicios",
-      label: "Servicios",
-      type: "gasto",
-      category: "SERVICIOS",
-      amount: 1200,
-      method: "DOMICILIADO",
-    },
-    {
-      id: "renta",
-      label: "Renta",
-      type: "gasto",
-      category: "RENTA",
-      amount: 20000,
-      method: "TRANSFERENCIA",
-    },
-    {
-      id: "sueldo",
-      label: "Sueldo",
-      type: "ingreso",
-      category: "SUELDO",
-      amount: 50000,
-      method: "TRANSFERENCIA",
-    },
-  ];
-
-  const todayYMD = () => {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-  };
-
-  const applyTemplate = (tpl: QuickTemplate) => {
-    if (editingId) return;
-
-    setForm((prev) => ({
-      ...prev,
-      date: prev.date || todayYMD(),
-      type: tpl.type,
-      category: tpl.category,
-      method: tpl.method ?? prev.method,
-      amount: tpl.amount != null ? String(tpl.amount) : prev.amount,
-      notes: tpl.notes ?? prev.notes,
-    }));
-  };
-
-  const inferFromNotes = (raw: string): { category?: string; method?: string } => {
-    const t = (raw || "").toLowerCase();
-
-    if (/(gasolina|pemex|shell|bp|mobil)/.test(t)) return { category: "GASOLINA" };
-    if (/(super|walmart|heb|costco|sams|soriana)/.test(t)) return { category: "SUPER" };
-    if (/(colegiatura|escuela|inscrip|uniforme|libros)/.test(t)) return { category: "ESCUELA" };
-    if (/(renta|arrend|cas(a|ita))/i.test(t)) return { category: "RENTA" };
-    if (/(luz|cfe|agua|aydm|gas|internet|izzi|totalplay|telmex|netflix|spotify)/.test(t))
-      return { category: "SERVICIOS" };
-    if (/(cine|rest|restaurant|bar|uber eats|rappi|didifood)/.test(t))
-      return { category: "ENTRETENIMIENTO" };
-
-    if (/(spei|transfer|tranferencia|bbva|banorte|hsbc)/.test(t))
-      return { method: "TRANSFERENCIA" };
-    if (/(efectivo|cash)/.test(t)) return { method: "EFECTIVO" };
-    if (/(domiciliad|auto ?pago)/.test(t)) return { method: "DOMICILIADO" };
-    if (/(tarjeta|tdc|tdd|amex|visa|mastercard)/.test(t)) return { method: "TARJETA" };
-
-    return {};
-  };
-
-  // =========================================================
-  //  Draft + prefs
-  // =========================================================
-  const DRAFT_KEY = "ff-gastos-draft-v1";
-  const PREFS_KEY = "ff-gastos-prefs-v1";
-  const draftTimer = useRef<number | null>(null);
-
-  const clearDraft = () => {
-    if (typeof window === "undefined") return;
-    try {
-      localStorage.removeItem(DRAFT_KEY);
-    } catch {}
-  };
-
-  // =========================================================
-  //  Metas + familia
-  // =========================================================
-  const [goals, setGoals] = useState<FamilyGoal[]>([]);
-  const [familyCtx, setFamilyCtx] = useState<FamilyContext | null>(null);
-  const [familyCtxLoading, setFamilyCtxLoading] = useState(false);
-  const [familyCtxError, setFamilyCtxError] = useState<string | null>(null);
-
-  const canUseFamilyScope = familyCtx?.role === "owner";
-  const [viewScope, setViewScope] = useState<"mine" | "family">("mine");
 
   // Tarjeta nueva
   const [newCardName, setNewCardName] = useState("");
@@ -403,57 +320,17 @@ export default function GastosPage() {
   const [cardError, setCardError] = useState<string | null>(null);
   const [newCardShared, setNewCardShared] = useState(false);
 
-  // 🌙 Tema
-  const { theme, systemTheme } = useTheme();
-  const [mountedTheme, setMountedTheme] = useState(false);
-  useEffect(() => setMountedTheme(true), []);
-  const currentTheme = theme === "system" ? systemTheme : theme;
-  const isDark = mountedTheme && currentTheme === "dark";
+  // Metas
+  const [goals, setGoals] = useState<FamilyGoal[]>([]);
 
-  // Decide texto "Generó"
-  const getSpenderLabel = (tx: Tx): string => {
-    if (!user) return "—";
+  // search ref
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const draftTimer = useRef<number | null>(null);
 
-    const member =
-      familyCtx?.membersByUserId && tx.spender_user_id
-        ? familyCtx.membersByUserId[tx.spender_user_id]
-        : null;
-
-    if (member) {
-      if (tx.spender_user_id === user.id) return "Yo";
-      return member.shortLabel || member.fullName || "Miembro";
-    }
-
-    if (tx.spender_user_id === user.id) return "Yo";
-    if (tx.spender_label && tx.spender_label !== "Yo") return tx.spender_label;
-    return "Miembro";
-  };
-
-  const handleChangeCard = (cardId: string | null) => {
-    setSelectedCardId(cardId);
-
-    if (!cardId) return;
-    const found = cards.find((c) => c.id === cardId);
-    if (!found) return;
-
-    const methodValue =
-      found.default_method ?? found.name.toUpperCase().replace(/\s+/g, "_");
-
-    setForm((prev) => ({ ...prev, method: methodValue }));
-
-    setMethods((prev) => {
-      if (prev.some((m) => m.value === methodValue)) return prev;
-
-      const updated = [...prev, { label: found.name, value: methodValue }];
-      if (typeof window !== "undefined") {
-        localStorage.setItem(CUSTOM_METHODS_KEY, JSON.stringify(updated));
-      }
-      return updated;
-    });
-  };
+  const formatMoney = (n: number) => fmtMoney(n, "MXN");
 
   // =========================================================
-  //  AUTH
+  // AUTH
   // =========================================================
   useEffect(() => {
     let ignore = false;
@@ -495,7 +372,6 @@ export default function GastosPage() {
         password: authPassword,
       });
       if (error) {
-        console.error("Error en login", error);
         setAuthError(error.message);
         return;
       }
@@ -532,135 +408,32 @@ export default function GastosPage() {
       setTransactions([]);
       setBudget(null);
       setBudgetInput("");
-      setFamilyCtx(null);
+      setCards([]);
+      setGoals([]);
     } catch (err) {
       console.error("Error cerrando sesión", err);
     }
   };
 
   // =========================================================
-  //  Cargar contexto de familia
+  // Helpers UI/labels
   // =========================================================
-  useEffect(() => {
-    const currentUser = user;
-    if (!currentUser) {
-      setFamilyCtx(null);
-      setFamilyCtxError(null);
-      setFamilyCtxLoading(false);
-      return;
+  const getSpenderLabel = (tx: Tx): string => {
+    if (!user) return "—";
+
+    if (tx.spender_user_id && membersByUserId[tx.spender_user_id]) {
+      if (tx.spender_user_id === user.id) return "Yo";
+      const m = membersByUserId[tx.spender_user_id];
+      return m.shortLabel || m.fullName || "Miembro";
     }
 
-    const userId = currentUser.id;
-    const email = (currentUser.email ?? "").toLowerCase();
-    let cancelled = false;
-
-    const loadFamilyCtx = async () => {
-      setFamilyCtxLoading(true);
-      setFamilyCtxError(null);
-
-      try {
-        const { data: memberRows, error: memberError } = await supabase
-          .from("family_members")
-          .select("id,family_id,role,status,user_id,invited_email")
-          .or(`user_id.eq.${userId},invited_email.eq.${email}`)
-          .eq("status", "active")
-          .limit(1);
-
-        if (memberError) throw memberError;
-
-        if (!memberRows || memberRows.length === 0) {
-          if (!cancelled) setFamilyCtx(null);
-          return;
-        }
-
-        const member = memberRows[0];
-
-        const { data: fam, error: famError } = await supabase
-          .from("families")
-          .select("id,name,user_id")
-          .eq("id", member.family_id)
-          .single();
-
-        if (famError) throw famError;
-
-        let membersByUserId: Record<
-          string,
-          { userId: string; fullName: string; shortLabel: string }
-        > = {};
-
-        const { data: allMembers, error: membersError } = await supabase
-          .from("family_members")
-          .select("user_id, full_name, short_label, status")
-          .eq("family_id", fam.id)
-          .eq("status", "active");
-
-        if (membersError) {
-          console.error("Error cargando miembros:", membersError);
-        } else if (allMembers) {
-          allMembers.forEach((m: any) => {
-            if (!m.user_id) return;
-            const fullName = m.full_name ?? "Miembro";
-            const autoShort = fullName.split(" ")[0] ?? fullName;
-            const shortLabel = m.short_label ?? autoShort;
-            membersByUserId[m.user_id] = {
-              userId: m.user_id,
-              fullName,
-              shortLabel,
-            };
-          });
-        }
-
-        const { data: activeMembers, error: activeError } = await supabase
-          .from("family_members")
-          .select("user_id,status")
-          .eq("family_id", fam.id)
-          .eq("status", "active");
-
-        if (activeError) throw activeError;
-
-        let activeIds =
-          (activeMembers ?? [])
-            .map((r: any) => r.user_id)
-            .filter((id: string | null) => !!id) as string[];
-
-        if (!activeIds.includes(fam.user_id)) activeIds.push(fam.user_id);
-
-        if (!cancelled) {
-          setFamilyCtx({
-            familyId: fam.id,
-            familyName: fam.name,
-            ownerUserId: fam.user_id,
-            memberId: member.id,
-            role: member.role as "owner" | "member",
-            activeMemberUserIds: activeIds,
-            membersByUserId,
-          });
-        }
-      } catch (err: any) {
-        console.error("Error cargando contexto de familia:", err);
-        if (!cancelled) {
-          setFamilyCtxError("No se pudo cargar la información de familia.");
-          setFamilyCtx(null);
-        }
-      } finally {
-        if (!cancelled) setFamilyCtxLoading(false);
-      }
-    };
-
-    loadFamilyCtx();
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
-
-  useEffect(() => {
-    if (viewScope === "family" && canUseFamilyScope) {
-      setShowGastosPorPersona(true);
-    }
-  }, [viewScope, canUseFamilyScope]);
+    if (tx.spender_user_id === user.id) return "Yo";
+    if (tx.spender_label && tx.spender_label !== "Yo") return tx.spender_label;
+    return "Miembro";
+  };
 
   // =========================================================
-  //  Cargar categorías/métodos personalizados
+  // Cargar categorías/métodos personalizados
   // =========================================================
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -671,9 +444,7 @@ export default function GastosPage() {
         const parsed = JSON.parse(catsRaw);
         if (Array.isArray(parsed) && parsed.length) setCategories(parsed);
       }
-    } catch (err) {
-      console.error("Error cargando categorías personalizadas", err);
-    }
+    } catch {}
 
     try {
       const methodsRaw = localStorage.getItem(CUSTOM_METHODS_KEY);
@@ -681,33 +452,11 @@ export default function GastosPage() {
         const parsed = JSON.parse(methodsRaw);
         if (Array.isArray(parsed) && parsed.length) setMethods(parsed);
       }
-    } catch (err) {
-      console.error("Error cargando métodos de pago personalizados", err);
-    }
+    } catch {}
   }, []);
 
   // =========================================================
-  //  Online / offline
-  // =========================================================
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const handlerOnline = () => setIsOnline(true);
-    const handlerOffline = () => setIsOnline(false);
-
-    window.addEventListener("online", handlerOnline);
-    window.addEventListener("offline", handlerOffline);
-
-    setIsOnline(navigator.onLine);
-
-    return () => {
-      window.removeEventListener("online", handlerOnline);
-      window.removeEventListener("offline", handlerOffline);
-    };
-  }, []);
-
-  // =========================================================
-  //  Offline queue (cargar)
+  // Offline queue (cargar)
   // =========================================================
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -730,7 +479,7 @@ export default function GastosPage() {
   }, []);
 
   // =========================================================
-  //  Cargar movimientos (Supabase)
+  // Cargar movimientos (Supabase)
   // =========================================================
   useEffect(() => {
     const currentUser = user;
@@ -766,8 +515,7 @@ export default function GastosPage() {
             query = query.eq("owner_user_id", userId);
           } else {
             const ids = familyCtx?.activeMemberUserIds ?? [userId];
-            if (!ids.length) query = query.eq("user_id", userId);
-            else query = query.in("user_id", ids);
+            query = ids.length ? query.in("user_id", ids) : query.eq("user_id", userId);
           }
         } else {
           query = query.eq("user_id", userId);
@@ -776,24 +524,25 @@ export default function GastosPage() {
         const { data, error } = await query;
         if (error) throw error;
 
-        setTransactions(
-          (data ?? []).map((t: any) => ({
-            id: t.id,
-            date: t.date,
-            type: t.type,
-            category: t.category,
-            amount: Number(t.amount),
-            method: t.method,
-            notes: t.notes,
-            owner_user_id: t.owner_user_id ?? null,
-            spender_user_id: t.spender_user_id ?? null,
-            spender_label: t.spender_label ?? null,
-            created_by: t.created_by ?? null,
-            card_id: t.card_id ?? null,
-            family_group_id: t.family_group_id ?? null,
-            goal_id: t.goal_id ?? null,
-          }))
-        );
+        const mapped: Tx[] = (data ?? []).map((t: any) => ({
+          id: t.id,
+          date: t.date,
+          type: t.type,
+          category: t.category,
+          amount: Number(t.amount),
+          method: t.method,
+          notes: t.notes,
+          owner_user_id: t.owner_user_id ?? null,
+          spender_user_id: t.spender_user_id ?? null,
+          spender_label: t.spender_label ?? null,
+          created_by: t.created_by ?? null,
+          card_id: t.card_id ?? null,
+          family_group_id: t.family_group_id ?? null,
+          goal_id: t.goal_id ?? null,
+          created_at: t.created_at ?? null,
+        }));
+
+        setTransactions(mapped);
 
         if (typeof window !== "undefined") {
           localStorage.setItem(`ff-cache-${month}`, JSON.stringify(data ?? []));
@@ -823,6 +572,7 @@ export default function GastosPage() {
                   card_id: t.card_id ?? null,
                   family_group_id: t.family_group_id ?? null,
                   goal_id: t.goal_id ?? null,
+                  created_at: t.created_at ?? null,
                 }))
               );
             } catch {}
@@ -834,10 +584,10 @@ export default function GastosPage() {
     }
 
     if (typeof window !== "undefined") load();
-  }, [month, user, viewScope, canUseFamilyScope, familyCtx]);
+  }, [month, user, viewScope, canUseFamilyScope, familyCtx?.activeMemberUserIds, familyCtx?.familyId]);
 
   // =========================================================
-  //  Sync offline al volver internet
+  // Sync offline al volver internet
   // =========================================================
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -853,16 +603,12 @@ export default function GastosPage() {
         const synced = await syncOfflineTxs(userId);
         if (!synced.length) return;
 
-        alert(
-          `Se sincronizaron ${synced.length} movimientos que estaban guardados sin conexión.`
-        );
+        alert(`Se sincronizaron ${synced.length} movimientos que estaban guardados sin conexión.`);
 
         const syncedIds = new Set(synced.map((t: any) => t.id));
 
         setTransactions((prev) =>
-          prev.map((tx) =>
-            tx.localOnly && syncedIds.has(tx.id) ? { ...tx, localOnly: false } : tx
-          )
+          prev.map((tx) => (tx.localOnly && syncedIds.has(tx.id) ? { ...tx, localOnly: false } : tx))
         );
       } catch (err) {
         console.error("Error al sincronizar movimientos offline", err);
@@ -881,7 +627,7 @@ export default function GastosPage() {
   }, [user]);
 
   // =========================================================
-  //  Presupuesto mensual (localStorage)
+  // Presupuesto mensual (localStorage)
   // =========================================================
   useEffect(() => {
     const key = `ff-budget-${month}`;
@@ -898,8 +644,18 @@ export default function GastosPage() {
     }
   }, [month]);
 
+  const handleSaveBudget = () => {
+    const val = toNumberSafe(budgetInput);
+    if (!Number.isFinite(val) || val <= 0) {
+      alert("Ingresa un presupuesto válido mayor a 0.");
+      return;
+    }
+    setBudget(val);
+    if (typeof window !== "undefined") localStorage.setItem(`ff-budget-${month}`, String(val));
+  };
+
   // =========================================================
-  //  Tarjetas (Supabase)
+  // Tarjetas (Supabase)
   // =========================================================
   useEffect(() => {
     if (!user) {
@@ -927,26 +683,44 @@ export default function GastosPage() {
           return;
         }
 
-        const mapped: Card[] = (data ?? []).map((row: any) => ({
-          id: row.id as string,
-          name: row.name as string,
-          default_method: (row.default_method ?? null) as string | null,
-          owner_id: row.owner_id as string,
-          family_id: (row.family_id ?? null) as string | null,
-          shared_with_family: (row.shared_with_family ?? false) as boolean,
-        }));
-
-        setCards(mapped);
+        setCards(
+          (data ?? []).map((row: any) => ({
+            id: row.id,
+            name: row.name,
+            default_method: row.default_method ?? null,
+            owner_id: row.owner_id,
+            family_id: row.family_id ?? null,
+            shared_with_family: row.shared_with_family ?? false,
+          }))
+        );
       } catch (err) {
         console.warn("Error inesperado al cargar tarjetas", err);
       }
     };
 
     loadCards();
-  }, [user, familyCtx, canUseFamilyScope]);
+  }, [user, familyCtx?.ownerUserId, familyCtx?.familyId, canUseFamilyScope]);
+
+  const handleChangeCard = (cardId: string | null) => {
+    setSelectedCardId(cardId);
+
+    if (!cardId) return;
+    const found = cards.find((c) => c.id === cardId);
+    if (!found) return;
+
+    const methodValue = found.default_method ?? found.name.toUpperCase().replace(/\s+/g, "_");
+    setForm((prev) => ({ ...prev, method: methodValue }));
+
+    setMethods((prev) => {
+      if (prev.some((m) => m.value === methodValue)) return prev;
+      const updated = [...prev, { label: found.name, value: methodValue }];
+      if (typeof window !== "undefined") localStorage.setItem(CUSTOM_METHODS_KEY, JSON.stringify(updated));
+      return updated;
+    });
+  };
 
   // =========================================================
-  //  Metas familiares (Supabase)
+  // Metas familiares (Supabase)
   // =========================================================
   useEffect(() => {
     if (!user) {
@@ -957,7 +731,6 @@ export default function GastosPage() {
     const loadGoals = async () => {
       try {
         let query = supabase.from("family_goals").select("*");
-
         if (familyCtx) query = query.eq("family_group_id", familyCtx.familyId);
         else query = query.eq("owner_user_id", user.id);
 
@@ -974,379 +747,10 @@ export default function GastosPage() {
     };
 
     loadGoals();
-  }, [user, familyCtx]);
+  }, [user, familyCtx?.familyId]);
 
   // =========================================================
-  //  Form handlers
-  // =========================================================
-  const handleSaveBudget = () => {
-    const val = Number(budgetInput);
-    if (!Number.isFinite(val) || val <= 0) {
-      alert("Ingresa un presupuesto válido mayor a 0.");
-      return;
-    }
-
-    setBudget(val);
-    if (typeof window !== "undefined") {
-      localStorage.setItem(`ff-budget-${month}`, String(val));
-    }
-  };
-
-  const { totalIngresos, totalGastos } = useMemo(() => {
-    let ingresos = 0;
-    let gastos = 0;
-    for (const t of transactions) {
-      if (t.type === "ingreso") ingresos += t.amount;
-      else gastos += t.amount;
-    }
-    return { totalIngresos: ingresos, totalGastos: gastos };
-  }, [transactions]);
-
-  const flujo = totalIngresos - totalGastos;
-  const disponible = budget != null ? budget - totalGastos : null;
-
-  const gastosPorCategoria = useMemo(() => {
-    const map = new Map<string, number>();
-
-    for (const t of transactions) {
-      if (t.type !== "gasto") continue;
-      const key = t.category || "SIN_CATEGORIA";
-      map.set(key, (map.get(key) ?? 0) + t.amount);
-    }
-
-    const entries = Array.from(map.entries()).map(([category, total]) => ({
-      category,
-      total,
-    }));
-
-    entries.sort((a, b) => b.total - a.total);
-
-    const totalGastosMes = entries.reduce((sum, e) => sum + e.total, 0);
-
-    return entries.map((e) => ({
-      ...e,
-      percent: totalGastosMes ? (e.total * 100) / totalGastosMes : 0,
-    }));
-  }, [transactions]);
-
-  const gastosPorPersona = useMemo(() => {
-    const map = new Map<string, number>();
-
-    for (const t of transactions) {
-      if (t.type !== "gasto") continue;
-
-      const label =
-        t.spender_label ??
-        (t.spender_user_id === user?.id ? "Yo" : familyCtx ? "Familiar" : "Otro");
-
-      map.set(label, (map.get(label) ?? 0) + t.amount);
-    }
-
-    const arr = Array.from(map.entries()).map(([label, total]) => ({
-      label,
-      total,
-    }));
-
-    const total = arr.reduce((s, x) => s + x.total, 0);
-
-    return arr
-      .map((x) => ({
-        ...x,
-        percent: total ? (x.total * 100) / total : 0,
-      }))
-      .sort((a, b) => b.total - a.total);
-  }, [transactions, user, familyCtx]);
-
-  const goalsById = useMemo(() => {
-    const map = new Map<string, FamilyGoal>();
-    goals.forEach((g) => {
-      if (g.id) map.set(g.id, g);
-    });
-    return map;
-  }, [goals]);
-
-  const filteredTransactions = useMemo(() => {
-    const filtered = transactions.filter((t) => {
-      if (filterType !== "todos" && t.type !== filterType) return false;
-      if (filterCategory !== "TODAS" && t.category !== filterCategory) return false;
-      if (filterMethod !== "TODOS" && t.method !== filterMethod) return false;
-
-      if (searchText.trim()) {
-        const q = searchText.trim().toLowerCase();
-        const haystack = [t.category, t.method, t.notes ?? "", formatDateDisplay(t.date)]
-          .join(" ")
-          .toLowerCase();
-        if (!haystack.includes(q)) return false;
-      }
-
-      return true;
-    });
-
-    return filtered.sort((a, b) => {
-      if (a.date !== b.date) return a.date > b.date ? -1 : 1;
-
-      const aCreated = (a as any).created_at ?? "";
-      const bCreated = (b as any).created_at ?? "";
-
-      if (aCreated && bCreated && aCreated !== bCreated) {
-        return aCreated > bCreated ? -1 : 1;
-      }
-
-      return 0;
-    });
-  }, [transactions, filterType, filterCategory, filterMethod, searchText]);
-
-  const { filteredIngresos, filteredGastos, filteredFlujo } = useMemo(() => {
-    let ingresos = 0;
-    let gastos = 0;
-
-    for (const t of filteredTransactions) {
-      if (t.type === "ingreso") ingresos += t.amount;
-      else gastos += t.amount;
-    }
-
-    return {
-      filteredIngresos: ingresos,
-      filteredGastos: gastos,
-      filteredFlujo: ingresos - gastos,
-    };
-  }, [filteredTransactions]);
-
-  const chartDataCategorias = useMemo(() => {
-    return gastosPorCategoria.map((g) => ({
-      category: g.category,
-      total: g.total,
-    }));
-  }, [gastosPorCategoria]);
-
-  const chartDataLinea = useMemo(() => {
-    const map = new Map<string, { date: string; ingresos: number; gastos: number }>();
-
-    for (const t of transactions) {
-      const key = (t.date ?? "").slice(0, 10);
-      if (!map.has(key)) {
-        map.set(key, { date: key, ingresos: 0, gastos: 0 });
-      }
-      const item = map.get(key)!;
-      if (t.type === "ingreso") item.ingresos += t.amount;
-      else item.gastos += t.amount;
-    }
-
-    const arr = Array.from(map.values());
-    arr.sort((a, b) => (a.date < b.date ? -1 : 1));
-
-    return arr.map((d) => ({ ...d, dateLabel: formatDateDisplay(d.date) }));
-  }, [transactions]);
-
-  const smartSummary = useMemo(() => {
-    const lines: string[] = [];
-
-    if (!transactions.length) {
-      lines.push(
-        "Aún no tienes movimientos en este mes. Empieza registrando ingresos y gastos para ver tu resumen."
-      );
-      return lines;
-    }
-
-    if (totalIngresos === 0 && totalGastos > 0) {
-      lines.push(
-        "Este mes sólo has registrado gastos, pero ningún ingreso. Revisa si falta capturar tu sueldo o ingresos principales."
-      );
-    }
-
-    if (totalIngresos > 0) {
-      const ratio = (totalGastos / totalIngresos) * 100;
-      lines.push(`Has gastado aproximadamente el ${ratio.toFixed(1)}% de tus ingresos del mes.`);
-
-      if (ratio > 90) {
-        lines.push(
-          "Estás muy cerca de gastar todo lo que ingresaste. Sería bueno frenar un poco los gastos en lo que resta del mes."
-        );
-      } else if (ratio > 70) {
-        lines.push(
-          "Tu nivel de gasto es elevado, pero aún tienes margen. Vale la pena revisar en qué se está yendo la mayor parte."
-        );
-      } else if (ratio < 50) {
-        lines.push("Vas muy bien. Estás gastando menos de la mitad de lo que ingresaste este mes.");
-      }
-    }
-
-    if (budget != null) {
-      if (disponible != null && disponible < 0) {
-        lines.push(
-          `Ya sobrepasaste tu presupuesto de ${formatMoney(budget)}. Estás por encima en ${formatMoney(
-            Math.abs(disponible)
-          )}.`
-        );
-      } else if (disponible != null && disponible > 0) {
-        lines.push(
-          `Todavía te quedan ${formatMoney(disponible)} disponibles dentro de tu presupuesto de este mes.`
-        );
-      }
-    }
-
-    if (gastosPorCategoria.length > 0) {
-      const top1 = gastosPorCategoria[0];
-      lines.push(
-        `Tu categoría con más gasto este mes es "${top1.category}" con ${formatMoney(top1.total)} (${top1.percent.toFixed(
-          1
-        )}% del total de gastos).`
-      );
-      if (gastosPorCategoria.length > 1) {
-        const top2 = gastosPorCategoria[1];
-        lines.push(`La segunda categoría con más peso es "${top2.category}" con ${formatMoney(top2.total)}.`);
-      }
-    }
-
-    return lines;
-  }, [transactions, totalIngresos, totalGastos, budget, disponible, gastosPorCategoria]);
-
-  const monthLabel = useMemo(() => {
-    const [y, m] = month.split("-");
-    const date = new Date(Number(y), Number(m) - 1, 1);
-
-    const raw = date.toLocaleDateString("es-MX", { year: "numeric", month: "long" });
-    return raw.charAt(0).toUpperCase() + raw.slice(1);
-  }, [month]);
-
-  // =========================================================
-  //  Export CSV/PDF
-  // =========================================================
-  const handleExportCsv = () => {
-    let data = transactions;
-    if (exportType === "ingresos") data = transactions.filter((t) => t.type === "ingreso");
-    else if (exportType === "gastos") data = transactions.filter((t) => t.type === "gasto");
-
-    if (!data.length) {
-      alert("No hay movimientos en este mes con ese filtro para exportar.");
-      return;
-    }
-
-    const header = ["Fecha", "Tipo", "Categoría", "Monto", "Método", "Notas", "Offline"];
-
-    const rows = data.map((t) => [
-      t.date,
-      t.type,
-      t.category,
-      t.amount,
-      t.method,
-      t.notes ?? "",
-      t.localOnly ? "sí" : "no",
-    ]);
-
-    const csvLines = [header.map(csvEscape).join(","), ...rows.map((r) => r.map(csvEscape).join(","))];
-
-    if (exportIncludeCategorySummary && gastosPorCategoria.length > 0 && exportType !== "ingresos") {
-      csvLines.push("");
-      csvLines.push("Resumen de gastos por categoría");
-      csvLines.push("Categoría,Total,Porcentaje");
-
-      gastosPorCategoria.forEach((item) => {
-        csvLines.push(
-          [csvEscape(item.category), csvEscape(item.total), csvEscape(`${item.percent.toFixed(1)}%`)].join(",")
-        );
-      });
-    }
-
-    const csvContent = csvLines.join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-
-    const url = URL.createObjectURL(blob);
-    const fileMonth = month.replace("-", "_");
-    const exportLabel = exportType === "todos" ? "todos" : exportType === "ingresos" ? "ingresos" : "gastos";
-    const fileName = `finanzas_${fileMonth}_${exportLabel}.csv`;
-
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleExportPdf = async () => {
-    if (!transactions.length) {
-      alert("No hay movimientos en este mes para generar el PDF.");
-      return;
-    }
-
-    const jsPDFmod = await import("jspdf");
-    const autoTable = (await import("jspdf-autotable")).default as any;
-
-    const doc = new jsPDFmod.jsPDF();
-
-    const now = new Date();
-    const generatedAt = now.toLocaleString("es-MX");
-
-    doc.setFontSize(14);
-    doc.text("Finanzas familiares - Reporte mensual", 14, 18);
-    doc.setFontSize(11);
-    doc.text(`Mes: ${monthLabel}`, 14, 26);
-    doc.text(`Generado: ${generatedAt}`, 14, 32);
-
-    let y = 42;
-    doc.setFontSize(10);
-    doc.text(`Ingresos del mes: ${formatMoney(totalIngresos)}`, 14, y);
-    y += 6;
-    doc.text(`Gastos del mes: ${formatMoney(totalGastos)}`, 14, y);
-    y += 6;
-    doc.text(`Flujo (Ingresos - Gastos): ${formatMoney(flujo)}`, 14, y);
-    y += 6;
-
-    if (budget != null) {
-      doc.text(
-        `Presupuesto definido: ${formatMoney(budget)} · Disponible: ${disponible != null ? formatMoney(disponible) : "-"}`,
-        14,
-        y
-      );
-      y += 6;
-    }
-
-    if (gastosPorCategoria.length > 0) {
-      const top1 = gastosPorCategoria[0];
-      doc.text(
-        `Categoría con más gasto: ${top1.category} (${formatMoney(top1.total)}, ${top1.percent.toFixed(1)}%)`,
-        14,
-        y
-      );
-      y += 8;
-    } else {
-      y += 4;
-    }
-
-    const txForPdf = filteredTransactions.slice(0, 80);
-
-    const body = txForPdf.map((t) => [
-      formatDateDisplay(t.date),
-      t.type === "ingreso" ? "Ingreso" : "Gasto",
-      t.category,
-      formatMoney(t.amount),
-      t.method,
-      t.notes ?? "",
-    ]);
-
-    autoTable(doc, {
-      head: [["Fecha", "Tipo", "Categoría", "Monto", "Método", "Notas"]],
-      body,
-      startY: y,
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [15, 23, 42], textColor: 255 },
-      columnStyles: { 3: { halign: "right" } },
-      theme: "grid",
-    });
-
-    const fileMonth = month.replace("-", "_");
-    doc.save(`reporte_finanzas_${fileMonth}.pdf`);
-  };
-
-  // =========================================================
-  //  Change month
-  // =========================================================
-  const handleChangeMonth = (value: string) => setMonth(value);
-
-  // =========================================================
-  //  Form change + reset
+  // Form: change + reset
   // =========================================================
   const handleChangeForm = (field: keyof FormState, value: string) => {
     setForm((prev) => {
@@ -1360,6 +764,13 @@ export default function GastosPage() {
 
       return next;
     });
+  };
+
+  const clearDraft = () => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {}
   };
 
   const resetForm = () => {
@@ -1378,7 +789,7 @@ export default function GastosPage() {
   };
 
   // =========================================================
-  //  Draft + prefs load/save
+  // Draft + prefs load/save
   // =========================================================
   useEffect(() => {
     if (!user) return;
@@ -1408,9 +819,7 @@ export default function GastosPage() {
     try {
       const draftRaw = localStorage.getItem(DRAFT_KEY);
       if (draftRaw && !editingId) {
-        const draft = JSON.parse(draftRaw) as Partial<FormState> & {
-          selectedCardId?: string | null;
-        };
+        const draft = JSON.parse(draftRaw) as Partial<FormState> & { selectedCardId?: string | null };
 
         if (typeof draft.date === "string") handleChangeForm("date", draft.date);
         if (draft.type) handleChangeForm("type", draft.type);
@@ -1463,7 +872,7 @@ export default function GastosPage() {
   }, [user, form, selectedCardId, editingId]);
 
   // =========================================================
-  //  Atajos teclado
+  // Atajos teclado
   // =========================================================
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1474,8 +883,7 @@ export default function GastosPage() {
 
       const active = document.activeElement as HTMLElement | null;
       const tag = (active?.tagName || "").toLowerCase();
-      const isTyping =
-        tag === "input" || tag === "textarea" || (active as any)?.isContentEditable;
+      const isTyping = tag === "input" || tag === "textarea" || (active as any)?.isContentEditable;
 
       if (isMeta && key === "k") {
         e.preventDefault();
@@ -1509,24 +917,284 @@ export default function GastosPage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editingId]);
 
-  const handleDuplicate = (tx: Tx) => {
-    setForm({
-      date: tx.date || todayYMD(),
-      type: tx.type,
-      category: tx.category,
-      amount: String(tx.amount),
-      method: tx.method,
-      notes: tx.notes ?? "",
-      spenderLabel: tx.spender_label ?? (tx.spender_user_id === user?.id ? "Yo" : "Otro"),
-      goalId: tx.goal_id ?? "",
-    });
-    setSelectedCardId(tx.card_id ?? null);
-    setEditingId(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  // =========================================================
+  // Templates
+  // =========================================================
+  const applyTemplate = (tpl: QuickTemplate) => {
+    if (editingId) return;
+    setForm((prev) => ({
+      ...prev,
+      date: prev.date || todayYMD(),
+      type: tpl.type,
+      category: tpl.category,
+      method: tpl.method ?? prev.method,
+      amount: tpl.amount != null ? String(tpl.amount) : prev.amount,
+      notes: tpl.notes ?? prev.notes,
+    }));
   };
 
   // =========================================================
-  //  CRUD Movimientos
+  // KPIs + cálculos
+  // =========================================================
+  const { totalIngresos, totalGastos } = useMemo(() => {
+    let ingresos = 0;
+    let gastos = 0;
+    for (const t of transactions) {
+      if (t.type === "ingreso") ingresos += t.amount;
+      else gastos += t.amount;
+    }
+    return { totalIngresos: ingresos, totalGastos: gastos };
+  }, [transactions]);
+
+  const flujo = totalIngresos - totalGastos;
+  const disponible = budget != null ? budget - totalGastos : null;
+
+  const gastosPorCategoria = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const t of transactions) {
+      if (t.type !== "gasto") continue;
+      const key = t.category || "SIN_CATEGORIA";
+      map.set(key, (map.get(key) ?? 0) + t.amount);
+    }
+    const entries = Array.from(map.entries()).map(([category, total]) => ({ category, total }));
+    entries.sort((a, b) => b.total - a.total);
+    const totalGastosMes = entries.reduce((sum, e) => sum + e.total, 0);
+
+    return entries.map((e) => ({
+      ...e,
+      percent: totalGastosMes ? (e.total * 100) / totalGastosMes : 0,
+    }));
+  }, [transactions]);
+
+  const gastosPorPersona = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const t of transactions) {
+      if (t.type !== "gasto") continue;
+      const label = getSpenderLabel(t);
+      map.set(label, (map.get(label) ?? 0) + t.amount);
+    }
+    const arr = Array.from(map.entries()).map(([label, total]) => ({ label, total }));
+    const total = arr.reduce((s, x) => s + x.total, 0);
+
+    return arr
+      .map((x) => ({ ...x, percent: total ? (x.total * 100) / total : 0 }))
+      .sort((a, b) => b.total - a.total);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions, user?.id, membersByUserId]);
+
+  const goalsById = useMemo(() => {
+    const map = new Map<string, FamilyGoal>();
+    goals.forEach((g) => g.id && map.set(g.id, g));
+    return map;
+  }, [goals]);
+
+  const filteredTransactions = useMemo(() => {
+    const filtered = transactions.filter((t) => {
+      if (filterType !== "todos" && t.type !== filterType) return false;
+      if (filterCategory !== "TODAS" && t.category !== filterCategory) return false;
+      if (filterMethod !== "TODOS" && t.method !== filterMethod) return false;
+
+      if (searchText.trim()) {
+        const q = searchText.trim().toLowerCase();
+        const haystack = [t.category, t.method, t.notes ?? "", formatDateDisplay(t.date)]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+
+    return filtered.sort((a, b) => {
+      if (a.date !== b.date) return a.date > b.date ? -1 : 1;
+      const aCreated = a.created_at ?? "";
+      const bCreated = b.created_at ?? "";
+      if (aCreated && bCreated && aCreated !== bCreated) return aCreated > bCreated ? -1 : 1;
+      return 0;
+    });
+  }, [transactions, filterType, filterCategory, filterMethod, searchText]);
+
+  const { filteredIngresos, filteredGastos, filteredFlujo } = useMemo(() => {
+    let ingresos = 0;
+    let gastos = 0;
+    for (const t of filteredTransactions) {
+      if (t.type === "ingreso") ingresos += t.amount;
+      else gastos += t.amount;
+    }
+    return { filteredIngresos: ingresos, filteredGastos: gastos, filteredFlujo: ingresos - gastos };
+  }, [filteredTransactions]);
+
+  const chartDataCategorias = useMemo(
+    () => gastosPorCategoria.map((g) => ({ category: g.category, total: g.total })),
+    [gastosPorCategoria]
+  );
+
+  const chartDataLinea = useMemo(() => {
+    const map = new Map<string, { date: string; ingresos: number; gastos: number }>();
+    for (const t of transactions) {
+      const key = (t.date ?? "").slice(0, 10);
+      if (!map.has(key)) map.set(key, { date: key, ingresos: 0, gastos: 0 });
+      const item = map.get(key)!;
+      if (t.type === "ingreso") item.ingresos += t.amount;
+      else item.gastos += t.amount;
+    }
+    const arr = Array.from(map.values());
+    arr.sort((a, b) => (a.date < b.date ? -1 : 1));
+    return arr.map((d) => ({ ...d, dateLabel: formatDateDisplay(d.date) }));
+  }, [transactions]);
+
+  const smartSummary = useMemo(() => {
+    const lines: string[] = [];
+
+    if (!transactions.length) {
+      lines.push("Aún no tienes movimientos en este mes. Empieza registrando ingresos y gastos para ver tu resumen.");
+      return lines;
+    }
+
+    if (totalIngresos === 0 && totalGastos > 0) {
+      lines.push("Este mes sólo has registrado gastos, pero ningún ingreso. Revisa si falta capturar tu sueldo o ingresos principales.");
+    }
+
+    if (totalIngresos > 0) {
+      const ratio = (totalGastos / totalIngresos) * 100;
+      lines.push(`Has gastado aproximadamente el ${ratio.toFixed(1)}% de tus ingresos del mes.`);
+
+      if (ratio > 90) lines.push("Estás muy cerca de gastar todo lo que ingresaste. Sería bueno frenar un poco los gastos en lo que resta del mes.");
+      else if (ratio > 70) lines.push("Tu nivel de gasto es elevado, pero aún tienes margen. Vale la pena revisar en qué se está yendo la mayor parte.");
+      else if (ratio < 50) lines.push("Vas muy bien. Estás gastando menos de la mitad de lo que ingresaste este mes.");
+    }
+
+    if (budget != null) {
+      if (disponible != null && disponible < 0) {
+        lines.push(`Ya sobrepasaste tu presupuesto de ${formatMoney(budget)}. Estás por encima en ${formatMoney(Math.abs(disponible))}.`);
+      } else if (disponible != null && disponible > 0) {
+        lines.push(`Todavía te quedan ${formatMoney(disponible)} disponibles dentro de tu presupuesto de este mes.`);
+      }
+    }
+
+    if (gastosPorCategoria.length > 0) {
+      const top1 = gastosPorCategoria[0];
+      lines.push(`Tu categoría con más gasto este mes es "${top1.category}" con ${formatMoney(top1.total)} (${top1.percent.toFixed(1)}% del total).`);
+      if (gastosPorCategoria.length > 1) {
+        const top2 = gastosPorCategoria[1];
+        lines.push(`La segunda categoría con más peso es "${top2.category}" con ${formatMoney(top2.total)}.`);
+      }
+    }
+
+    // Conexión con Patrimonio (sin tocar DB)
+    lines.push(`Impacto estimado en tu patrimonio este mes: ${formatMoney(flujo)} (flujo neto del mes).`);
+
+    return lines;
+  }, [transactions, totalIngresos, totalGastos, budget, disponible, gastosPorCategoria, flujo]);
+
+  const monthLabel = useMemo(() => {
+    const [y, m] = month.split("-");
+    const date = new Date(Number(y), Number(m) - 1, 1);
+    const raw = date.toLocaleDateString("es-MX", { year: "numeric", month: "long" });
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+  }, [month]);
+
+  // =========================================================
+  // Export CSV/PDF
+  // =========================================================
+  const handleExportCsv = () => {
+    let data = transactions;
+    if (exportType === "ingresos") data = transactions.filter((t) => t.type === "ingreso");
+    else if (exportType === "gastos") data = transactions.filter((t) => t.type === "gasto");
+
+    if (!data.length) {
+      alert("No hay movimientos en este mes con ese filtro para exportar.");
+      return;
+    }
+
+    const header = ["Fecha", "Tipo", "Categoría", "Monto", "Método", "Notas", "Offline"];
+    const rows = data.map((t) => [t.date, t.type, t.category, t.amount, t.method, t.notes ?? "", t.localOnly ? "sí" : "no"]);
+    const csvLines = [header.map(csvEscape).join(","), ...rows.map((r) => r.map(csvEscape).join(","))];
+
+    if (exportIncludeCategorySummary && gastosPorCategoria.length > 0 && exportType !== "ingresos") {
+      csvLines.push("");
+      csvLines.push("Resumen de gastos por categoría");
+      csvLines.push("Categoría,Total,Porcentaje");
+      gastosPorCategoria.forEach((item) => {
+        csvLines.push([csvEscape(item.category), csvEscape(item.total), csvEscape(`${item.percent.toFixed(1)}%`)].join(","));
+      });
+    }
+
+    const csvContent = csvLines.join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const fileMonth = month.replace("-", "_");
+    const exportLabel = exportType === "todos" ? "todos" : exportType === "ingresos" ? "ingresos" : "gastos";
+    const fileName = `finanzas_${fileMonth}_${exportLabel}.csv`;
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportPdf = async () => {
+    if (!transactions.length) {
+      alert("No hay movimientos en este mes para generar el PDF.");
+      return;
+    }
+
+    const jsPDFmod = await import("jspdf");
+    const autoTable = (await import("jspdf-autotable")).default as any;
+    const doc = new jsPDFmod.jsPDF();
+
+    const now = new Date();
+    const generatedAt = now.toLocaleString("es-MX");
+
+    doc.setFontSize(14);
+    doc.text("Finanzas familiares - Reporte mensual", 14, 18);
+    doc.setFontSize(11);
+    doc.text(`Mes: ${monthLabel}`, 14, 26);
+    doc.text(`Generado: ${generatedAt}`, 14, 32);
+
+    let y = 42;
+    doc.setFontSize(10);
+    doc.text(`Ingresos del mes: ${formatMoney(totalIngresos)}`, 14, y); y += 6;
+    doc.text(`Gastos del mes: ${formatMoney(totalGastos)}`, 14, y); y += 6;
+    doc.text(`Flujo (Ingresos - Gastos): ${formatMoney(flujo)}`, 14, y); y += 6;
+
+    if (budget != null) {
+      doc.text(
+        `Presupuesto definido: ${formatMoney(budget)} · Disponible: ${disponible != null ? formatMoney(disponible) : "-"}`,
+        14,
+        y
+      );
+      y += 6;
+    }
+
+    const txForPdf = filteredTransactions.slice(0, 80);
+    const body = txForPdf.map((t) => [
+      formatDateDisplay(t.date),
+      t.type === "ingreso" ? "Ingreso" : "Gasto",
+      t.category,
+      formatMoney(t.amount),
+      t.method,
+      t.notes ?? "",
+    ]);
+
+    autoTable(doc, {
+      head: [["Fecha", "Tipo", "Categoría", "Monto", "Método", "Notas"]],
+      body,
+      startY: y,
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [15, 23, 42], textColor: 255 },
+      columnStyles: { 3: { halign: "right" } },
+      theme: "grid",
+    });
+
+    const fileMonth = month.replace("-", "_");
+    doc.save(`reporte_finanzas_${fileMonth}.pdf`);
+  };
+
+  // =========================================================
+  // CRUD movimientos
   // =========================================================
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1537,15 +1205,9 @@ export default function GastosPage() {
       return;
     }
 
-    const amountNumber = Number(form.amount);
-    if (!form.date) {
-      alert("Selecciona una fecha.");
-      return;
-    }
-    if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
-      alert("Ingresa un monto válido mayor a 0.");
-      return;
-    }
+    const amountNumber = toNumberSafe(form.amount);
+    if (!form.date) return alert("Selecciona una fecha.");
+    if (!Number.isFinite(amountNumber) || amountNumber <= 0) return alert("Ingresa un monto válido mayor a 0.");
 
     const spenderLabel = form.spenderLabel || "Yo";
     const goalId = form.goalId || "";
@@ -1599,9 +1261,7 @@ export default function GastosPage() {
           console.error("Error guardando movimiento offline", err);
         }
 
-        alert(
-          "Estás sin conexión. El movimiento se guardó sólo en este dispositivo y se enviará cuando vuelva el internet."
-        );
+        alert("Estás sin conexión. El movimiento se guardó en este dispositivo y se sincronizará cuando vuelva internet.");
         clearDraft();
         resetForm();
         return;
@@ -1626,14 +1286,7 @@ export default function GastosPage() {
         setTransactions((prev) =>
           prev.map((t) =>
             t.id === editingId
-              ? {
-                  ...t,
-                  ...basePayload,
-                  owner_user_id: ownerUserId,
-                  spender_user_id: spenderUserId,
-                  created_by: user.id,
-                  card_id: selectedCardId ?? null,
-                }
+              ? { ...t, ...basePayload, owner_user_id: ownerUserId, spender_user_id: spenderUserId, created_by: user.id, card_id: selectedCardId ?? null }
               : t
           )
         );
@@ -1649,9 +1302,7 @@ export default function GastosPage() {
             created_by: user.id,
             card_id: selectedCardId ?? null,
           })
-          .select(
-            "id,date,type,category,amount,method,notes,owner_user_id,spender_user_id,spender_label,created_by,card_id,family_group_id,goal_id"
-          )
+          .select("id,date,type,category,amount,method,notes,owner_user_id,spender_user_id,spender_label,created_by,card_id,family_group_id,goal_id,created_at")
           .single();
 
         if (error) throw error;
@@ -1671,6 +1322,7 @@ export default function GastosPage() {
           card_id: data.card_id ?? null,
           family_group_id: data.family_group_id ?? null,
           goal_id: data.goal_id ?? null,
+          created_at: data.created_at ?? null,
         };
 
         setTransactions((prev) => [newTx, ...prev]);
@@ -1678,6 +1330,7 @@ export default function GastosPage() {
 
       clearDraft();
       resetForm();
+      setShowAdvanced(false);
     } catch (err) {
       console.error("Error en handleSubmit:", err);
       setError("No se pudo guardar el movimiento.");
@@ -1706,48 +1359,50 @@ export default function GastosPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const handleDuplicate = (tx: Tx) => {
+    setForm({
+      date: tx.date || todayYMD(),
+      type: tx.type,
+      category: tx.category,
+      amount: String(tx.amount),
+      method: tx.method,
+      notes: tx.notes ?? "",
+      spenderLabel: tx.spender_label ?? (tx.spender_user_id === user?.id ? "Yo" : "Otro"),
+      goalId: tx.goal_id ?? "",
+    });
+    setSelectedCardId(tx.card_id ?? null);
+    setEditingId(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   const handleDelete = async (tx: Tx) => {
-    if (!isOnline) {
-      alert("No puedes eliminar movimientos mientras estás sin conexión.");
-      return;
-    }
-    if (!user) {
-      alert("Debes iniciar sesión para eliminar movimientos.");
-      return;
-    }
+    if (!isOnline) return alert("No puedes eliminar movimientos mientras estás sin conexión.");
+    if (!user) return alert("Debes iniciar sesión para eliminar movimientos.");
 
     try {
-      const { error } = await supabase
-        .from("transactions")
-        .delete()
-        .eq("id", tx.id)
-        .eq("user_id", user.id);
-
+      const { error } = await supabase.from("transactions").delete().eq("id", tx.id).eq("user_id", user.id);
       if (error) throw error;
       setTransactions((prev) => prev.filter((t) => t.id !== tx.id));
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
       alert("No se pudo eliminar el movimiento.");
     }
   };
 
+  // =========================================================
+  // Custom cat/method
+  // =========================================================
   const handleAddCategory = () => {
     const trimmed = newCategory.trim();
     if (!trimmed) return;
 
     const value = trimmed.toUpperCase().replace(/\s+/g, "_");
-    if (categories.some((c) => c.value === value)) {
-      alert("Esa categoría ya existe.");
-      return;
-    }
+    if (categories.some((c) => c.value === value)) return alert("Esa categoría ya existe.");
 
     const updated = [...categories, { label: trimmed, value }];
     setCategories(updated);
     setNewCategory("");
-
-    if (typeof window !== "undefined") {
-      localStorage.setItem(CUSTOM_CATEGORIES_KEY, JSON.stringify(updated));
-    }
+    if (typeof window !== "undefined") localStorage.setItem(CUSTOM_CATEGORIES_KEY, JSON.stringify(updated));
   };
 
   const handleAddMethod = () => {
@@ -1755,32 +1410,23 @@ export default function GastosPage() {
     if (!trimmed) return;
 
     const value = trimmed.toUpperCase().replace(/\s+/g, "_");
-    if (methods.some((m) => m.value === value)) {
-      alert("Ese método ya existe.");
-      return;
-    }
+    if (methods.some((m) => m.value === value)) return alert("Ese método ya existe.");
 
     const updated = [...methods, { label: trimmed, value }];
     setMethods(updated);
     setNewMethod("");
-
-    if (typeof window !== "undefined") {
-      localStorage.setItem(CUSTOM_METHODS_KEY, JSON.stringify(updated));
-    }
+    if (typeof window !== "undefined") localStorage.setItem(CUSTOM_METHODS_KEY, JSON.stringify(updated));
   };
 
   // =========================================================
-  //  Tarjetas CRUD
+  // Tarjetas CRUD
   // =========================================================
   const handleAddCard = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
 
     const trimmed = newCardName.trim();
-    if (!trimmed) {
-      alert("Escribe un nombre para la tarjeta (ej. BBVA Negra David).");
-      return;
-    }
+    if (!trimmed) return alert("Escribe un nombre para la tarjeta (ej. BBVA Negra David).");
 
     setSavingCard(true);
     setCardError(null);
@@ -1791,19 +1437,13 @@ export default function GastosPage() {
     try {
       const { data, error } = await supabase
         .from("cards")
-        .insert({
-          owner_id: ownerId,
-          family_id: familyId,
-          name: trimmed,
-          default_method: null,
-          shared_with_family: newCardShared,
-        })
+        .insert({ owner_id: ownerId, family_id: familyId, name: trimmed, default_method: null, shared_with_family: newCardShared })
         .select("id,name,default_method,owner_id,family_id,shared_with_family")
         .single();
 
       if (error || !data) throw error;
 
-      const newCard: Card = {
+      const newCard: CardType = {
         id: data.id,
         name: data.name,
         default_method: data.default_method ?? null,
@@ -1825,15 +1465,12 @@ export default function GastosPage() {
 
   const handleDeleteCard = async (cardId: string) => {
     if (!user) return;
-    const ok = confirm(
-      "¿Seguro que quieres eliminar esta tarjeta? No se borran tus movimientos, sólo la etiqueta."
-    );
+    const ok = confirm("¿Seguro que quieres eliminar esta tarjeta? No se borran tus movimientos, sólo la etiqueta.");
     if (!ok) return;
 
     try {
       const { error } = await supabase.from("cards").delete().eq("id", cardId).eq("owner_id", user.id);
       if (error) throw error;
-
       setCards((prev) => prev.filter((c) => c.id !== cardId));
       if (selectedCardId === cardId) setSelectedCardId(null);
     } catch (err) {
@@ -1844,23 +1481,13 @@ export default function GastosPage() {
 
   const handleToggleCardSharing = async (cardId: string, current: boolean | null | undefined) => {
     if (!user || !familyCtx) return;
-
-    if (!canUseFamilyScope) {
-      alert("Sólo el jefe de familia puede cambiar si una tarjeta se comparte o no con la familia.");
-      return;
-    }
+    if (!canUseFamilyScope) return alert("Sólo el jefe de familia puede cambiar si una tarjeta se comparte o no.");
 
     const newValue = !current;
 
     try {
-      const { error } = await supabase
-        .from("cards")
-        .update({ shared_with_family: newValue })
-        .eq("id", cardId)
-        .eq("owner_id", user.id);
-
+      const { error } = await supabase.from("cards").update({ shared_with_family: newValue }).eq("id", cardId).eq("owner_id", user.id);
       if (error) throw error;
-
       setCards((prev) => prev.map((c) => (c.id === cardId ? { ...c, shared_with_family: newValue } : c)));
     } catch (err) {
       console.error("Error actualizando tarjeta compartida:", err);
@@ -1869,7 +1496,14 @@ export default function GastosPage() {
   };
 
   // =========================================================
-  //  AUTH render
+  // Auto UX: al entrar en scope familia, abrir por persona
+  // =========================================================
+  useEffect(() => {
+    if (viewScope === "family" && canUseFamilyScope) setShowGastosPorPersona(true);
+  }, [viewScope, canUseFamilyScope]);
+
+  // =========================================================
+  // Render AUTH
   // =========================================================
   if (authLoading) {
     return (
@@ -1881,14 +1515,12 @@ export default function GastosPage() {
 
   if (!user) {
     return (
-      <div className="flex flex-1 items-center justify-center">
+      <div className="flex flex-1 items-center justify-center p-4">
         <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-lg font-semibold">Finanzas familiares</h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Registra tus ingresos y gastos en un solo lugar.
-              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Registra tus ingresos y gastos en un solo lugar.</p>
             </div>
             <ThemeToggle />
           </div>
@@ -1897,60 +1529,34 @@ export default function GastosPage() {
 
           <form onSubmit={authMode === "login" ? handleSignIn : handleSignUp} className="space-y-3 text-sm">
             <div>
-              <label className={UI.label}>Correo electrónico</label>
-              <input
-                type="email"
-                required
-                value={authEmail}
-                onChange={(e) => setAuthEmail(e.target.value)}
-                className={UI.input}
-                placeholder="tucorreo@ejemplo.com"
-              />
+              <Label>Correo electrónico</Label>
+              <Input type="email" required value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="tucorreo@ejemplo.com" />
             </div>
 
             <div>
-              <label className={UI.label}>Contraseña</label>
-              <input
-                type="password"
-                required
-                value={authPassword}
-                onChange={(e) => setAuthPassword(e.target.value)}
-                className={UI.input}
-                placeholder="Mínimo 6 caracteres"
-              />
+              <Label>Contraseña</Label>
+              <Input type="password" required value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
             </div>
 
-            {authError && <p className="text-xs text-red-500">{authError}</p>}
+            {authError && <p className="text-xs text-rose-500">{authError}</p>}
 
-            <button type="submit" className="w-full rounded-xl bg-sky-500 py-2 text-sm font-medium text-white transition hover:bg-sky-600">
+            <Button type="submit">
               {authMode === "login" ? "Entrar" : "Crear cuenta"}
-            </button>
+            </Button>
           </form>
 
           <div className="text-center text-xs text-slate-600 dark:text-slate-300">
             {authMode === "login" ? (
               <>
                 ¿No tienes cuenta?{" "}
-                <button
-                  className="text-sky-600 underline"
-                  onClick={() => {
-                    setAuthMode("signup");
-                    setAuthError(null);
-                  }}
-                >
+                <button className="text-sky-600 underline" onClick={() => { setAuthMode("signup"); setAuthError(null); }}>
                   Crear una nueva
                 </button>
               </>
             ) : (
               <>
                 ¿Ya tienes cuenta?{" "}
-                <button
-                  className="text-sky-600 underline"
-                  onClick={() => {
-                    setAuthMode("login");
-                    setAuthError(null);
-                  }}
-                >
+                <button className="text-sky-600 underline" onClick={() => { setAuthMode("login"); setAuthError(null); }}>
                   Inicia sesión
                 </button>
               </>
@@ -1962,10 +1568,10 @@ export default function GastosPage() {
   }
 
   // =========================================================
-  //  Render app logueada
+  // Render APP
   // =========================================================
   return (
-    <main className={UI.page}>
+    <PageShell>
       <AppHeader
         title="Gastos e ingresos"
         subtitle="Aquí capturas todos los movimientos del día a día."
@@ -1974,938 +1580,725 @@ export default function GastosPage() {
         onSignOut={handleSignOut}
       />
 
-      {/* Mes + export + conexión */}
-      <section className="space-y-4">
-        <div className={UI.card}>
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="min-w-0">
-              <div className="text-xs text-slate-500 dark:text-slate-300">Mes</div>
-              <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
-                <input
-                  type="month"
-                  value={month}
-                  onChange={(e) => handleChangeMonth(e.target.value)}
-                  className={UI.input}
-                  aria-label={`Mes: ${monthLabel}`}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowExportOptions((v) => !v)}
-                  className="h-11 shrink-0 rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-white transition hover:bg-emerald-600"
-                >
-                  {showExportOptions ? "Cerrar exportar" : "Exportar"}
-                </button>
+      {/* Controles mes + export + scope + conexión */}
+      <Card>
+        <Section
+          title="Mes"
+          subtitle="Elige el mes, exporta y (si eres jefe) alterna entre Solo yo / Familia."
+          right={
+            <div className="flex flex-col items-end gap-2">
+              <div
+                className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs ${
+                  isOnline
+                    ? "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300"
+                    : "bg-yellow-50 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300"
+                }`}
+              >
+                <span className={`h-2 w-2 rounded-full ${isOnline ? "bg-green-500" : "bg-yellow-500"}`} />
+                {isOnline ? "Conectado" : "Sin conexión (modo local)"}
               </div>
 
-              {/* Toggle vista (solo jefe) */}
-              {familyCtx && canUseFamilyScope && (
-                <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 dark:bg-slate-800">
-                  <button
-                    type="button"
-                    className={
-                      "rounded-full px-2 py-0.5 transition " +
-                      (viewScope === "mine"
-                        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-50"
-                        : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-200")
-                    }
-                    onClick={() => setViewScope("mine")}
-                  >
-                    Solo yo
-                  </button>
-
-                  <button
-                    type="button"
-                    className={
-                      "rounded-full px-2 py-0.5 transition " +
-                      (viewScope === "family"
-                        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-50"
-                        : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-200")
-                    }
-                    onClick={() => setViewScope("family")}
-                  >
-                    Familia
-                  </button>
+              {familyCtx && canUseFamilyScope ? (
+                <SegmentedControl<"mine" | "family">
+                  value={viewScope}
+                  onChange={(v) => setViewScope(v)}
+                  label="Vista"
+                  help="Familia suma movimientos de miembros activos."
+                  options={[
+                    { value: "mine", label: "Solo yo" },
+                    { value: "family", label: "Familia" },
+                  ]}
+                />
+              ) : familyCtx ? (
+                <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
+                  Vista “Familia” sólo para el jefe de familia.
                 </div>
-              )}
-
-              {!canUseFamilyScope && familyCtx && (
-                <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
-                  La vista “Familia” solo está disponible para el jefe de familia.
-                </p>
-              )}
-
-              {familyCtxLoading && (
-                <p className="mt-2 text-[11px] text-slate-400 dark:text-slate-500">Cargando familia…</p>
-              )}
-              {familyCtxError && <p className="mt-2 text-[11px] text-rose-500">{familyCtxError}</p>}
+              ) : null}
+            </div>
+          }
+        >
+          <div className="grid gap-3 md:grid-cols-3 md:items-end">
+            <div>
+              <Label>Mes</Label>
+              <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} aria-label={`Mes: ${monthLabel}`} />
             </div>
 
-            <div
-              className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs ${
-                isOnline
-                  ? "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300"
-                  : "bg-yellow-50 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300"
-              }`}
-            >
-              <span className={`h-2 w-2 rounded-full ${isOnline ? "bg-green-500" : "bg-yellow-500"}`} />
-              {isOnline ? "Conectado" : "Sin conexión (modo local)"}
+            <div className="flex gap-2">
+              <Button type="button" variant="secondary" onClick={() => setShowExportOptions((v) => !v)}>
+                {showExportOptions ? "Cerrar exportar" : "Exportar"}
+              </Button>
+
+              <Button
+                type="button"
+                onClick={() => (window.location.href = "/patrimonio")}
+                title="Ir a Patrimonio"
+              >
+                Ver Patrimonio
+              </Button>
+            </div>
+
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              {familyLoading ? "Cargando familia…" : familyError ? familyError : familyCtx ? `Familia: ${familyCtx.familyName}` : "Sin familia vinculada"}
             </div>
           </div>
 
           {showExportOptions && (
-            <div className="mt-4 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-950">
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 Exportar movimientos
               </div>
 
-              <div className="flex flex-col gap-1">
-                <span className="text-[11px] text-slate-600 dark:text-slate-300">Tipo de movimientos</span>
+              <div className="space-y-2">
                 <div className="flex flex-wrap gap-2">
                   {(["todos", "ingresos", "gastos"] as ExportType[]).map((t) => (
                     <button
                       key={t}
                       type="button"
                       onClick={() => setExportType(t)}
-                      className={`rounded-full border px-2 py-1 text-[11px] ${
+                      className={`rounded-full border px-3 py-1 text-[11px] ${
                         exportType === t
-                          ? "border-emerald-500 bg-emerald-500 text-white"
-                          : "border-slate-300 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+                          ? "border-slate-900 bg-slate-900 text-white dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900"
+                          : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                       }`}
                     >
                       {t === "todos" ? "Todos" : t === "ingresos" ? "Sólo ingresos" : "Sólo gastos"}
                     </button>
                   ))}
                 </div>
-              </div>
 
-              {/* ✅ checkbox estándar (ya no gigante) */}
-              <label className="flex cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
-                  className={UI.checkbox}
-                  checked={exportIncludeCategorySummary}
-                  onChange={(e) => setExportIncludeCategorySummary(e.target.checked)}
-                />
-                <span className="text-[11px] text-slate-700 dark:text-slate-200">
-                  Incluir resumen de gastos por categoría al final
-                </span>
-              </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border border-slate-300 dark:border-slate-600"
+                    checked={exportIncludeCategorySummary}
+                    onChange={(e) => setExportIncludeCategorySummary(e.target.checked)}
+                  />
+                  <span className="text-[11px] text-slate-700 dark:text-slate-200">
+                    Incluir resumen de gastos por categoría al final
+                  </span>
+                </label>
 
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button type="button" onClick={handleExportCsv} className={UI.btnEmerald}>
-                  Descargar CSV
-                </button>
-                <button
-                  type="button"
-                  onClick={handleExportPdf}
-                  className="rounded-lg bg-slate-900 px-3 py-1 text-xs font-medium text-white transition hover:bg-black dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
-                >
-                  Descargar PDF del mes
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={handleExportCsv} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700">
+                    Descargar CSV
+                  </button>
+                  <button type="button" onClick={handleExportPdf} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-black dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white">
+                    Descargar PDF del mes
+                  </button>
+                </div>
               </div>
             </div>
           )}
-        </div>
+        </Section>
+      </Card>
 
-        {/* KPIs */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className={UI.card}>
-            <div className="text-xs text-slate-500 dark:text-slate-300">Ingresos del mes</div>
-            <div className="mt-1 text-2xl font-semibold tracking-tight text-emerald-600 dark:text-emerald-400 md:text-3xl">
-              {formatMoney(totalIngresos)}
-            </div>
-          </div>
-
-          <div className={UI.card}>
-            <div className="text-xs text-slate-500 dark:text-slate-300">Gastos del mes</div>
-            <div className="mt-1 text-2xl font-semibold tracking-tight text-rose-600 dark:text-rose-400 md:text-3xl">
-              {formatMoney(totalGastos)}
-            </div>
-          </div>
-
-          <div className={UI.card}>
-            <div className="text-xs text-slate-500 dark:text-slate-300">Flujo (Ingresos - Gastos)</div>
-            <div
-              className={`mt-1 text-2xl font-semibold tracking-tight md:text-3xl ${
-                flujo >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
-              }`}
-            >
-              {formatMoney(flujo)}
-            </div>
-          </div>
-
-          <div className={UI.card}>
-            <div className="text-xs text-slate-500 dark:text-slate-300">Presupuesto del mes</div>
-            <div className="mb-2 mt-1 flex items-center gap-2">
-              <input type="number" value={budgetInput} onChange={(e) => setBudgetInput(e.target.value)} className={UI.input} />
+      {/* KPIs */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Ingresos del mes" value={formatMoney(totalIngresos)} tone="good" />
+        <StatCard label="Gastos del mes" value={formatMoney(totalGastos)} tone="bad" />
+        <StatCard label="Flujo (Ingresos - Gastos)" value={formatMoney(flujo)} tone={flujo >= 0 ? "good" : "bad"} />
+        <Card>
+          <Section title="Presupuesto del mes" subtitle="Guarda tu tope mensual (local en este dispositivo).">
+            <div className="flex gap-2">
+              <Input type="number" value={budgetInput} onChange={(e) => setBudgetInput(e.target.value)} placeholder="Ej. 50000" />
               {String(budget ?? "") !== budgetInput && (
-                <button onClick={handleSaveBudget} className="h-11 rounded-xl bg-sky-500 px-4 text-sm font-semibold text-white hover:bg-sky-600">
+                <Button type="button" onClick={handleSaveBudget} className="w-auto px-4">
                   Guardar
-                </button>
+                </Button>
               )}
             </div>
             {budget != null && (
-              <div className={`text-xs ${disponible != null && disponible < 0 ? "text-rose-500" : "text-emerald-600 dark:text-emerald-400"}`}>
+              <div className={`mt-2 text-xs ${disponible != null && disponible < 0 ? "text-rose-500" : "text-emerald-600 dark:text-emerald-400"}`}>
                 Disponible: {disponible != null ? formatMoney(disponible) : "-"}
               </div>
             )}
-          </div>
-        </div>
-      </section>
+          </Section>
+        </Card>
+      </div>
 
       {/* Resumen inteligente */}
-      <section className={UI.card}>
-        <h2 className="mb-2 text-sm font-semibold">Resumen inteligente del mes</h2>
-        {smartSummary.length === 0 ? (
-          <p className="text-xs text-slate-500 dark:text-slate-400">Aún no hay suficiente información para generar un resumen.</p>
-        ) : (
-          <ul className="list-disc space-y-1 pl-5 text-xs text-slate-700 dark:text-slate-200">
-            {smartSummary.map((line, idx) => (
-              <li key={idx}>{line}</li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <Card>
+        <Section title="Resumen inteligente del mes" subtitle="Incluye impacto estimado a Patrimonio (flujo neto).">
+          {smartSummary.length === 0 ? (
+            <EmptyState>Aún no hay suficiente información para generar un resumen.</EmptyState>
+          ) : (
+            <ul className="list-disc space-y-1 pl-5 text-xs text-slate-700 dark:text-slate-200">
+              {smartSummary.map((line, idx) => (
+                <li key={idx}>{line}</li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      </Card>
 
-      {/* Tarjetas ligadas */}
-      <section className={UI.card}>
-        <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 className="text-sm font-semibold">Tarjetas ligadas a tus gastos</h2>
-            <p className={UI.help}>
-              Aquí sólo tú ves tus tarjetas. Si las compartes, los gastos de tu familia con esa tarjeta también se reflejan en tu resumen.
-            </p>
-          </div>
-
-          <button type="button" onClick={() => setShowCardsList((v) => !v)} className={UI.btnSecondary}>
-            {showCardsList ? "Ocultar mis tarjetas" : `Ver mis tarjetas (${cards.length})`}
-          </button>
-        </div>
-
-        <form onSubmit={handleAddCard} className="mt-3 flex flex-col gap-3 text-sm md:flex-row md:items-end">
-          <div className="flex-1">
-            <label className={UI.label}>Nombre de la tarjeta</label>
-            <input
-              type="text"
-              value={newCardName}
-              onChange={(e) => setNewCardName(e.target.value)}
-              className={UI.input}
-              placeholder="Ej. BBVA Negra David, Amex Platino, etc."
-            />
-
-            {familyCtx && canUseFamilyScope && (
-              <label className="mt-3 flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  checked={newCardShared}
-                  onChange={(e) => setNewCardShared(e.target.checked)}
-                  className="mt-0.5 h-5 w-5 rounded border border-slate-300 text-slate-900 focus:ring-2 focus:ring-sky-500/30 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-200"
-                />
-                <span className="min-w-0">
-                  <span className="block text-[12px] font-medium text-slate-700 dark:text-slate-200">
+      {/* Tarjetas */}
+      <Card>
+        <Section
+          title="Tarjetas ligadas"
+          subtitle="Si las compartes, los gastos de tu familia con esa tarjeta también se reflejan en tu resumen."
+          right={
+            <Button type="button" variant="secondary" onClick={() => setShowCardsList((v) => !v)} className="w-auto">
+              {showCardsList ? "Ocultar" : `Ver (${cards.length})`}
+            </Button>
+          }
+        >
+          <form onSubmit={handleAddCard} className="mt-2 grid gap-3 md:grid-cols-3 md:items-end">
+            <div className="md:col-span-2">
+              <Label>Nombre de la tarjeta</Label>
+              <Input value={newCardName} onChange={(e) => setNewCardName(e.target.value)} placeholder="Ej. BBVA Negra David, Amex Platino…" />
+              {familyCtx && canUseFamilyScope && (
+                <label className="mt-2 flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border border-slate-300 dark:border-slate-600"
+                    checked={newCardShared}
+                    onChange={(e) => setNewCardShared(e.target.checked)}
+                  />
+                  <span className="text-[11px] text-slate-600 dark:text-slate-300">
                     Compartir esta tarjeta con mi familia
                   </span>
-                  <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-slate-400">
-                    Los miembros podrán usarla al capturar sus gastos y se verán en tu resumen.
-                  </span>
-                </span>
-              </label>
-            )}
-
-            {cardError && <p className="mt-2 text-xs text-rose-500">{cardError}</p>}
-          </div>
-
-          <button type="submit" disabled={savingCard} className={UI.btnPrimary + " h-11 md:w-auto"}>
-            {savingCard ? "Guardando..." : "Agregar tarjeta"}
-          </button>
-        </form>
-
-        <div className="mt-4">
-          {!showCardsList ? (
-            <p className="text-xs text-slate-500 dark:text-slate-400">Lista de tarjetas oculta para mantener la pantalla limpia.</p>
-          ) : cards.length === 0 ? (
-            <p className="text-xs text-slate-500 dark:text-slate-400">Aún no tienes tarjetas registradas. Empieza agregando una arriba.</p>
-          ) : (
-            <div className="space-y-2">
-              {cards.map((card) => (
-                <div
-                  key={card.id}
-                  className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm dark:border-slate-800 dark:bg-slate-950 md:flex-row md:items-center md:justify-between"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate font-medium text-slate-900 dark:text-slate-100">{card.name}</span>
-                      <span
-                        className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                          card.shared_with_family
-                            ? "bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-200"
-                            : "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                        }`}
-                      >
-                        {card.shared_with_family ? "Compartida" : "Sólo tú"}
-                      </span>
-                    </div>
-
-                    <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                      Se puede seleccionar al capturar un movimiento.
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-end gap-2">
-                    {canUseFamilyScope && (
-                      <button
-                        type="button"
-                        onClick={() => handleToggleCardSharing(card.id, card.shared_with_family)}
-                        className={`h-9 rounded-full border px-3 text-[11px] font-medium transition ${
-                          card.shared_with_family
-                            ? "border-slate-900 bg-slate-900 text-white hover:bg-black dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
-                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-                        }`}
-                      >
-                        {card.shared_with_family ? "Dejar de compartir" : "Compartir con familia"}
-                      </button>
-                    )}
-
-                    <button type="button" onClick={() => handleDeleteCard(card.id)} className={UI.btnDangerPill}>
-                      Eliminar
-                    </button>
-                  </div>
-                </div>
-              ))}
+                </label>
+              )}
+              {cardError && <p className="mt-2 text-xs text-rose-500">{cardError}</p>}
             </div>
-          )}
-        </div>
-      </section>
+
+            <Button type="submit" disabled={savingCard}>
+              {savingCard ? "Guardando..." : "Agregar tarjeta"}
+            </Button>
+          </form>
+
+          <div className="mt-4">
+            {!showCardsList ? (
+              <EmptyState>Lista oculta para mantener la pantalla limpia.</EmptyState>
+            ) : cards.length === 0 ? (
+              <EmptyState>Aún no tienes tarjetas registradas.</EmptyState>
+            ) : (
+              <ul className="space-y-2">
+                {cards.map((c) => (
+                  <ListItem
+                    key={c.id}
+                    left={
+                      <>
+                        <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{c.name}</div>
+                        <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                          Estado: {c.shared_with_family ? "Compartida" : "Sólo tú"}
+                        </div>
+                      </>
+                    }
+                    right={
+                      <div className="flex flex-col items-end gap-2">
+                        {canUseFamilyScope && (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleCardSharing(c.id, c.shared_with_family)}
+                            className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                          >
+                            {c.shared_with_family ? "Dejar de compartir" : "Compartir con familia"}
+                          </button>
+                        )}
+                        <LinkButton tone="danger" onClick={() => handleDeleteCard(c.id)}>
+                          Eliminar
+                        </LinkButton>
+                      </div>
+                    }
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        </Section>
+      </Card>
 
       {/* Gráficas */}
-      <section className={UI.card}>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold">Gráficas</h2>
-            <p className={UI.help}>Visualiza tendencias del mes sin saturar la pantalla.</p>
-          </div>
+      <Card>
+        <Section
+          title="Gráficas"
+          subtitle="Visualiza categorías y tendencia por día."
+          right={
+            <button
+              type="button"
+              onClick={() => setShowCharts((v) => !v)}
+              className="rounded-lg bg-sky-500 px-3 py-2 text-xs font-medium text-white hover:bg-sky-600"
+            >
+              {showCharts ? "Ocultar" : "Ver"}
+            </button>
+          }
+        >
+          {!showCharts ? (
+            <EmptyState>Gráficas ocultas. Ábrelas cuando quieras revisar tendencias.</EmptyState>
+          ) : (
+            <div className="mt-2 grid gap-4 md:grid-cols-2">
+              <Card>
+                <Section title="Gastos por categoría">
+                  {chartDataCategorias.length === 0 ? (
+                    <EmptyState>Aún no hay gastos registrados.</EmptyState>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={260}>
+                      <BarChart data={chartDataCategorias} margin={{ top: 10, right: 10, left: 0, bottom: 40 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="category" tick={{ fontSize: 10, fill: isDark ? "#e5e7eb" : "#374151" }} angle={-30} textAnchor="end" />
+                        <YAxis tick={{ fontSize: 10, fill: isDark ? "#e5e7eb" : "#374151" }} />
+                        <Tooltip />
+                        <Legend />
+                        <Bar dataKey="total" name="Gasto" radius={4} fill={isDark ? "#38bdf8" : "#0ea5e9"} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </Section>
+              </Card>
 
-          <button type="button" onClick={() => setShowCharts((v) => !v)} className={UI.btnSky}>
-            {showCharts ? "Ocultar gráficas" : "Ver gráficas"}
-          </button>
-        </div>
-
-        {!showCharts ? (
-          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
-            Gráficas ocultas. Ábrelas cuando quieras revisar categorías y tendencia por día.
-          </div>
-        ) : (
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <div className={UI.card}>
-              <h3 className="mb-2 text-xs font-semibold">Gastos por categoría</h3>
-              {chartDataCategorias.length === 0 ? (
-                <p className="text-xs text-slate-500 dark:text-slate-400">Aún no hay gastos registrados.</p>
-              ) : (
-                <ResponsiveContainer width="100%" height={260}>
-                  <BarChart data={chartDataCategorias} margin={{ top: 10, right: 10, left: 0, bottom: 40 }}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="category"
-                      tick={{ fontSize: 10, fill: isDark ? "#e5e7eb" : "#374151" }}
-                      angle={-30}
-                      textAnchor="end"
-                    />
-                    <YAxis tick={{ fontSize: 10, fill: isDark ? "#e5e7eb" : "#374151" }} />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="total" name="Gasto" radius={4} fill={isDark ? "#38bdf8" : "#0ea5e9"} />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
+              <Card>
+                <Section title="Ingresos vs Gastos por día">
+                  {chartDataLinea.length === 0 ? (
+                    <EmptyState>Aún no hay movimientos suficientes.</EmptyState>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={260}>
+                      <LineChart data={chartDataLinea}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="dateLabel" tick={{ fontSize: 10, fill: isDark ? "#e5e7eb" : "#374151" }} />
+                        <YAxis tick={{ fontSize: 10, fill: isDark ? "#e5e7eb" : "#374151" }} />
+                        <Tooltip />
+                        <Legend />
+                        <Line type="monotone" dataKey="ingresos" name="Ingresos" dot={false} stroke={isDark ? "#22c55e" : "#16a34a"} strokeWidth={2} />
+                        <Line type="monotone" dataKey="gastos" name="Gastos" dot={false} stroke={isDark ? "#fb7185" : "#ef4444"} strokeWidth={2} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
+                </Section>
+              </Card>
             </div>
-
-            <div className={UI.card}>
-              <h3 className="mb-2 text-xs font-semibold">Ingresos vs Gastos por día</h3>
-              {chartDataLinea.length === 0 ? (
-                <p className="text-xs text-slate-500 dark:text-slate-400">Aún no hay movimientos suficientes para la gráfica.</p>
-              ) : (
-                <ResponsiveContainer width="100%" height={260}>
-                  <LineChart data={chartDataLinea}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="dateLabel" tick={{ fontSize: 10, fill: isDark ? "#e5e7eb" : "#374151" }} />
-                    <YAxis tick={{ fontSize: 10, fill: isDark ? "#e5e7eb" : "#374151" }} />
-                    <Tooltip />
-                    <Legend />
-                    <Line type="monotone" dataKey="ingresos" name="Ingresos" dot={false} stroke={isDark ? "#22c55e" : "#16a34a"} strokeWidth={2} />
-                    <Line type="monotone" dataKey="gastos" name="Gastos" dot={false} stroke={isDark ? "#fb7185" : "#ef4444"} strokeWidth={2} />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-          </div>
-        )}
-      </section>
+          )}
+        </Section>
+      </Card>
 
       {/* Formulario */}
-      <section className={UI.card}>
-        <form id="ff-gastos-form" onSubmit={handleSubmit} className="space-y-4 text-sm">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-                  {editingId ? "Editar movimiento" : "Agregar movimiento"}
-                </h2>
-
-                {editingId && <span className={UI.chip}>Editando</span>}
-              </div>
-
-              <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
-                Atajos: ⌘/Ctrl+Enter guardar · Esc cancelar · ⌘/Ctrl+K buscar
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 text-[11px]">
-              <button type="button" onClick={() => handleChangeForm("date", todayYMD())} className={UI.btnPill}>
-                Hoy
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  const d = new Date();
-                  d.setDate(d.getDate() - 1);
-                  const y = d.getFullYear();
-                  const m = String(d.getMonth() + 1).padStart(2, "0");
-                  const day = String(d.getDate()).padStart(2, "0");
-                  handleChangeForm("date", `${y}-${m}-${day}`);
-                }}
-                className={UI.btnPill}
-              >
-                Ayer
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleChangeForm("amount", String((Number(form.amount || "0") || 0) + 100))}
-                className={UI.btnPill}
-              >
-                +$100
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleChangeForm("amount", String((Number(form.amount || "0") || 0) + 500))}
-                className={UI.btnPill}
-              >
-                +$500
-              </button>
-
-              {!editingId && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    clearDraft();
-                    resetForm();
-                  }}
-                  className="rounded-full bg-slate-900 px-3 py-1 font-medium text-white shadow-sm hover:bg-black dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
-                >
-                  Limpiar
-                </button>
-              )}
-            </div>
-          </div>
-
+      <Card>
+        <Section
+          title={editingId ? "Editar movimiento" : "Agregar movimiento"}
+          subtitle="Atajos: ⌘/Ctrl+Enter guardar · Esc cancelar · ⌘/Ctrl+K buscar"
+          right={editingId ? <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Editando</span> : null}
+        >
           {!editingId && (
-            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px]">
               <span className="text-slate-400 dark:text-slate-500">Plantillas:</span>
               {QUICK_TEMPLATES.map((tpl) => (
-                <button key={tpl.id} type="button" onClick={() => applyTemplate(tpl)} className={UI.btnPill}>
+                <button
+                  key={tpl.id}
+                  type="button"
+                  onClick={() => applyTemplate(tpl)}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                >
                   {tpl.label}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => {
+                  clearDraft();
+                  resetForm();
+                }}
+                className="rounded-full bg-slate-900 px-3 py-1 text-[11px] font-medium text-white hover:bg-black dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
+              >
+                Limpiar
+              </button>
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-7">
-            <div>
-              <label className={UI.label}>Tarjeta</label>
-              <select
-                value={selectedCardId ?? ""}
-                onChange={(e) => handleChangeCard(e.target.value ? e.target.value : null)}
-                className={UI.select}
-              >
-                <option value="">Sin tarjeta específica</option>
-                {cards.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <form id="ff-gastos-form" onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-7">
+              <div className="md:col-span-2">
+                <Label>Tarjeta</Label>
+                <Select value={selectedCardId ?? ""} onChange={(e) => handleChangeCard(e.target.value ? e.target.value : null)}>
+                  <option value="">Sin tarjeta específica</option>
+                  {cards.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
 
-            <div>
-              <label className={UI.label}>Tipo</label>
-              <div className="flex h-11 w-full rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-950">
-                <button
-                  type="button"
-                  onClick={() => handleChangeForm("type", "ingreso")}
-                  className={`flex-1 rounded-lg text-sm font-medium transition ${
-                    form.type === "ingreso"
-                      ? "bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-50"
-                      : "text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
-                  }`}
-                >
-                  Ingreso
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleChangeForm("type", "gasto")}
-                  className={`flex-1 rounded-lg text-sm font-medium transition ${
-                    form.type === "gasto"
-                      ? "bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-slate-50"
-                      : "text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
-                  }`}
-                >
-                  Gasto
-                </button>
+              <div className="md:col-span-2">
+                <SegmentedControl<TxType>
+                  value={form.type}
+                  onChange={(v) => handleChangeForm("type", v)}
+                  label="Tipo"
+                  options={[
+                    { value: "ingreso", label: "Ingreso" },
+                    { value: "gasto", label: "Gasto" },
+                  ]}
+                />
+              </div>
+
+              <div>
+                <Label>Fecha</Label>
+                <Input type="date" value={form.date} onChange={(e) => handleChangeForm("date", e.target.value)} />
+              </div>
+
+              <div>
+                <Label>Categoría</Label>
+                <Select value={form.category} onChange={(e) => handleChangeForm("category", e.target.value)}>
+                  {categories.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+
+              <div>
+                <Label>Monto</Label>
+                <Input type="number" step="0.01" value={form.amount} onChange={(e) => handleChangeForm("amount", e.target.value)} placeholder="0.00" />
+              </div>
+
+              <div>
+                <Label>Método</Label>
+                <Select value={form.method} onChange={(e) => handleChangeForm("method", e.target.value)}>
+                  {methods.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+
+              <div>
+                <Label>Quién generó</Label>
+                <Select value={form.spenderLabel} onChange={(e) => handleChangeForm("spenderLabel", e.target.value)}>
+                  {SPENDER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </Select>
               </div>
             </div>
 
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">Opciones avanzadas</div>
+              <button type="button" onClick={() => setShowAdvanced((v) => !v)} className="text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400">
+                {showAdvanced ? "Ocultar" : "Mostrar"}
+              </button>
+            </div>
+
+            {showAdvanced && (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <Label>Objetivo familiar (opcional)</Label>
+                    <Select value={form.goalId} onChange={(e) => handleChangeForm("goalId", e.target.value)}>
+                      <option value="">Sin objetivo</option>
+                      {goals.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.name}
+                        </option>
+                      ))}
+                    </Select>
+                    <Help>Si eliges una meta, este movimiento contará para el avance del dashboard familiar.</Help>
+                  </div>
+
+                  <div>
+                    <Label>Notas</Label>
+                    <Textarea value={form.notes} onChange={(e) => handleChangeForm("notes", e.target.value)} placeholder="Descripción, quién pagó, folio, etc." />
+                  </div>
+                </div>
+
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <div>
+                    <Label>Nueva categoría</Label>
+                    <div className="flex gap-2">
+                      <Input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="Ej. Vacaciones…" />
+                      <Button type="button" className="w-auto px-4" onClick={handleAddCategory}>
+                        +
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label>Nuevo método</Label>
+                    <div className="flex gap-2">
+                      <Input value={newMethod} onChange={(e) => setNewMethod(e.target.value)} placeholder="Ej. Tarjeta Amazon…" />
+                      <Button type="button" className="w-auto px-4" onClick={handleAddMethod}>
+                        +
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="submit" disabled={saving}>
+                {saving ? "Guardando..." : editingId ? "Guardar cambios" : "Agregar"}
+              </Button>
+
+              {editingId && (
+                <Button type="button" variant="secondary" onClick={() => { resetForm(); setShowAdvanced(false); }}>
+                  Cancelar edición
+                </Button>
+              )}
+
+              {error && <span className="text-xs text-rose-600 dark:text-rose-400">{error}</span>}
+            </div>
+          </form>
+        </Section>
+      </Card>
+
+      {/* Filtros */}
+      <Card>
+        <Section title="Filtros de movimientos" subtitle="Los totales se calculan con los movimientos filtrados.">
+          <div className="grid gap-4 md:grid-cols-3">
+            <StatCard label="Ingresos filtrados" value={formatMoney(filteredIngresos)} tone="good" />
+            <StatCard label="Gastos filtrados" value={formatMoney(filteredGastos)} tone="bad" />
+            <StatCard label="Flujo filtrado" value={formatMoney(filteredFlujo)} tone={filteredFlujo >= 0 ? "good" : "bad"} />
+          </div>
+
+          <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+            Calculados con <span className="font-semibold">{filteredTransactions.length}</span> movimientos.
+          </p>
+
+          <div className="mt-3 grid gap-3 md:grid-cols-4">
             <div>
-              <label className={UI.label}>Fecha</label>
-              <input type="date" value={form.date} onChange={(e) => handleChangeForm("date", e.target.value)} className={UI.input} />
+              <Label>Tipo</Label>
+              <Select value={filterType} onChange={(e) => setFilterType(e.target.value as any)}>
+                <option value="todos">Todos</option>
+                <option value="ingreso">Ingresos</option>
+                <option value="gasto">Gastos</option>
+              </Select>
             </div>
 
             <div>
-              <label className={UI.label}>Categoría</label>
-              <select value={form.category} onChange={(e) => handleChangeForm("category", e.target.value)} className={UI.select}>
+              <Label>Categoría</Label>
+              <Select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
+                <option value="TODAS">Todas</option>
                 {categories.map((c) => (
                   <option key={c.value} value={c.value}>
                     {c.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
 
             <div>
-              <label className={UI.label}>Monto</label>
-              <input
-                type="number"
-                step="0.01"
-                value={form.amount}
-                onChange={(e) => handleChangeForm("amount", e.target.value)}
-                className={UI.input}
-                placeholder="0.00"
-              />
-            </div>
-
-            <div>
-              <label className={UI.label}>Método</label>
-              <select value={form.method} onChange={(e) => handleChangeForm("method", e.target.value)} className={UI.select}>
+              <Label>Método</Label>
+              <Select value={filterMethod} onChange={(e) => setFilterMethod(e.target.value)}>
+                <option value="TODOS">Todos</option>
                 {methods.map((m) => (
                   <option key={m.value} value={m.value}>
                     {m.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
 
             <div>
-              <label className={UI.label}>Quién generó</label>
-              <select
-                value={form.spenderLabel}
-                onChange={(e) => handleChangeForm("spenderLabel", e.target.value)}
-                className={UI.select}
-              >
-                {SPENDER_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
+              <Label>Buscar</Label>
+              <Input ref={searchInputRef} value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Notas, categoría, fecha..." />
             </div>
           </div>
-
-          <div className="mt-4 flex items-center justify-between">
-            <div className="text-[11px] text-slate-400 dark:text-slate-500">Opciones avanzadas</div>
-            <button
-              type="button"
-              onClick={() => setShowAdvanced((v) => !v)}
-              className="text-[11px] font-medium text-sky-600 hover:text-sky-700 dark:text-sky-400"
-            >
-              {showAdvanced ? "Ocultar" : "Mostrar"}
-            </button>
-          </div>
-
-          {showAdvanced && (
-            <div className="mt-2 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
-              <div>
-                <label className={UI.label}>Objetivo familiar (opcional)</label>
-                <select value={form.goalId} onChange={(e) => handleChangeForm("goalId", e.target.value)} className={UI.select}>
-                  <option value="">Sin objetivo específico</option>
-                  {goals.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name}
-                    </option>
-                  ))}
-                </select>
-                <p className={UI.help}>Si eliges una meta, este movimiento contará para el avance en el dashboard familiar.</p>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div>
-                  <label className={UI.label}>Nueva categoría</label>
-                  <div className="flex gap-2">
-                    <input type="text" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} className={UI.input} placeholder="Ej. Vacaciones, Mascotas, etc." />
-                    <button type="button" onClick={handleAddCategory} className={UI.btnPrimary + " h-11 px-4"}>
-                      +
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className={UI.label}>Nuevo método</label>
-                  <div className="flex gap-2">
-                    <input type="text" value={newMethod} onChange={(e) => setNewMethod(e.target.value)} className={UI.input} placeholder="Ej. Tarjeta Amazon, Mercado Pago, etc." />
-                    <button type="button" onClick={handleAddMethod} className={UI.btnPrimary + " h-11 px-4"}>
-                      +
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className={UI.label}>Notas (opcional)</label>
-                <textarea value={form.notes} onChange={(e) => handleChangeForm("notes", e.target.value)} className={UI.textarea} placeholder="Descripción, quién pagó, folio, etc." />
-              </div>
-            </div>
-          )}
-
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button type="submit" disabled={saving} className={UI.btnPrimary}>
-              {saving ? "Guardando..." : editingId ? "Guardar cambios" : "Agregar"}
-            </button>
-
-            {editingId && (
-              <button
-                type="button"
-                onClick={() => {
-                  resetForm();
-                  setShowAdvanced(false);
-                }}
-                className={UI.btnSecondary}
-              >
-                Cancelar edición
-              </button>
-            )}
-
-            {error && <span className="text-xs text-rose-600 dark:text-rose-400">{error}</span>}
-          </div>
-        </form>
-      </section>
-
-      {/* Filtros */}
-      <section className={UI.card}>
-        <h2 className="mb-3 text-sm font-semibold">Filtros de movimientos</h2>
-
-        <div className="mb-2 grid gap-3 sm:grid-cols-3">
-          <div className={UI.cardSoft}>
-            <span className="text-[11px] text-slate-500 dark:text-slate-300">Ingresos (filtrados)</span>
-            <span className="mt-1 text-lg font-semibold text-emerald-600 dark:text-emerald-400">{formatMoney(filteredIngresos)}</span>
-          </div>
-
-          <div className={UI.cardSoft}>
-            <span className="text-[11px] text-slate-500 dark:text-slate-300">Gastos (filtrados)</span>
-            <span className="mt-1 text-lg font-semibold text-rose-600 dark:text-rose-400">{formatMoney(filteredGastos)}</span>
-          </div>
-
-          <div className={UI.cardSoft}>
-            <span className="text-[11px] text-slate-500 dark:text-slate-300">Flujo filtrado</span>
-            <span className={`mt-1 text-lg font-semibold ${filteredFlujo >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-              {formatMoney(filteredFlujo)}
-            </span>
-          </div>
-        </div>
-
-        <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
-          Estos totales se calculan sólo con los <span className="font-semibold">{filteredTransactions.length}</span> movimientos que cumplen los filtros actuales.
-        </p>
-
-        <div className="grid gap-3 text-xs md:grid-cols-4">
-          <div>
-            <div className="mb-1 text-slate-500 dark:text-slate-300">Tipo</div>
-            <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
-              <button
-                type="button"
-                onClick={() => setFilterType("todos")}
-                className={`px-3 py-2 text-xs ${filterType === "todos" ? "bg-sky-500 text-white" : "bg-white text-slate-700 dark:bg-slate-900 dark:text-slate-200"}`}
-              >
-                Todos
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterType("ingreso")}
-                className={`px-3 py-2 text-xs ${filterType === "ingreso" ? "bg-emerald-500 text-white" : "bg-white text-slate-700 dark:bg-slate-900 dark:text-slate-200"}`}
-              >
-                Ingresos
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterType("gasto")}
-                className={`px-3 py-2 text-xs ${filterType === "gasto" ? "bg-rose-500 text-white" : "bg-white text-slate-700 dark:bg-slate-900 dark:text-slate-200"}`}
-              >
-                Gastos
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <label className={UI.label}>Categoría</label>
-            <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className={UI.select}>
-              <option value="TODAS">Todas</option>
-              {categories.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className={UI.label}>Método de pago</label>
-            <select value={filterMethod} onChange={(e) => setFilterMethod(e.target.value)} className={UI.select}>
-              <option value="TODOS">Todos</option>
-              {methods.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className={UI.label}>Buscar</label>
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-              className={UI.input}
-              placeholder="Notas, categoría, fecha..."
-            />
-          </div>
-        </div>
-      </section>
+        </Section>
+      </Card>
 
       {/* Visor por categoría */}
-      <section className={UI.card}>
-        <h2 className="mb-2 text-sm font-semibold">Visor mensual de gastos por categoría</h2>
-        {gastosPorCategoria.length === 0 ? (
-          <p className="text-xs text-slate-500 dark:text-slate-400">Aún no hay gastos registrados en este mes.</p>
-        ) : (
-          <div className="space-y-2">
-            {gastosPorCategoria.map((item) => (
-              <div key={item.category} className="space-y-1">
-                <div className="flex justify-between text-xs text-slate-700 dark:text-slate-200">
-                  <span>{item.category}</span>
-                  <span>
-                    {formatMoney(item.total)}{" "}
-                    <span className="text-slate-400 dark:text-slate-500">({item.percent.toFixed(1)}%)</span>
-                  </span>
+      <Card>
+        <Section title="Gastos por categoría" subtitle="Distribución del mes actual.">
+          {gastosPorCategoria.length === 0 ? (
+            <EmptyState>Aún no hay gastos registrados en este mes.</EmptyState>
+          ) : (
+            <div className="space-y-2">
+              {gastosPorCategoria.map((item) => (
+                <div key={item.category} className="space-y-1">
+                  <div className="flex justify-between text-xs text-slate-700 dark:text-slate-200">
+                    <span>{item.category}</span>
+                    <span>
+                      {formatMoney(item.total)}{" "}
+                      <span className="text-slate-400 dark:text-slate-500">({item.percent.toFixed(1)}%)</span>
+                    </span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
+                    <div className="h-2 rounded bg-sky-500" style={{ width: `${Math.max(item.percent, 2)}%` }} />
+                  </div>
                 </div>
-                <div className="h-2 overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
-                  <div className="h-2 rounded bg-sky-500" style={{ width: `${Math.max(item.percent, 2)}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+              ))}
+            </div>
+          )}
+        </Section>
+      </Card>
 
       {/* Gastos por persona (familia) */}
       {viewScope === "family" && canUseFamilyScope && familyCtx && (
-        <section className={UI.card}>
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Gastos por persona (familia)</h2>
-            <button
-              type="button"
-              onClick={() => setShowGastosPorPersona((v) => !v)}
-              className="text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
-            >
-              {showGastosPorPersona ? "Ocultar" : "Ver"}
-            </button>
-          </div>
-
-          {showGastosPorPersona && (
-            <>
-              {gastosPorPersona.length === 0 ? (
-                <p className="text-xs text-slate-500 dark:text-slate-400">Aún no hay gastos registrados por persona en este mes.</p>
-              ) : (
-                <div className="space-y-2">
-                  {gastosPorPersona.map((item) => (
-                    <div key={item.label} className="space-y-1">
-                      <div className="flex justify-between text-xs text-slate-700 dark:text-slate-200">
-                        <span>{item.label}</span>
-                        <span>
-                          {formatMoney(item.total)}{" "}
-                          <span className="text-slate-400 dark:text-slate-500">({item.percent.toFixed(1)}%)</span>
-                        </span>
-                      </div>
-                      <div className="h-2 overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
-                        <div className="h-2 rounded bg-emerald-500" style={{ width: `${Math.max(item.percent, 2)}%` }} />
-                      </div>
+        <Card>
+          <Section
+            title="Gastos por persona (familia)"
+            subtitle="Sólo gastos del mes actual, por quién generó."
+            right={
+              <button type="button" onClick={() => setShowGastosPorPersona((v) => !v)} className="text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400">
+                {showGastosPorPersona ? "Ocultar" : "Ver"}
+              </button>
+            }
+          >
+            {!showGastosPorPersona ? (
+              <EmptyState>Oculto. Ábrelo cuando quieras revisar distribución por persona.</EmptyState>
+            ) : gastosPorPersona.length === 0 ? (
+              <EmptyState>Aún no hay gastos por persona en este mes.</EmptyState>
+            ) : (
+              <div className="space-y-2">
+                {gastosPorPersona.map((item) => (
+                  <div key={item.label} className="space-y-1">
+                    <div className="flex justify-between text-xs text-slate-700 dark:text-slate-200">
+                      <span>{item.label}</span>
+                      <span>
+                        {formatMoney(item.total)}{" "}
+                        <span className="text-slate-400 dark:text-slate-500">({item.percent.toFixed(1)}%)</span>
+                      </span>
                     </div>
-                  ))}
-                </div>
-              )}
-
-              <p className={UI.help}>
-                Estos montos consideran sólo los <span className="font-semibold">gastos</span> del mes actual y usan el campo{" "}
-                <span className="font-semibold">“Quién generó”</span>.
-              </p>
-            </>
-          )}
-        </section>
+                    <div className="h-2 overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
+                      <div className="h-2 rounded bg-emerald-500" style={{ width: `${Math.max(item.percent, 2)}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Section>
+        </Card>
       )}
 
       {/* Tabla */}
-      <section className={UI.card + " mb-4"}>
-        <div className="mb-2 flex items-baseline justify-between gap-2">
-          <h2 className="text-sm font-semibold">Movimientos de {month}</h2>
-          <p className="text-[11px] text-slate-500 dark:text-slate-300">
-            Mostrando <span className="font-semibold">{filteredTransactions.length}</span> de{" "}
-            <span className="font-semibold">{transactions.length}</span> movimientos del mes
-          </p>
-        </div>
-
-        <div className="overflow-x-auto text-sm">
-          <table className="min-w-[980px] w-full border border-slate-200 text-left text-xs dark:border-slate-700 md:text-sm">
-            <thead className="bg-slate-50 dark:bg-slate-900">
-              <tr>
-                <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Fecha</th>
-                <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Tipo</th>
-                <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Categoría</th>
-                <th className="border-b border-slate-200 px-2 py-2 text-right dark:border-slate-700">Monto</th>
-                <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Método</th>
-                <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Tarjeta</th>
-                <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Generó</th>
-                <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Notas</th>
-                <th className="border-b border-slate-200 px-2 py-2 text-center dark:border-slate-700">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading && (
+      <Card>
+        <Section
+          title={`Movimientos de ${month}`}
+          subtitle={`Mostrando ${filteredTransactions.length} de ${transactions.length} movimientos`}
+        >
+          <div className="overflow-x-auto">
+            <table className="min-w-[980px] w-full border border-slate-200 text-left text-xs dark:border-slate-700 md:text-sm">
+              <thead className="bg-slate-50 dark:bg-slate-900">
                 <tr>
-                  <td colSpan={9} className="py-4 text-center text-slate-500 dark:text-slate-400">
-                    Cargando movimientos...
-                  </td>
+                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Fecha</th>
+                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Tipo</th>
+                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Categoría</th>
+                  <th className="border-b border-slate-200 px-2 py-2 text-right dark:border-slate-700">Monto</th>
+                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Método</th>
+                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Tarjeta</th>
+                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Generó</th>
+                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Notas</th>
+                  <th className="border-b border-slate-200 px-2 py-2 text-center dark:border-slate-700">Acciones</th>
                 </tr>
-              )}
+              </thead>
+              <tbody>
+                {loading && (
+                  <tr>
+                    <td colSpan={9} className="py-4 text-center text-slate-500 dark:text-slate-400">
+                      Cargando movimientos...
+                    </td>
+                  </tr>
+                )}
 
-              {!loading && filteredTransactions.length === 0 && (
-                <tr>
-                  <td colSpan={9} className="py-4 text-center text-slate-500 dark:text-slate-400">
-                    Sin movimientos registrados con esos filtros.
-                  </td>
-                </tr>
-              )}
+                {!loading && filteredTransactions.length === 0 && (
+                  <tr>
+                    <td colSpan={9} className="py-4 text-center text-slate-500 dark:text-slate-400">
+                      Sin movimientos registrados con esos filtros.
+                    </td>
+                  </tr>
+                )}
 
-              {!loading &&
-                filteredTransactions.map((t) => {
-                  const goal = t.goal_id ? goalsById.get(t.goal_id) : undefined;
-                  const cardName = t.card_id ? cards.find((c) => c.id === t.card_id)?.name : undefined;
+                {!loading &&
+                  filteredTransactions.map((t) => {
+                    const goal = t.goal_id ? goalsById.get(t.goal_id) : undefined;
+                    const cardName = t.card_id ? cards.find((c) => c.id === t.card_id)?.name : undefined;
 
-                  return (
-                    <tr
-                      key={t.id}
-                      className={`odd:bg-white even:bg-slate-50 dark:odd:bg-slate-800 dark:even:bg-slate-900 hover:bg-sky-50 dark:hover:bg-slate-800/80 transition-colors ${
-                        t.localOnly ? "opacity-80" : ""
-                      } ${t.type === "ingreso" ? "border-l-4 border-l-emerald-400" : "border-l-4 border-l-rose-400"}`}
-                    >
-                      <td className="border-t border-slate-200 px-2 py-2 dark:border-slate-700">{formatDateDisplay(t.date)}</td>
+                    return (
+                      <tr
+                        key={t.id}
+                        className={`odd:bg-white even:bg-slate-50 dark:odd:bg-slate-800 dark:even:bg-slate-900 hover:bg-sky-50 dark:hover:bg-slate-800/80 transition-colors ${
+                          t.localOnly ? "opacity-80" : ""
+                        } ${t.type === "ingreso" ? "border-l-4 border-l-emerald-400" : "border-l-4 border-l-rose-400"}`}
+                      >
+                        <td className="border-t border-slate-200 px-2 py-2 dark:border-slate-700">{formatDateDisplay(t.date)}</td>
 
-                      <td className="border-t border-slate-200 px-2 py-2 dark:border-slate-700">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                            t.type === "ingreso"
-                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
-                              : "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
-                          }`}
-                        >
-                          {t.type === "ingreso" ? "Ingreso" : "Gasto"}
-                        </span>
-                      </td>
-
-                      <td className="border-t border-slate-200 px-2 py-2 dark:border-slate-700">{t.category}</td>
-
-                      <td className="border-t border-slate-200 px-2 py-2 dark:border-slate-700">
-                        <div className="flex items-center justify-end gap-1">
-                          <span className={`font-semibold ${t.type === "ingreso" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                            {formatMoney(t.amount)}
+                        <td className="border-t border-slate-200 px-2 py-2 dark:border-slate-700">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                              t.type === "ingreso"
+                                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
+                                : "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
+                            }`}
+                          >
+                            {t.type === "ingreso" ? "Ingreso" : "Gasto"}
                           </span>
-                          {t.localOnly && (
-                            <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200">
-                              Offline
+                        </td>
+
+                        <td className="border-t border-slate-200 px-2 py-2 dark:border-slate-700">{t.category}</td>
+
+                        <td className="border-t border-slate-200 px-2 py-2 text-right dark:border-slate-700">
+                          <div className="inline-flex items-center gap-2 justify-end">
+                            <span className={`font-semibold ${t.type === "ingreso" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                              {formatMoney(t.amount)}
+                            </span>
+                            {t.localOnly && (
+                              <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200">
+                                Offline
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        <td className="border-t border-slate-200 px-2 py-2 dark:border-slate-700">
+                          <span className="inline-flex max-w-[160px] items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                            <span className="truncate">{t.method}</span>
+                          </span>
+                        </td>
+
+                        <td className="border-t border-slate-200 px-2 py-2 dark:border-slate-700">
+                          {cardName ? (
+                            <span className="inline-flex max-w-[160px] items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
+                              <span className="truncate">{cardName}</span>
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-slate-400">—</span>
+                          )}
+                        </td>
+
+                        <td className="border-t border-slate-200 px-2 py-2 dark:border-slate-700">
+                          <span className="text-xs text-slate-700 dark:text-slate-200">{getSpenderLabel(t)}</span>
+                        </td>
+
+                        <td className="border-t border-slate-200 px-2 py-2 dark:border-slate-700">
+                          {goal && (
+                            <span className="mb-0.5 mr-1 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
+                              Meta: {goal.name}
                             </span>
                           )}
-                        </div>
-                      </td>
 
-                      <td className="border-t border-slate-200 px-2 py-2 dark:border-slate-700">
-                        <span className="inline-flex max-w-[160px] items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                          <span className="truncate">{t.method}</span>
-                        </span>
-                      </td>
+                          {t.notes ? (
+                            <span className="mt-0.5 block max-w-xs truncate text-xs text-slate-600 dark:text-slate-300" title={t.notes}>
+                              {t.notes}
+                            </span>
+                          ) : (
+                            !goal && <span className="text-[11px] text-slate-400">—</span>
+                          )}
+                        </td>
 
-                      <td className="border-t border-slate-200 px-2 py-2 dark:border-slate-700">
-                        {cardName ? (
-                          <span className="inline-flex max-w-[160px] items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
-                            <span className="truncate">{cardName}</span>
-                          </span>
-                        ) : (
-                          <span className="text-[11px] text-slate-400">—</span>
-                        )}
-                      </td>
+                        <td className="border-t border-slate-200 px-2 py-2 text-center dark:border-slate-700">
+                          <button type="button" onClick={() => handleEdit(t)} className="mr-2 text-xs text-sky-600 hover:underline">
+                            Editar
+                          </button>
 
-                      <td className="border-t border-slate-200 px-2 py-2 dark:border-slate-700">
-                        <span className="text-xs text-slate-700 dark:text-slate-200">{getSpenderLabel(t)}</span>
-                      </td>
+                          <button type="button" onClick={() => handleDuplicate(t)} className="mr-2 text-xs text-slate-600 hover:underline dark:text-slate-300">
+                            Duplicar
+                          </button>
 
-                      <td className="border-t border-slate-200 px-2 py-2 dark:border-slate-700">
-                        {goal && (
-                          <span className="mb-0.5 mr-1 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
-                            Meta: {goal.name}
-                          </span>
-                        )}
-
-                        {t.notes ? (
-                          <span className="mt-0.5 block max-w-xs truncate text-xs text-slate-600 dark:text-slate-300" title={t.notes}>
-                            {t.notes}
-                          </span>
-                        ) : (
-                          !goal && <span className="text-[11px] text-slate-400">—</span>
-                        )}
-                      </td>
-
-                      <td className="border-t border-slate-200 px-2 py-2 text-center dark:border-slate-700">
-                        <button type="button" onClick={() => handleEdit(t)} className="mr-2 text-xs text-sky-600 hover:underline">
-                          Editar
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleDuplicate(t)}
-                          className="mr-2 text-xs text-slate-600 hover:underline dark:text-slate-300"
-                        >
-                          Duplicar
-                        </button>
-
-                        <button type="button" onClick={() => handleDelete(t)} className="text-xs text-rose-600 hover:underline">
-                          Eliminar
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </main>
+                          <button type="button" onClick={() => handleDelete(t)} className="text-xs text-rose-600 hover:underline">
+                            Eliminar
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      </Card>
+    </PageShell>
   );
 }
