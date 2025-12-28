@@ -53,6 +53,17 @@ type Debt = {
   family_id?: string | null;
 };
 
+type TxRow = {
+  id: string;
+  date: string;
+  type: "ingreso" | "gasto";
+  amount: number;
+  family_group_id?: string | null;
+  user_id?: string | null;
+  owner_user_id?: string | null;
+  spender_user_id?: string | null;
+};
+
 type AssetForm = {
   name: string;
   category: string;
@@ -92,6 +103,22 @@ const DEBT_TYPES = [
   "Otro",
 ];
 
+function getCurrentMonthKey(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+function getMonthRange(monthKey: string) {
+  const [yearStr, monthStr] = monthKey.split("-");
+  const y = Number(yearStr);
+  const m = Number(monthStr);
+  const from = `${monthKey}-01`;
+  const lastDay = new Date(y, m, 0).getDate();
+  const to = `${monthKey}-${String(lastDay).padStart(2, "0")}`;
+  return { from, to };
+}
+
 export default function PatrimonioPage() {
   // -------- AUTH --------
   const [user, setUser] = useState<User | null>(null);
@@ -110,6 +137,13 @@ export default function PatrimonioPage() {
   const [debts, setDebts] = useState<Debt[]>([]);
   const [loading, setLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
+
+  // ✅ Conexión Gastos → Patrimonio: flujo del mes
+  const [month, setMonth] = useState<string>(() => getCurrentMonthKey());
+  const [txLoading, setTxLoading] = useState(false);
+  const [txError, setTxError] = useState<string | null>(null);
+  const [monthIngresos, setMonthIngresos] = useState(0);
+  const [monthGastos, setMonthGastos] = useState(0);
 
   // Formularios
   const [assetForm, setAssetForm] = useState<AssetForm>({
@@ -138,25 +172,30 @@ export default function PatrimonioPage() {
   // =========================================================
   // AUTH
   // =========================================================
-  useEffect(() => {
-    let ignore = false;
+useEffect(() => {
+  let ignore = false;
 
-    async function loadUser() {
-      setAuthLoading(true);
-      setAuthError(null);
-      try {
-        const { data, error } = await supabase.auth.getUser();
-        if (error && (error as any).name !== "AuthSessionMissingError") {
-          console.error("Error obteniendo usuario actual", error);
-          if (!ignore) setAuthError("Hubo un problema al cargar tu sesión.");
-        }
-        if (!ignore) setUser(data?.user ?? null);
-      } finally {
-        if (!ignore) setAuthLoading(false);
+  async function loadUser() {
+    setAuthLoading(true);
+    setAuthError(null);
+
+    try {
+      // ✅ OFFLINE-SAFE
+      const { data } = await supabase.auth.getSession();
+      const sessionUser = data.session?.user ?? null;
+
+      if (!ignore) setUser(sessionUser);
+    } catch (err) {
+      if (!ignore) {
+        setUser(null);
+        setAuthError("Hubo un problema al cargar tu sesión.");
       }
+    } finally {
+      if (!ignore) setAuthLoading(false);
     }
+  }
 
-    loadUser();
+  loadUser();
 
     const {
       data: { subscription },
@@ -176,13 +215,15 @@ export default function PatrimonioPage() {
       setUser(null);
       setAssets([]);
       setDebts([]);
+      setMonthIngresos(0);
+      setMonthGastos(0);
     } catch (err) {
       console.error("Error cerrando sesión", err);
     }
   };
 
   // =========================================================
-  // LOAD DATA
+  // LOAD DATA (assets/debts)
   // =========================================================
   useEffect(() => {
     async function load() {
@@ -227,19 +268,84 @@ export default function PatrimonioPage() {
   }, [user, familyCtx, isFamilyOwner, viewScope]);
 
   // =========================================================
-  // CALCULOS
+  // LOAD FLUJO DEL MES (transactions)
   // =========================================================
-  const totalActivos = useMemo(
-    () => assets.reduce((sum, a) => sum + (a.current_value ?? 0), 0),
-    [assets]
-  );
+  useEffect(() => {
+    async function loadTx() {
+      if (!user) {
+        setMonthIngresos(0);
+        setMonthGastos(0);
+        return;
+      }
 
-  const totalDeudas = useMemo(
-    () => debts.reduce((sum, d) => sum + Number(d.current_balance ?? d.total_amount ?? 0), 0),
-    [debts]
-  );
+      setTxLoading(true);
+      setTxError(null);
 
+      try {
+        const { from, to } = getMonthRange(month);
+
+        let query = supabase
+          .from("transactions")
+          .select("id,date,type,amount,family_group_id,user_id,owner_user_id,spender_user_id")
+          .gte("date", from)
+          .lte("date", to);
+
+        const isFamilyView = Boolean(familyCtx) && isFamilyOwner && viewScope === "family";
+
+        if (familyCtx?.familyId) {
+          query = query.eq("family_group_id", familyCtx.familyId);
+
+          if (!isFamilyView) {
+            // personal dentro del grupo familiar
+            query = query.or(`spender_user_id.eq.${user.id},user_id.eq.${user.id},owner_user_id.eq.${user.id}`);
+          }
+        } else {
+          // sin familia
+          query = query.or(`spender_user_id.eq.${user.id},user_id.eq.${user.id},owner_user_id.eq.${user.id}`);
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+
+        let ingresos = 0;
+        let gastos = 0;
+        (data as TxRow[] | null | undefined)?.forEach((t) => {
+          const amt = Number(t.amount) || 0;
+          if (t.type === "ingreso") ingresos += amt;
+          else gastos += amt;
+        });
+
+        setMonthIngresos(ingresos);
+        setMonthGastos(gastos);
+      } catch (err) {
+        console.error("Error cargando flujo del mes:", err);
+        setTxError("No se pudo calcular el flujo del mes desde Gastos.");
+        setMonthIngresos(0);
+        setMonthGastos(0);
+      } finally {
+        setTxLoading(false);
+      }
+    }
+
+    loadTx();
+  }, [user, month, familyCtx?.familyId, isFamilyOwner, viewScope]);
+
+  // =========================================================
+  // CALCULOS (patrimonio)
+  // =========================================================
+  const totalActivos = useMemo(() => assets.reduce((sum, a) => sum + (a.current_value ?? 0), 0), [assets]);
+  const totalDeudas = useMemo(() => debts.reduce((sum, d) => sum + Number(d.current_balance ?? d.total_amount ?? 0), 0), [debts]);
   const patrimonioNeto = totalActivos - totalDeudas;
+
+  // ✅ conexión: flujo neto del mes
+  const flujoMes = monthIngresos - monthGastos;
+
+  const monthLabel = useMemo(() => {
+    const [y, m] = month.split("-");
+    const date = new Date(Number(y), Number(m) - 1, 1);
+    const raw = date.toLocaleDateString("es-MX", { year: "numeric", month: "long" });
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+  }, [month]);
 
   // =========================================================
   // FORM HELPERS
@@ -319,7 +425,6 @@ export default function PatrimonioPage() {
 
       if (error) throw error;
 
-      // si estoy en vista familiar, muestro lo nuevo (es del owner)
       setAssets((prev) => [data as Asset, ...prev]);
       resetAssetForm();
     } catch (err) {
@@ -342,8 +447,7 @@ export default function PatrimonioPage() {
       return alert("Revisa el nombre y el monto total de la deuda.");
     }
 
-    const currentBalance =
-      debtForm.current_balance?.trim() ? toNumberSafe(debtForm.current_balance) : total;
+    const currentBalance = debtForm.current_balance?.trim() ? toNumberSafe(debtForm.current_balance) : total;
 
     if (!Number.isFinite(currentBalance) || currentBalance < 0) {
       return alert("Revisa el saldo actual de la deuda.");
@@ -484,7 +588,7 @@ export default function PatrimonioPage() {
     <PageShell>
       <AppHeader
         title="Patrimonio (activos y deudas)"
-        subtitle="Foto completa de lo que tienes y lo que debes. Desde aquí alimentas tu valor patrimonial."
+        subtitle="Foto completa de lo que tienes y lo que debes. Conectado a tu flujo mensual."
         activeTab="patrimonio"
         userEmail={user.email}
         onSignOut={handleSignOut}
@@ -511,9 +615,7 @@ export default function PatrimonioPage() {
               ) : (
                 <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
                   Vista actual: <span className="font-semibold">Sólo tu patrimonio.</span>
-                  {familyCtx && !isFamilyOwner && (
-                    <> El modo familiar sólo está disponible para el jefe de familia.</>
-                  )}
+                  {familyCtx && !isFamilyOwner && <> El modo familiar sólo está disponible para el jefe de familia.</>}
                 </div>
               )
             }
@@ -527,11 +629,7 @@ export default function PatrimonioPage() {
                 <div>
                   Miembros activos: <span className="font-semibold">{familyCtx.activeMembers}</span>
                 </div>
-                {familyLoading && (
-                  <div className="text-[10px] text-slate-400">
-                    Actualizando información de familia...
-                  </div>
-                )}
+                {familyLoading && <div className="text-[10px] text-slate-400">Actualizando información de familia...</div>}
               </div>
             )}
             {familyError && <p className="mt-2 text-[11px] text-rose-500">{familyError}</p>}
@@ -539,25 +637,40 @@ export default function PatrimonioPage() {
         </Card>
 
         <div className="grid gap-4 md:grid-cols-3">
-          <StatCard
-            label="Activos"
-            value={formatMoney(totalActivos)}
-            hint="Todo lo que tienes a valor aproximado actual."
-            tone="good"
-          />
-          <StatCard
-            label="Deudas"
-            value={formatMoney(totalDeudas)}
-            hint="Saldo pendiente considerando tarjetas, créditos y préstamos."
-            tone="bad"
-          />
-          <StatCard
-            label="Neto"
-            value={formatMoney(patrimonioNeto)}
-            hint="Activos – Deudas. Número clave para ver crecer."
-            tone={patrimonioNeto >= 0 ? "good" : "bad"}
-          />
+          <StatCard label="Activos" value={formatMoney(totalActivos)} hint="Todo lo que tienes a valor aproximado actual." tone="good" />
+          <StatCard label="Deudas" value={formatMoney(totalDeudas)} hint="Saldo pendiente considerando tarjetas, créditos y préstamos." tone="bad" />
+          <StatCard label="Neto" value={formatMoney(patrimonioNeto)} hint="Activos – Deudas. Número clave para ver crecer." tone={patrimonioNeto >= 0 ? "good" : "bad"} />
         </div>
+
+        {/* ✅ Conexión con Gastos */}
+        <Card>
+          <Section
+            title="Conexión con Gastos"
+            subtitle="Tu flujo mensual (ingresos - gastos) debería reflejarse con el tiempo en tu patrimonio."
+            right={
+              <div className="w-full max-w-[220px]">
+                <Label>Mes</Label>
+                <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+              </div>
+            }
+          >
+            {txError && (
+              <div className="mb-3 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
+                {txError}
+              </div>
+            )}
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <StatCard label={`Ingresos (${monthLabel})`} value={formatMoney(monthIngresos)} tone="good" />
+              <StatCard label={`Gastos (${monthLabel})`} value={formatMoney(monthGastos)} tone="bad" />
+              <StatCard label={`Flujo neto (${monthLabel})`} value={formatMoney(flujoMes)} tone={flujoMes >= 0 ? "good" : "bad"} hint={txLoading ? "Calculando…" : "Dato calculado desde tu módulo de Gastos."} />
+            </div>
+
+            <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+              Tip: si el flujo es positivo pero tu patrimonio no sube, normalmente significa que falta registrar el destino (ahorro/inversión) en Activos.
+            </p>
+          </Section>
+        </Card>
       </section>
 
       {/* Formularios */}
@@ -566,11 +679,7 @@ export default function PatrimonioPage() {
           <Section
             title={editingAssetId ? "Editar activo" : "Agregar activo"}
             subtitle="Cuentas bancarias, inversiones, propiedades, autos, negocios, etc."
-            right={
-              editingAssetId ? (
-                <LinkButton onClick={resetAssetForm}>Cancelar</LinkButton>
-              ) : null
-            }
+            right={editingAssetId ? <LinkButton onClick={resetAssetForm}>Cancelar</LinkButton> : null}
           >
             <form onSubmit={handleSubmitAsset} className="mt-2 space-y-3">
               <div>
@@ -586,10 +695,7 @@ export default function PatrimonioPage() {
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <Label>Categoría</Label>
-                  <Select
-                    value={assetForm.category}
-                    onChange={(e) => setAssetForm((p) => ({ ...p, category: e.target.value }))}
-                  >
+                  <Select value={assetForm.category} onChange={(e) => setAssetForm((p) => ({ ...p, category: e.target.value }))}>
                     {ASSET_CATEGORIES.map((c) => (
                       <option key={c} value={c}>
                         {c}
@@ -641,11 +747,7 @@ export default function PatrimonioPage() {
           <Section
             title={editingDebtId ? "Editar deuda" : "Agregar deuda"}
             subtitle="Tarjetas, préstamos, créditos de auto/casa. Lo importante es el saldo actual."
-            right={
-              editingDebtId ? (
-                <LinkButton onClick={resetDebtForm}>Cancelar</LinkButton>
-              ) : null
-            }
+            right={editingDebtId ? <LinkButton onClick={resetDebtForm}>Cancelar</LinkButton> : null}
           >
             <form onSubmit={handleSubmitDebt} className="mt-2 space-y-3">
               <div>
@@ -661,10 +763,7 @@ export default function PatrimonioPage() {
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <Label>Tipo</Label>
-                  <Select
-                    value={debtForm.type}
-                    onChange={(e) => setDebtForm((p) => ({ ...p, type: e.target.value }))}
-                  >
+                  <Select value={debtForm.type} onChange={(e) => setDebtForm((p) => ({ ...p, type: e.target.value }))}>
                     {DEBT_TYPES.map((t) => (
                       <option key={t} value={t}>
                         {t}
@@ -720,10 +819,7 @@ export default function PatrimonioPage() {
       {/* Listas */}
       <section className="grid gap-4 md:grid-cols-2">
         <Card>
-          <Section
-            title="Activos"
-            right={<span className="text-[11px] text-slate-500 dark:text-slate-400">{assets.length} activos</span>}
-          >
+          <Section title="Activos" right={<span className="text-[11px] text-slate-500 dark:text-slate-400">{assets.length} activos</span>}>
             {loading ? (
               <EmptyState>Cargando activos...</EmptyState>
             ) : assets.length === 0 ? (
@@ -735,9 +831,7 @@ export default function PatrimonioPage() {
                     key={a.id}
                     left={
                       <>
-                        <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-                          {a.name}
-                        </div>
+                        <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{a.name}</div>
                         <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
                           {(a.category || "Sin categoría") + " · "}
                           {a.owner ? `A nombre de: ${a.owner}` : "Propietario: N/D"}
@@ -745,30 +839,20 @@ export default function PatrimonioPage() {
 
                         {(a.created_at || effectiveScope === "family" || a.notes) && (
                           <div className="mt-1 space-y-1">
-                            {a.created_at && (
-                              <div className="text-[10px] text-slate-400 dark:text-slate-500">
-                                {formatDateDisplay(a.created_at)}
-                              </div>
-                            )}
+                            {a.created_at && <div className="text-[10px] text-slate-400 dark:text-slate-500">{formatDateDisplay(a.created_at)}</div>}
                             {effectiveScope === "family" && (
                               <div className="text-[10px] text-slate-400 dark:text-slate-500">
                                 Registrado por: {a.user_id === user.id ? "Tú" : "Otro miembro"}
                               </div>
                             )}
-                            {a.notes && (
-                              <div className="text-[11px] text-slate-600 dark:text-slate-300">
-                                {a.notes}
-                              </div>
-                            )}
+                            {a.notes && <div className="text-[11px] text-slate-600 dark:text-slate-300">{a.notes}</div>}
                           </div>
                         )}
                       </>
                     }
                     right={
                       <>
-                        <div className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                          {formatMoney(a.current_value ?? 0)}
-                        </div>
+                        <div className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">{formatMoney(a.current_value ?? 0)}</div>
 
                         {a.user_id === user.id && (
                           <div className="flex items-center gap-3">
@@ -788,10 +872,7 @@ export default function PatrimonioPage() {
         </Card>
 
         <Card>
-          <Section
-            title="Deudas"
-            right={<span className="text-[11px] text-slate-500 dark:text-slate-400">{debts.length} deudas</span>}
-          >
+          <Section title="Deudas" right={<span className="text-[11px] text-slate-500 dark:text-slate-400">{debts.length} deudas</span>}>
             {loading ? (
               <EmptyState>Cargando deudas...</EmptyState>
             ) : debts.length === 0 ? (
@@ -803,30 +884,20 @@ export default function PatrimonioPage() {
                     key={d.id}
                     left={
                       <>
-                        <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-                          {d.name}
-                        </div>
+                        <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{d.name}</div>
                         <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
                           {(d.type || "Sin tipo") + " · Total: "} {formatMoney(d.total_amount ?? 0)}
                         </div>
 
                         {(d.created_at || effectiveScope === "family" || d.notes) && (
                           <div className="mt-1 space-y-1">
-                            {d.created_at && (
-                              <div className="text-[10px] text-slate-400 dark:text-slate-500">
-                                {formatDateDisplay(d.created_at)}
-                              </div>
-                            )}
+                            {d.created_at && <div className="text-[10px] text-slate-400 dark:text-slate-500">{formatDateDisplay(d.created_at)}</div>}
                             {effectiveScope === "family" && (
                               <div className="text-[10px] text-slate-400 dark:text-slate-500">
                                 Registrada por: {d.user_id === user.id ? "Tú" : "Otro miembro"}
                               </div>
                             )}
-                            {d.notes && (
-                              <div className="text-[11px] text-slate-600 dark:text-slate-300">
-                                {d.notes}
-                              </div>
-                            )}
+                            {d.notes && <div className="text-[11px] text-slate-600 dark:text-slate-300">{d.notes}</div>}
                           </div>
                         )}
                       </>

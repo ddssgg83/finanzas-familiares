@@ -12,6 +12,46 @@ export type FamilyContext = {
   activeMemberUserIds: string[];
 };
 
+const FAMILY_CACHE_KEY = "ff-family-cache-v1";
+
+function readFamilyCache(): FamilyContext | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(FAMILY_CACHE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+
+    if (
+      typeof (parsed as any).familyId !== "string" ||
+      typeof (parsed as any).familyName !== "string" ||
+      typeof (parsed as any).ownerUserId !== "string" ||
+      typeof (parsed as any).activeMembers !== "number" ||
+      !Array.isArray((parsed as any).activeMemberUserIds)
+    ) {
+      return null;
+    }
+
+    return parsed as FamilyContext;
+  } catch {
+    return null;
+  }
+}
+
+function writeFamilyCache(ctx: FamilyContext | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (!ctx) {
+      localStorage.removeItem(FAMILY_CACHE_KEY);
+      return;
+    }
+    localStorage.setItem(FAMILY_CACHE_KEY, JSON.stringify(ctx));
+  } catch {
+    // ignore
+  }
+}
+
 export function useFamilyContext(user: User | null) {
   const [familyCtx, setFamilyCtx] = useState<FamilyContext | null>(null);
   const [familyLoading, setFamilyLoading] = useState(false);
@@ -19,20 +59,34 @@ export function useFamilyContext(user: User | null) {
 
   useEffect(() => {
     const currentUser = user;
+
     if (!currentUser) {
       setFamilyCtx(null);
       setFamilyError(null);
       setFamilyLoading(false);
+      writeFamilyCache(null);
       return;
     }
 
+    let cancelled = false;
+
     const userId = currentUser.id;
     const email = (currentUser.email ?? "").toLowerCase();
-    let cancelled = false;
 
     const loadFamily = async () => {
       setFamilyLoading(true);
       setFamilyError(null);
+
+      // ✅ OFFLINE: no intentes pegar a Supabase
+      if (typeof window !== "undefined" && !navigator.onLine) {
+        const cached = readFamilyCache();
+        if (!cancelled) {
+          setFamilyCtx(cached);
+          setFamilyError(null);
+          setFamilyLoading(false);
+        }
+        return;
+      }
 
       try {
         const { data: memberRows, error: memberError } = await supabase
@@ -45,7 +99,10 @@ export function useFamilyContext(user: User | null) {
         if (memberError) throw memberError;
 
         if (!memberRows || memberRows.length === 0) {
-          if (!cancelled) setFamilyCtx(null);
+          if (!cancelled) {
+            setFamilyCtx(null);
+            writeFamilyCache(null);
+          }
           return;
         }
 
@@ -59,7 +116,7 @@ export function useFamilyContext(user: User | null) {
 
         if (famError) throw famError;
 
-        const { data: activeMembers, error: membersError } = await supabase
+        const { data: activeMembersRows, error: membersError } = await supabase
           .from("family_members")
           .select("id,status,user_id")
           .eq("family_id", fam.id)
@@ -67,23 +124,39 @@ export function useFamilyContext(user: User | null) {
 
         if (membersError) throw membersError;
 
-        const activeMemberUserIds = (activeMembers ?? [])
+        const activeMemberUserIds = (activeMembersRows ?? [])
           .map((m) => m.user_id)
           .filter((id): id is string => !!id);
 
+        const nextCtx: FamilyContext = {
+          familyId: fam.id,
+          familyName: fam.name,
+          ownerUserId: fam.user_id,
+          activeMembers: activeMembersRows?.length ?? 0,
+          activeMemberUserIds,
+        };
+
         if (!cancelled) {
-          setFamilyCtx({
-            familyId: fam.id,
-            familyName: fam.name,
-            ownerUserId: fam.user_id,
-            activeMembers: activeMembers?.length ?? 0,
-            activeMemberUserIds,
-          });
+          setFamilyCtx(nextCtx);
+          writeFamilyCache(nextCtx);
         }
       } catch (err) {
+        // ✅ si se fue el internet a mitad, cae a cache y NO spamees error
+        if (typeof window !== "undefined" && !navigator.onLine) {
+          if (!cancelled) {
+            const cached = readFamilyCache();
+            setFamilyCtx(cached);
+            setFamilyError(null);
+            setFamilyLoading(false);
+          }
+          return;
+        }
+
         console.error("useFamilyContext error:", err);
         if (!cancelled) {
-          setFamilyError("No se pudo cargar la información de tu familia. Revisa la sección Familia.");
+          setFamilyError(
+            "No se pudo cargar la información de tu familia. Revisa la sección Familia."
+          );
           setFamilyCtx(null);
         }
       } finally {
@@ -92,6 +165,7 @@ export function useFamilyContext(user: User | null) {
     };
 
     loadFamily();
+
     return () => {
       cancelled = true;
     };

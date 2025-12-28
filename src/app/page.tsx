@@ -29,6 +29,24 @@ type Goal = {
   status: "en-proceso" | "completado" | "pausado";
 };
 
+// -------------------------
+// Cache helpers
+// -------------------------
+function safeJSONParse<T>(raw: string | null): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+function cacheKeyForMonth(prefix: string, monthStart: Date) {
+  const y = monthStart.getFullYear();
+  const m = String(monthStart.getMonth() + 1).padStart(2, "0");
+  return `${prefix}-${y}-${m}`;
+}
+
 export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,8 +68,9 @@ export default function DashboardPage() {
       setDataError(null);
 
       try {
-        const { data: userData } = await supabase.auth.getUser();
-        if (!cancelled) setUser(userData?.user ?? null);
+        // ✅ OFFLINE-SAFE: lee sesión local (no red)
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!cancelled) setUser(sessionData.session?.user ?? null);
 
         const now = new Date();
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -62,13 +81,55 @@ export default function DashboardPage() {
           year: "numeric",
         });
 
+        const summaryCacheKey = cacheKeyForMonth("ff-dashboard-summary", monthStart);
+        const netWorthCacheKey = cacheKeyForMonth("ff-dashboard-networth", monthStart);
+
+        // =========================================================
+        // ✅ OFFLINE: NO tocar Supabase. Carga de cache si existe.
+        // =========================================================
+        if (typeof window !== "undefined" && !navigator.onLine) {
+          const cachedSummary = safeJSONParse<Pick<MonthlySummary, "incomes" | "expenses" | "balance">>(
+            localStorage.getItem(summaryCacheKey)
+          );
+
+          const cachedNetWorth = safeJSONParse<NetWorthSummary>(
+            localStorage.getItem(netWorthCacheKey)
+          );
+
+          if (!cancelled) {
+            setSummary({
+              incomes: Number(cachedSummary?.incomes ?? 0),
+              expenses: Number(cachedSummary?.expenses ?? 0),
+              balance: Number(cachedSummary?.balance ?? 0),
+              monthLabel,
+            });
+
+            setNetWorth({
+              assets: Number(cachedNetWorth?.assets ?? 0),
+              debts: Number(cachedNetWorth?.debts ?? 0),
+              netWorth: Number(cachedNetWorth?.netWorth ?? 0),
+            });
+
+            // Si quieres, puedes mostrar un mensajito suave:
+            // setDataError("Estás sin conexión. Mostrando datos en caché (si existen).");
+          }
+
+          return;
+        }
+
+        // =========================================================
+        // 🌐 ONLINE: cargar Supabase y guardar cache
+        // =========================================================
+
         // ---------- RESUMEN MENSUAL ----------
         try {
-          const { data: txs } = await supabase
+          const { data: txs, error } = await supabase
             .from("transactions")
             .select("type, amount, date")
             .gte("date", monthStart.toISOString())
             .lt("date", nextMonthStart.toISOString());
+
+          if (error) throw error;
 
           let incomes = 0;
           let expenses = 0;
@@ -79,25 +140,47 @@ export default function DashboardPage() {
             if (tx.type === "gasto") expenses += amt;
           });
 
-          if (!cancelled) {
-            setSummary({
-              incomes,
-              expenses,
-              balance: incomes - expenses,
-              monthLabel,
-            });
+          const nextSummary: MonthlySummary = {
+            incomes,
+            expenses,
+            balance: incomes - expenses,
+            monthLabel,
+          };
+
+          if (!cancelled) setSummary(nextSummary);
+
+          // ✅ Cache resumen mensual
+          if (typeof window !== "undefined") {
+            try {
+              localStorage.setItem(
+                summaryCacheKey,
+                JSON.stringify({
+                  incomes: nextSummary.incomes,
+                  expenses: nextSummary.expenses,
+                  balance: nextSummary.balance,
+                })
+              );
+            } catch {}
           }
         } catch (err) {
           console.warn("No se pudo cargar resumen mensual:", err);
-          if (!cancelled) {
-            setSummary({
-              incomes: 0,
-              expenses: 0,
-              balance: 0,
-              monthLabel,
-            });
-            setDataError("No se pudieron cargar algunos datos de este mes.");
+
+          // fallback a cache si falló
+          if (typeof window !== "undefined") {
+            const cached = safeJSONParse<any>(localStorage.getItem(summaryCacheKey));
+            if (!cancelled) {
+              setSummary({
+                incomes: Number(cached?.incomes ?? 0),
+                expenses: Number(cached?.expenses ?? 0),
+                balance: Number(cached?.balance ?? 0),
+                monthLabel,
+              });
+            }
+          } else if (!cancelled) {
+            setSummary({ incomes: 0, expenses: 0, balance: 0, monthLabel });
           }
+
+          if (!cancelled) setDataError("No se pudieron cargar algunos datos de este mes.");
         }
 
         // ---------- VALOR PATRIMONIAL ----------
@@ -107,6 +190,9 @@ export default function DashboardPage() {
             supabase.from("debts").select("current_balance, total_amount"),
           ]);
 
+          if (assetsRes.error) throw assetsRes.error;
+          if (debtsRes.error) throw debtsRes.error;
+
           const assetsTotal = (assetsRes.data ?? []).reduce(
             (acc: number, row: any) => acc + (Number(row.current_value) || 0),
             0
@@ -114,28 +200,42 @@ export default function DashboardPage() {
 
           const debtsTotal = (debtsRes.data ?? []).reduce(
             (acc: number, row: any) =>
-              acc +
-              (Number(row.current_balance ?? row.total_amount ?? 0) || 0),
+              acc + (Number(row.current_balance ?? row.total_amount ?? 0) || 0),
             0
           );
 
-          if (!cancelled) {
-            setNetWorth({
-              assets: assetsTotal,
-              debts: debtsTotal,
-              netWorth: assetsTotal - debtsTotal,
-            });
+          const nextNetWorth: NetWorthSummary = {
+            assets: assetsTotal,
+            debts: debtsTotal,
+            netWorth: assetsTotal - debtsTotal,
+          };
+
+          if (!cancelled) setNetWorth(nextNetWorth);
+
+          // ✅ Cache net worth
+          if (typeof window !== "undefined") {
+            try {
+              localStorage.setItem(netWorthCacheKey, JSON.stringify(nextNetWorth));
+            } catch {}
           }
         } catch (err) {
           console.warn("No se pudo cargar patrimonio:", err);
-          if (!cancelled) {
-            setNetWorth({
-              assets: 0,
-              debts: 0,
-              netWorth: 0,
-            });
-            setDataError("No se pudieron cargar algunos datos de patrimonio.");
+
+          // fallback a cache si falló
+          if (typeof window !== "undefined") {
+            const cached = safeJSONParse<NetWorthSummary>(localStorage.getItem(netWorthCacheKey));
+            if (!cancelled) {
+              setNetWorth({
+                assets: Number(cached?.assets ?? 0),
+                debts: Number(cached?.debts ?? 0),
+                netWorth: Number(cached?.netWorth ?? 0),
+              });
+            }
+          } else if (!cancelled) {
+            setNetWorth({ assets: 0, debts: 0, netWorth: 0 });
           }
+
+          if (!cancelled) setDataError("No se pudieron cargar algunos datos de patrimonio.");
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -143,6 +243,7 @@ export default function DashboardPage() {
     }
 
     load();
+
     return () => {
       cancelled = true;
     };
@@ -151,10 +252,8 @@ export default function DashboardPage() {
   const balanceTag = useMemo(() => {
     if (!summary) return null;
     const { balance } = summary;
-    if (balance > 0)
-      return { label: "Mes superavitario", tone: "positivo" as const };
-    if (balance < 0)
-      return { label: "Mes en rojo", tone: "negativo" as const };
+    if (balance > 0) return { label: "Mes superavitario", tone: "positivo" as const };
+    if (balance < 0) return { label: "Mes en rojo", tone: "negativo" as const };
     return { label: "Mes tablas", tone: "neutro" as const };
   }, [summary]);
 
@@ -198,9 +297,7 @@ export default function DashboardPage() {
                     Resumen de este mes
                   </h2>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {summary
-                      ? `Movimientos del mes de ${summary.monthLabel}.`
-                      : "Cargando movimientos recientes..."}
+                    {summary ? `Movimientos del mes de ${summary.monthLabel}.` : "Cargando movimientos recientes..."}
                   </p>
                 </div>
                 {balanceTag && (
@@ -219,36 +316,22 @@ export default function DashboardPage() {
               </div>
 
               <div className="mt-3 grid gap-3 md:grid-cols-3">
-                <SummaryCard
-                  label="Ingresos del mes"
-                  value={summary?.incomes ?? 0}
-                  tone="positive"
-                />
-                <SummaryCard
-                  label="Gastos del mes"
-                  value={summary?.expenses ?? 0}
-                  tone="negative"
-                />
+                <SummaryCard label="Ingresos del mes" value={summary?.incomes ?? 0} tone="positive" />
+                <SummaryCard label="Gastos del mes" value={summary?.expenses ?? 0} tone="negative" />
                 <SummaryCard
                   label="Balance del mes"
                   value={summary?.balance ?? 0}
-                  tone={
-                    summary && summary.balance >= 0 ? "positive" : "negative"
-                  }
+                  tone={summary && summary.balance >= 0 ? "positive" : "negative"}
                 />
               </div>
 
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
                 <div>
-                  {dataError
-                    ? dataError
-                    : "Para ver el detalle por categoría, entra a “Gastos e ingresos”."}
+                  {dataError ? dataError : "Para ver el detalle por categoría, entra a “Gastos e ingresos”."}
                 </div>
                 <div className="flex gap-2">
                   <LinkButton href="/gastos">Ver gastos / ingresos</LinkButton>
-                  <LinkButton href="/familia/dashboard">
-                    Ver dashboard familiar
-                  </LinkButton>
+                  <LinkButton href="/familia/dashboard">Ver dashboard familiar</LinkButton>
                 </div>
               </div>
             </div>
@@ -264,36 +347,21 @@ export default function DashboardPage() {
                 </p>
 
                 <div className="mt-3 space-y-2">
-                  <SimpleRow
-                    label="Activos personales"
-                    value={netWorth?.assets ?? 0}
-                  />
-                  <SimpleRow
-                    label="Deudas personales"
-                    value={netWorth?.debts ?? 0}
-                  />
-                  <SimpleRow
-                    label="Valor neto"
-                    value={netWorth?.netWorth ?? 0}
-                    highlight
-                  />
+                  <SimpleRow label="Activos personales" value={netWorth?.assets ?? 0} />
+                  <SimpleRow label="Deudas personales" value={netWorth?.debts ?? 0} />
+                  <SimpleRow label="Valor neto" value={netWorth?.netWorth ?? 0} highlight />
                 </div>
 
                 <div className="mt-3 text-right">
-                  <LinkButton href="/patrimonio">
-                    Ver detalle de activos / deudas
-                  </LinkButton>
+                  <LinkButton href="/patrimonio">Ver detalle de activos / deudas</LinkButton>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-sky-100 bg-sky-50/80 p-3 text-[11px] shadow-sm dark:border-sky-900/50 dark:bg-sky-900/10 dark:text-slate-100">
-                <p className="font-medium text-sky-800 dark:text-sky-100">
-                  Tip rápido:
-                </p>
+                <p className="font-medium text-sky-800 dark:text-sky-100">Tip rápido:</p>
                 <p className="mt-1 text-slate-600 dark:text-slate-200">
-                  Si este mes tu balance es positivo, decide desde hoy qué
-                  porcentaje se va directo a ahorro o a bajar deudas, antes de
-                  que “se pierda” en gastos chicos.
+                  Si este mes tu balance es positivo, decide desde hoy qué porcentaje se va directo a ahorro o a bajar deudas,
+                  antes de que “se pierda” en gastos chicos.
                 </p>
               </div>
             </div>
@@ -307,8 +375,7 @@ export default function DashboardPage() {
                 Define un objetivo financiero
               </h2>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Puede ser ahorrar para un fondo de emergencia, pagar una deuda
-                o juntar para unas vacaciones.
+                Puede ser ahorrar para un fondo de emergencia, pagar una deuda o juntar para unas vacaciones.
               </p>
 
               <div className="mt-3 space-y-2 text-[12px]">
@@ -323,6 +390,7 @@ export default function DashboardPage() {
                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-950"
                   />
                 </div>
+
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
@@ -335,6 +403,7 @@ export default function DashboardPage() {
                       className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-950"
                     />
                   </div>
+
                   <div>
                     <label className="mb-1 block text-[11px] text-slate-600 dark:text-slate-300">
                       Fecha objetivo (opcional)
@@ -349,20 +418,17 @@ export default function DashboardPage() {
                 </div>
 
                 <button
-  type="button"
-  onClick={handleAddGoal}
-  className="mt-2 w-full rounded-full bg-sky-500 py-2 text-[12px] font-semibold text-white shadow-sm transition hover:bg-sky-600 disabled:bg-sky-300"
-  disabled={!goalTitle.trim() || !goalTarget.trim()}
->
-  Guardar objetivo rápido
-</button>
+                  type="button"
+                  onClick={handleAddGoal}
+                  className="mt-2 w-full rounded-full bg-sky-500 py-2 text-[12px] font-semibold text-white shadow-sm transition hover:bg-sky-600 disabled:bg-sky-300"
+                  disabled={!goalTitle.trim() || !goalTarget.trim()}
+                >
+                  Guardar objetivo rápido
+                </button>
 
-<p className="text-[10px] text-slate-400 dark:text-slate-500">
-  Objetivo rápido para referencia personal.  
-  Las metas familiares con seguimiento automático se gestionan
-  desde el módulo de Familia.
-</p>
-
+                <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                  Objetivo rápido para referencia personal. Las metas familiares con seguimiento automático se gestionan desde el módulo de Familia.
+                </p>
               </div>
             </div>
 
@@ -373,17 +439,13 @@ export default function DashboardPage() {
                   Tus objetivos
                 </h2>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  {goals.length === 0
-                    ? "Empieza creando tu primer objetivo."
-                    : `${goals.length} objetivo(s) activos`}
+                  {goals.length === 0 ? "Empieza creando tu primer objetivo." : `${goals.length} objetivo(s) activos`}
                 </span>
               </div>
 
               {goals.length === 0 ? (
                 <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-3 text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
-                  Aquí verás tus objetivos con su monto meta y fecha. Más
-                  adelante podrás ligar cada uno a categorías específicas de
-                  gastos.
+                  Aquí verás tus objetivos con su monto meta y fecha. Más adelante podrás ligar cada uno a categorías específicas de gastos.
                 </div>
               ) : (
                 <ul className="mt-3 space-y-2 text-[12px]">
@@ -406,9 +468,7 @@ export default function DashboardPage() {
                             })}
                           </span>
                           {goal.deadline &&
-                            ` · Para: ${new Date(
-                              goal.deadline
-                            ).toLocaleDateString("es-MX")}`}
+                            ` · Para: ${new Date(goal.deadline).toLocaleDateString("es-MX")}`}
                         </p>
                       </div>
                       <span className="mt-0.5 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-100">
@@ -449,9 +509,7 @@ function SummaryCard({
       <p className="text-slate-500 dark:text-slate-400">{label}</p>
       <p
         className={`mt-1 text-base font-semibold ${
-          isPositive
-            ? "text-emerald-600 dark:text-emerald-300"
-            : "text-rose-600 dark:text-rose-300"
+          isPositive ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"
         }`}
       >
         {formatted}
@@ -478,11 +536,7 @@ function SimpleRow({
   return (
     <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-300">
       <span>{label}</span>
-      <span
-        className={`font-semibold ${
-          highlight ? "text-sky-700 dark:text-sky-300" : ""
-        }`}
-      >
+      <span className={`font-semibold ${highlight ? "text-sky-700 dark:text-sky-300" : ""}`}>
         {formatted}
       </span>
     </div>

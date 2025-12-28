@@ -124,17 +124,17 @@ export default function FamilyDashboardPage() {
         setLoading(true);
         setError(null);
 
-        const {
-          data: { user },
-          error: userError,
-        } = await supabase.auth.getUser();
+        const { data } = await supabase.auth.getSession();
+const user = data.session?.user ?? null;
 
-        if (userError) throw userError;
-        if (!user) {
-          setError("No se encontró el usuario. Inicia sesión de nuevo.");
-          setLoading(false);
-          return;
-        }
+if (!user) {
+  setError("No se encontró el usuario. Inicia sesión de nuevo.");
+  setLoading(false);
+  return;
+}
+
+setUser(user);
+
 
         setUser(user);
 

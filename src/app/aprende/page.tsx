@@ -27,28 +27,29 @@ export default function AprendePage() {
   const [authPassword, setAuthPassword] = useState("");
 
   useEffect(() => {
-    let ignore = false;
+  let ignore = false;
 
-    async function loadUser() {
-      setAuthLoading(true);
-      setAuthError(null);
-      try {
-        const { data, error } = await supabase.auth.getUser();
-        if (error && (error as any).name !== "AuthSessionMissingError") {
-          console.error("Error obteniendo usuario actual", error);
-          if (!ignore) {
-            setAuthError("Hubo un problema al cargar tu sesión.");
-          }
-        }
-        if (!ignore) {
-          setUser(data?.user ?? null);
-        }
-      } finally {
-        if (!ignore) setAuthLoading(false);
+  async function loadUser() {
+    setAuthLoading(true);
+    setAuthError(null);
+
+    try {
+      // ✅ OFFLINE-SAFE
+      const { data } = await supabase.auth.getSession();
+      const sessionUser = data.session?.user ?? null;
+
+      if (!ignore) setUser(sessionUser);
+    } catch (err) {
+      if (!ignore) {
+        setUser(null);
+        setAuthError("Hubo un problema al cargar tu sesión.");
       }
+    } finally {
+      if (!ignore) setAuthLoading(false);
     }
+  }
 
-    loadUser();
+  loadUser();
 
     const {
       data: { subscription },

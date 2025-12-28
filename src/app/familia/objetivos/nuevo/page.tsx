@@ -39,18 +39,33 @@ export default function NewFamilyGoalPage() {
     track_category: "",
   });
 
-  useEffect(() => {
-    const getUser = async () => {
-      const { data, error } = await supabase.auth.getUser();
-      if (error) {
-        console.error(error);
-        setError("No se pudo obtener el usuario.");
+ useEffect(() => {
+  let cancelled = false;
+
+  const getUser = async () => {
+    try {
+      // ✅ OFFLINE-SAFE
+      const { data } = await supabase.auth.getSession();
+      const sessionUser = data.session?.user ?? null;
+
+      if (!sessionUser) {
+        if (!cancelled) setError("No se encontró el usuario. Inicia sesión de nuevo.");
         return;
       }
-      setUser(data.user);
-    };
-    getUser();
-  }, []);
+
+      if (!cancelled) setUser(sessionUser);
+    } catch (err) {
+      if (!cancelled) setError("No se pudo obtener el usuario.");
+    }
+  };
+
+  getUser();
+
+  return () => {
+    cancelled = true;
+  };
+}, []);
+
 
   const handleChange = (
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>

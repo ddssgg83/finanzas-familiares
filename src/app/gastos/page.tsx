@@ -21,6 +21,9 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { AppHeader } from "@/components/AppHeader";
 import { PageShell } from "@/components/ui/PageShell";
 
+// ✅ Para ref (evita depender de si kit Input tiene forwardRef o no)
+import { Input as RefInput } from "@/components/ui/input";
+
 import { formatMoney as fmtMoney, formatDateDisplay, toNumberSafe } from "@/lib/format";
 import { useFamilyContext } from "@/hooks/useFamilyContext";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
@@ -30,7 +33,7 @@ import {
   Card,
   EmptyState,
   Help,
-  Input,
+  Input as UIInput,
   Label,
   LinkButton,
   ListItem,
@@ -43,6 +46,29 @@ import {
 
 export const dynamic = "force-dynamic";
 
+function dedupeAndSortTx(list: Tx[]) {
+  const byId = new Map<string, Tx>();
+  for (const t of list) byId.set(t.id, t);
+  const merged = Array.from(byId.values());
+
+  merged.sort((a, b) => {
+    if (a.date !== b.date) return a.date > b.date ? -1 : 1;
+    const aCreated = a.created_at ?? "";
+    const bCreated = b.created_at ?? "";
+    if (aCreated && bCreated && aCreated !== bCreated) return aCreated > bCreated ? -1 : 1;
+    return 0;
+  });
+
+  return merged;
+}
+
+function mergeKeepLocalOnly(prev: Tx[], incoming: Tx[]) {
+  // prev puede traer localOnly; incoming es lo que venga (supabase o cache)
+  // Resultado: 1 sola fila por id
+  const localOnly = prev.filter((t) => t.localOnly);
+  return dedupeAndSortTx([...localOnly, ...incoming]);
+}
+
 type TxType = "ingreso" | "gasto";
 type ExportType = "todos" | "ingresos" | "gastos";
 
@@ -54,6 +80,8 @@ type Tx = {
   amount: number;
   method: string;
   notes?: string | null;
+
+  user_id?: string | null; // legacy/compat (en tu DB existe)
   created_by?: string | null;
   card_id?: string | null;
 
@@ -143,6 +171,16 @@ function getCurrentMonthKey(date = new Date()) {
   return `${y}-${m}`;
 }
 
+function getMonthRange(monthKey: string) {
+  const [yearStr, monthStr] = monthKey.split("-");
+  const y = Number(yearStr);
+  const m = Number(monthStr);
+  const from = `${monthKey}-01`;
+  const lastDay = new Date(y, m, 0).getDate(); // m ya es 1..12
+  const to = `${monthKey}-${String(lastDay).padStart(2, "0")}`;
+  return { from, to };
+}
+
 function todayYMD() {
   const d = new Date();
   const y = d.getFullYear();
@@ -217,7 +255,7 @@ export default function GastosPage() {
   const canUseFamilyScope = Boolean(familyCtx && isFamilyOwner);
   const [viewScope, setViewScope] = useState<"mine" | "family">("mine");
 
-  // (extra) miembros para labels bonitos
+  // miembros para labels bonitos
   const [membersByUserId, setMembersByUserId] = useState<
     Record<string, { userId: string; fullName: string; shortLabel: string }>
   >({});
@@ -333,23 +371,27 @@ export default function GastosPage() {
   // AUTH
   // =========================================================
   useEffect(() => {
-    let ignore = false;
+  let ignore = false;
 
-    async function loadUser() {
-      setAuthLoading(true);
-      setAuthError(null);
-      try {
-        const { data, error } = await supabase.auth.getUser();
-        if (error && (error as any).name !== "AuthSessionMissingError") {
-          console.error("Error obteniendo usuario actual", error);
-        }
-        if (!ignore) setUser(data?.user ?? null);
-      } finally {
-        if (!ignore) setAuthLoading(false);
-      }
+  async function loadUser() {
+    setAuthLoading(true);
+    setAuthError(null);
+
+    try {
+      // ✅ OFFLINE-SAFE (no pega a red)
+      const { data } = await supabase.auth.getSession();
+      const sessionUser = data.session?.user ?? null;
+
+      if (!ignore) setUser(sessionUser);
+    } catch (err) {
+      // Esto casi nunca falla, pero por seguridad:
+      if (!ignore) setUser(null);
+    } finally {
+      if (!ignore) setAuthLoading(false);
     }
+  }
 
-    loadUser();
+  loadUser();
 
     const {
       data: { subscription },
@@ -456,175 +498,228 @@ export default function GastosPage() {
   }, []);
 
   // =========================================================
-  // Offline queue (cargar)
-  // =========================================================
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+// Helpers (dedupe / merge / sort)
+// =========================================================
+function sortTxs(list: Tx[]): Tx[] {
+  const arr = [...list];
+  arr.sort((a, b) => {
+    if (a.date !== b.date) return a.date > b.date ? -1 : 1;
+    const aCreated = a.created_at ?? "";
+    const bCreated = b.created_at ?? "";
+    if (aCreated && bCreated && aCreated !== bCreated) return aCreated > bCreated ? -1 : 1;
+    return 0;
+  });
+  return arr;
+}
 
-    async function loadOffline() {
-      try {
+function dedupeAndSortTx(list: Tx[]): Tx[] {
+  const byId = new Map<string, Tx>();
+  for (const tx of list) {
+    // último gana
+    byId.set(tx.id, tx);
+  }
+  return sortTxs(Array.from(byId.values()));
+}
+
+// Mantiene los localOnly existentes y mete lo de server sin duplicar por id
+function mergeKeepLocalOnly(prev: Tx[], server: Tx[]): Tx[] {
+  const localOnly = prev.filter((t) => t.localOnly);
+
+  const byId = new Map<string, Tx>();
+  for (const t of localOnly) byId.set(t.id, t);
+  for (const t of server) byId.set(t.id, t);
+
+  return sortTxs(Array.from(byId.values()));
+}
+
+// =========================================================
+// Cargar movimientos (Supabase / Cache / Offline)
+// =========================================================
+useEffect(() => {
+  const currentUser = user;
+  if (!currentUser) {
+    setTransactions([]);
+    return;
+  }
+
+  const userId = currentUser.id;
+  let cancelled = false;
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+
+    const { from, to } = getMonthRange(month);
+
+    const mapRows = (rows: any[]): Tx[] =>
+      (rows ?? []).map((t: any) => ({
+        id: t.id,
+        date: t.date,
+        type: t.type,
+        category: t.category,
+        amount: Number(t.amount),
+        method: t.method,
+        notes: t.notes,
+        owner_user_id: t.owner_user_id ?? null,
+        spender_user_id: t.spender_user_id ?? null,
+        spender_label: t.spender_label ?? null,
+        created_by: t.created_by ?? null,
+        card_id: t.card_id ?? null,
+        family_group_id: t.family_group_id ?? null,
+        goal_id: t.goal_id ?? null,
+        created_at: t.created_at ?? null,
+      }));
+
+    try {
+      // =========================
+      // 🚫 OFFLINE: NO SUPABASE
+      // =========================
+      if (typeof window !== "undefined" && !navigator.onLine) {
+        const cacheRaw = localStorage.getItem(`ff-cache-${month}`);
+        const cached = cacheRaw ? JSON.parse(cacheRaw) : [];
+        const cachedMapped = mapRows(cached);
+
         const offline = await getOfflineTxs();
-        if (offline.length) {
-          setTransactions((prev) => [
-            ...offline.map((t: any) => ({ ...t, localOnly: true })),
-            ...prev,
-          ]);
-        }
-      } catch (err) {
-        console.error("Error cargando movimientos offline", err);
-      }
-    }
-
-    loadOffline();
-  }, []);
-
-  // =========================================================
-  // Cargar movimientos (Supabase)
-  // =========================================================
-  useEffect(() => {
-    const currentUser = user;
-    if (!currentUser) {
-      setTransactions([]);
-      return;
-    }
-
-    const userId = currentUser.id;
-
-    async function load() {
-      setLoading(true);
-      setError(null);
-
-      try {
-        const [year, monthNumber] = month.split("-");
-        const from = `${month}-01`;
-        const to = `${month}-${new Date(Number(year), Number(monthNumber), 0)
-          .getDate()
-          .toString()
-          .padStart(2, "0")}`;
-
-        let query = supabase
-          .from("transactions")
-          .select("*")
-          .gte("date", from)
-          .lte("date", to)
-          .order("date", { ascending: false })
-          .order("created_at", { ascending: false });
-
-        if (canUseFamilyScope) {
-          if (viewScope === "mine") {
-            query = query.eq("owner_user_id", userId);
-          } else {
-            const ids = familyCtx?.activeMemberUserIds ?? [userId];
-            query = ids.length ? query.in("user_id", ids) : query.eq("user_id", userId);
-          }
-        } else {
-          query = query.eq("user_id", userId);
-        }
-
-        const { data, error } = await query;
-        if (error) throw error;
-
-        const mapped: Tx[] = (data ?? []).map((t: any) => ({
+        const offlineMapped: Tx[] = offline.map((t) => ({
           id: t.id,
           date: t.date,
           type: t.type,
           category: t.category,
           amount: Number(t.amount),
           method: t.method,
-          notes: t.notes,
+          notes: t.notes ?? null,
           owner_user_id: t.owner_user_id ?? null,
           spender_user_id: t.spender_user_id ?? null,
-          spender_label: t.spender_label ?? null,
+          spender_label: t.spender_label ?? "Yo",
           created_by: t.created_by ?? null,
           card_id: t.card_id ?? null,
           family_group_id: t.family_group_id ?? null,
           goal_id: t.goal_id ?? null,
-          created_at: t.created_at ?? null,
+          created_at: null,
+          localOnly: true,
         }));
 
-        setTransactions(mapped);
-
-        if (typeof window !== "undefined") {
-          localStorage.setItem(`ff-cache-${month}`, JSON.stringify(data ?? []));
+        if (!cancelled) {
+          setTransactions(dedupeAndSortTx([...offlineMapped, ...cachedMapped]));
         }
-      } catch (err) {
-        console.error(err);
-        setError("No se pudieron cargar los movimientos.");
-
-        if (typeof window !== "undefined") {
-          const cache = localStorage.getItem(`ff-cache-${month}`);
-          if (cache) {
-            try {
-              const parsed = JSON.parse(cache);
-              setTransactions(
-                (parsed ?? []).map((t: any) => ({
-                  id: t.id,
-                  date: t.date,
-                  type: t.type,
-                  category: t.category,
-                  amount: Number(t.amount),
-                  method: t.method,
-                  notes: t.notes,
-                  owner_user_id: t.owner_user_id ?? null,
-                  spender_user_id: t.spender_user_id ?? null,
-                  spender_label: t.spender_label ?? null,
-                  created_by: t.created_by ?? null,
-                  card_id: t.card_id ?? null,
-                  family_group_id: t.family_group_id ?? null,
-                  goal_id: t.goal_id ?? null,
-                  created_at: t.created_at ?? null,
-                }))
-              );
-            } catch {}
-          }
-        }
-      } finally {
-        setLoading(false);
+        return;
       }
-    }
 
-    if (typeof window !== "undefined") load();
-  }, [month, user, viewScope, canUseFamilyScope, familyCtx?.activeMemberUserIds, familyCtx?.familyId]);
+      // =========================
+      // 🌐 ONLINE: SUPABASE
+      // =========================
+      let query = supabase
+        .from("transactions")
+        .select("*")
+        .gte("date", from)
+        .lte("date", to)
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false });
 
-  // =========================================================
-  // Sync offline al volver internet
-  // =========================================================
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!user) return;
+      if (familyCtx?.familyId) {
+        query = query.eq("family_group_id", familyCtx.familyId);
 
-    const userId = user.id;
-    let cancelled = false;
+        if (canUseFamilyScope) {
+          if (viewScope === "mine") {
+            query = query.eq("owner_user_id", userId);
+          } else {
+            const ids = familyCtx.activeMemberUserIds?.length
+              ? familyCtx.activeMemberUserIds
+              : [userId];
+            query = query.or(
+              `spender_user_id.in.(${ids.join(",")}),owner_user_id.in.(${ids.join(",")}),user_id.in.(${ids.join(",")})`
+            );
+          }
+        } else {
+          query = query.or(
+            `spender_user_id.eq.${userId},user_id.eq.${userId},owner_user_id.eq.${userId}`
+          );
+        }
+      } else {
+        query = query.or(
+          `spender_user_id.eq.${userId},user_id.eq.${userId},owner_user_id.eq.${userId}`
+        );
+      }
 
-    const syncAndMark = async () => {
-      if (cancelled) return;
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const mapped = mapRows(data ?? []);
+
+      if (!cancelled) {
+        setTransactions((prev) => mergeKeepLocalOnly(prev, mapped));
+      }
+
+      localStorage.setItem(`ff-cache-${month}`, JSON.stringify(data ?? []));
+    } catch (err) {
+      if (!cancelled) setError("No se pudieron cargar los movimientos.");
 
       try {
-        const synced = await syncOfflineTxs(userId);
-        if (!synced.length) return;
-
-        alert(`Se sincronizaron ${synced.length} movimientos que estaban guardados sin conexión.`);
-
-        const syncedIds = new Set(synced.map((t: any) => t.id));
-
+        const cache = localStorage.getItem(`ff-cache-${month}`);
+        const parsed = cache ? JSON.parse(cache) : [];
         setTransactions((prev) =>
-          prev.map((tx) => (tx.localOnly && syncedIds.has(tx.id) ? { ...tx, localOnly: false } : tx))
+          mergeKeepLocalOnly(prev, mapRows(parsed))
         );
-      } catch (err) {
-        console.error("Error al sincronizar movimientos offline", err);
-      }
-    };
+      } catch {}
+    } finally {
+      if (!cancelled) setLoading(false);
+    }
+  }
 
-    if (navigator.onLine) syncAndMark();
+  load();
+  return () => {
+    cancelled = true;
+  };
+}, [
+  month,
+  user,
+  viewScope,
+  canUseFamilyScope,
+  familyCtx?.familyId,
+  familyCtx?.activeMemberUserIds,
+]);
 
-    const handleOnline = () => syncAndMark();
-    window.addEventListener("online", handleOnline);
+// =========================================================
+// Sync offline al volver internet (solo cuando hay red)
+// =========================================================
+useEffect(() => {
+  if (typeof window === "undefined") return;
+  if (!user) return;
 
-    return () => {
-      cancelled = true;
-      window.removeEventListener("online", handleOnline);
-    };
-  }, [user]);
+  const userId = user.id;
+  let cancelled = false;
+
+  const syncAndMark = async () => {
+    if (cancelled) return;
+    if (!navigator.onLine) return;
+
+    try {
+      const synced = await syncOfflineTxs(userId);
+      if (!synced?.length) return;
+
+      alert(`Se sincronizaron ${synced.length} movimientos que estaban guardados sin conexión.`);
+
+      const syncedIds = new Set(synced.map((t: any) => t.id));
+
+      // marca localOnly=false si siguen en UI
+      setTransactions((prev) =>
+        prev.map((tx) => (tx.localOnly && syncedIds.has(tx.id) ? { ...tx, localOnly: false } : tx))
+      );
+    } catch (err) {
+      console.error("Error al sincronizar movimientos offline", err);
+    }
+  };
+
+  if (navigator.onLine) syncAndMark();
+
+  const handleOnline = () => syncAndMark();
+  window.addEventListener("online", handleOnline);
+
+  return () => {
+    cancelled = true;
+    window.removeEventListener("online", handleOnline);
+  };
+}, [user]);
 
   // =========================================================
   // Presupuesto mensual (localStorage)
@@ -1080,7 +1175,6 @@ export default function GastosPage() {
       }
     }
 
-    // Conexión con Patrimonio (sin tocar DB)
     lines.push(`Impacto estimado en tu patrimonio este mes: ${formatMoney(flujo)} (flujo neto del mes).`);
 
     return lines;
@@ -1192,202 +1286,255 @@ export default function GastosPage() {
     const fileMonth = month.replace("-", "_");
     doc.save(`reporte_finanzas_${fileMonth}.pdf`);
   };
+function upsertAndSortTx(prev: Tx[], incoming: Tx): Tx[] {
+  const byId = new Map<string, Tx>();
 
-  // =========================================================
-  // CRUD movimientos
-  // =========================================================
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
+  // primero lo nuevo (para que gane en caso de conflicto)
+  byId.set(incoming.id, incoming);
 
-    if (!user) {
-      alert("Debes iniciar sesión para guardar movimientos.");
+  // luego lo anterior (solo si no existe)
+  for (const t of prev) {
+    if (!byId.has(t.id)) byId.set(t.id, t);
+  }
+
+  const merged = Array.from(byId.values());
+
+  merged.sort((a, b) => {
+    if (a.date !== b.date) return a.date > b.date ? -1 : 1;
+    const aCreated = a.created_at ?? "";
+    const bCreated = b.created_at ?? "";
+    if (aCreated && bCreated && aCreated !== bCreated) return aCreated > bCreated ? -1 : 1;
+    return 0;
+  });
+
+  return merged;
+}
+
+ // =========================================================
+// CRUD movimientos
+// =========================================================
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setError(null);
+
+  if (!user) {
+    alert("Debes iniciar sesión para guardar movimientos.");
+    return;
+  }
+
+  const amountNumber = toNumberSafe(form.amount);
+  if (!form.date) return alert("Selecciona una fecha.");
+  if (!Number.isFinite(amountNumber) || amountNumber <= 0) return alert("Ingresa un monto válido mayor a 0.");
+
+  const spenderLabel = form.spenderLabel || "Yo";
+  const goalId = form.goalId || "";
+
+  const basePayload = {
+    date: form.date,
+    type: form.type,
+    category: form.category,
+    amount: amountNumber,
+    method: form.method,
+    notes: form.notes || null,
+    spender_label: spenderLabel,
+    goal_id: goalId || null,
+    family_group_id: familyCtx?.familyId ?? null,
+  };
+
+  const selectedCard = selectedCardId ? cards.find((c) => c.id === selectedCardId) : undefined;
+  const ownerUserId = selectedCard?.owner_id ?? user.id;
+  const spenderUserId = user.id;
+
+  setSaving(true);
+
+  try {
+    // Offline
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      const id = crypto.randomUUID();
+
+      const localTx: Tx = {
+        id,
+        ...basePayload,
+        owner_user_id: ownerUserId,
+        spender_user_id: spenderUserId,
+        created_by: user.id,
+        card_id: selectedCardId ?? null,
+        localOnly: true,
+      };
+
+      // ✅ Upsert + sort (evita keys duplicadas)
+      setTransactions((prev) => upsertAndSortTx(prev, localTx));
+
+      try {
+        await saveOfflineTx({
+          id: localTx.id,
+          date: localTx.date,
+          type: localTx.type,
+          category: localTx.category,
+          amount: localTx.amount,
+          method: localTx.method,
+          notes: localTx.notes ?? null,
+
+          owner_user_id: ownerUserId,
+          spender_user_id: spenderUserId,
+          spender_label: spenderLabel,
+          created_by: user.id,
+          card_id: selectedCardId ?? null,
+          family_group_id: familyCtx?.familyId ?? null,
+          goal_id: goalId || null,
+        });
+      } catch (err) {
+        console.error("Error guardando movimiento offline", err);
+      }
+
+      alert("Estás sin conexión. El movimiento se guardó en este dispositivo y se sincronizará cuando vuelva internet.");
+      clearDraft();
+      resetForm();
       return;
     }
 
-    const amountNumber = toNumberSafe(form.amount);
-    if (!form.date) return alert("Selecciona una fecha.");
-    if (!Number.isFinite(amountNumber) || amountNumber <= 0) return alert("Ingresa un monto válido mayor a 0.");
-
-    const spenderLabel = form.spenderLabel || "Yo";
-    const goalId = form.goalId || "";
-
-    const basePayload = {
-      date: form.date,
-      type: form.type,
-      category: form.category,
-      amount: amountNumber,
-      method: form.method,
-      notes: form.notes || null,
-      spender_label: spenderLabel,
-      goal_id: goalId || null,
-      family_group_id: familyCtx?.familyId ?? null,
-    };
-
-    const selectedCard = selectedCardId ? cards.find((c) => c.id === selectedCardId) : undefined;
-    const ownerUserId = selectedCard?.owner_id ?? user.id;
-    const spenderUserId = user.id;
-
-    setSaving(true);
-
-    try {
-      // Offline
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
-        const id = crypto.randomUUID();
-
-        const localTx: Tx = {
-          id,
+    // Online
+    if (editingId) {
+      const { error } = await supabase
+        .from("transactions")
+        .update({
           ...basePayload,
+          user_id: user.id,
           owner_user_id: ownerUserId,
           spender_user_id: spenderUserId,
+          card_id: selectedCardId ?? null,
+          created_by: user.id,
+        })
+        .eq("id", editingId);
+
+      if (error) throw error;
+
+      // ✅ Update + sort (mantiene orden y evita duplicados raros)
+      setTransactions((prev) => {
+        const next = prev.map((t) =>
+          t.id === editingId
+            ? {
+                ...t,
+                ...basePayload,
+                owner_user_id: ownerUserId,
+                spender_user_id: spenderUserId,
+                created_by: user.id,
+                card_id: selectedCardId ?? null,
+              }
+            : t
+        );
+
+        // ordena al final para que si cambiaste fecha, se reacomode
+        next.sort((a, b) => {
+          if (a.date !== b.date) return a.date > b.date ? -1 : 1;
+          const aCreated = a.created_at ?? "";
+          const bCreated = b.created_at ?? "";
+          if (aCreated && bCreated && aCreated !== bCreated) return aCreated > bCreated ? -1 : 1;
+          return 0;
+        });
+
+        return next;
+      });
+    } else {
+      const { data, error } = await supabase
+        .from("transactions")
+        .insert({
+          ...basePayload,
+          user_id: user.id,
+          owner_user_id: ownerUserId,
+          spender_user_id: spenderUserId,
+          spender_label: spenderLabel,
           created_by: user.id,
           card_id: selectedCardId ?? null,
-          localOnly: true,
-        };
+        })
+        .select("id,date,type,category,amount,method,notes,user_id,owner_user_id,spender_user_id,spender_label,created_by,card_id,family_group_id,goal_id,created_at")
+        .single();
 
-        setTransactions((prev) => [localTx, ...prev]);
-
-        try {
-          await saveOfflineTx({
-            id: localTx.id,
-            date: localTx.date,
-            type: localTx.type,
-            category: localTx.category,
-            amount: localTx.amount,
-            method: localTx.method,
-            notes: localTx.notes ?? null,
-          });
-        } catch (err) {
-          console.error("Error guardando movimiento offline", err);
-        }
-
-        alert("Estás sin conexión. El movimiento se guardó en este dispositivo y se sincronizará cuando vuelva internet.");
-        clearDraft();
-        resetForm();
-        return;
-      }
-
-      // Online
-      if (editingId) {
-        const { error } = await supabase
-          .from("transactions")
-          .update({
-            ...basePayload,
-            user_id: user.id,
-            owner_user_id: ownerUserId,
-            spender_user_id: spenderUserId,
-            card_id: selectedCardId ?? null,
-            created_by: user.id,
-          })
-          .eq("id", editingId);
-
-        if (error) throw error;
-
-        setTransactions((prev) =>
-          prev.map((t) =>
-            t.id === editingId
-              ? { ...t, ...basePayload, owner_user_id: ownerUserId, spender_user_id: spenderUserId, created_by: user.id, card_id: selectedCardId ?? null }
-              : t
-          )
-        );
-      } else {
-        const { data, error } = await supabase
-          .from("transactions")
-          .insert({
-            ...basePayload,
-            user_id: user.id,
-            owner_user_id: ownerUserId,
-            spender_user_id: spenderUserId,
-            spender_label: spenderLabel,
-            created_by: user.id,
-            card_id: selectedCardId ?? null,
-          })
-          .select("id,date,type,category,amount,method,notes,owner_user_id,spender_user_id,spender_label,created_by,card_id,family_group_id,goal_id,created_at")
-          .single();
-
-        if (error) throw error;
-
-        const newTx: Tx = {
-          id: data.id,
-          date: data.date,
-          type: data.type,
-          category: data.category,
-          amount: Number(data.amount),
-          method: data.method,
-          notes: data.notes,
-          owner_user_id: data.owner_user_id ?? null,
-          spender_user_id: data.spender_user_id ?? null,
-          spender_label: data.spender_label ?? null,
-          created_by: data.created_by ?? null,
-          card_id: data.card_id ?? null,
-          family_group_id: data.family_group_id ?? null,
-          goal_id: data.goal_id ?? null,
-          created_at: data.created_at ?? null,
-        };
-
-        setTransactions((prev) => [newTx, ...prev]);
-      }
-
-      clearDraft();
-      resetForm();
-      setShowAdvanced(false);
-    } catch (err) {
-      console.error("Error en handleSubmit:", err);
-      setError("No se pudo guardar el movimiento.");
-      alert("No se pudo guardar el movimiento.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleEdit = (tx: Tx) => {
-    const inferredSpender = tx.spender_label ?? (tx.spender_user_id === user?.id ? "Yo" : "Otro");
-
-    setForm({
-      date: tx.date,
-      type: tx.type,
-      category: tx.category,
-      amount: String(tx.amount),
-      method: tx.method,
-      notes: tx.notes ?? "",
-      spenderLabel: inferredSpender,
-      goalId: tx.goal_id ?? "",
-    });
-
-    setSelectedCardId(tx.card_id ?? null);
-    setEditingId(tx.id);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const handleDuplicate = (tx: Tx) => {
-    setForm({
-      date: tx.date || todayYMD(),
-      type: tx.type,
-      category: tx.category,
-      amount: String(tx.amount),
-      method: tx.method,
-      notes: tx.notes ?? "",
-      spenderLabel: tx.spender_label ?? (tx.spender_user_id === user?.id ? "Yo" : "Otro"),
-      goalId: tx.goal_id ?? "",
-    });
-    setSelectedCardId(tx.card_id ?? null);
-    setEditingId(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const handleDelete = async (tx: Tx) => {
-    if (!isOnline) return alert("No puedes eliminar movimientos mientras estás sin conexión.");
-    if (!user) return alert("Debes iniciar sesión para eliminar movimientos.");
-
-    try {
-      const { error } = await supabase.from("transactions").delete().eq("id", tx.id).eq("user_id", user.id);
       if (error) throw error;
-      setTransactions((prev) => prev.filter((t) => t.id !== tx.id));
-    } catch (err) {
-      console.error(err);
-      alert("No se pudo eliminar el movimiento.");
+
+      const newTx: Tx = {
+        id: data.id,
+        date: data.date,
+        type: data.type,
+        category: data.category,
+        amount: Number(data.amount),
+        method: data.method,
+        notes: data.notes,
+        user_id: data.user_id ?? null,
+        owner_user_id: data.owner_user_id ?? null,
+        spender_user_id: data.spender_user_id ?? null,
+        spender_label: data.spender_label ?? null,
+        created_by: data.created_by ?? null,
+        card_id: data.card_id ?? null,
+        family_group_id: data.family_group_id ?? null,
+        goal_id: data.goal_id ?? null,
+        created_at: data.created_at ?? null,
+      };
+
+      // ✅ Upsert + sort (evita duplicados por id)
+      setTransactions((prev) => upsertAndSortTx(prev, newTx));
     }
-  };
+
+    clearDraft();
+    resetForm();
+    setShowAdvanced(false);
+  } catch (err) {
+    console.error("Error en handleSubmit:", err);
+    setError("No se pudo guardar el movimiento.");
+    alert("No se pudo guardar el movimiento.");
+  } finally {
+    setSaving(false);
+  }
+};
+
+const handleEdit = (tx: Tx) => {
+  const inferredSpender = tx.spender_label ?? (tx.spender_user_id === user?.id ? "Yo" : "Otro");
+
+  setForm({
+    date: tx.date,
+    type: tx.type,
+    category: tx.category,
+    amount: String(tx.amount),
+    method: tx.method,
+    notes: tx.notes ?? "",
+    spenderLabel: inferredSpender,
+    goalId: tx.goal_id ?? "",
+  });
+
+  setSelectedCardId(tx.card_id ?? null);
+  setEditingId(tx.id);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+
+const handleDuplicate = (tx: Tx) => {
+  setForm({
+    date: tx.date || todayYMD(),
+    type: tx.type,
+    category: tx.category,
+    amount: String(tx.amount),
+    method: tx.method,
+    notes: tx.notes ?? "",
+    spenderLabel: tx.spender_label ?? (tx.spender_user_id === user?.id ? "Yo" : "Otro"),
+    goalId: tx.goal_id ?? "",
+  });
+  setSelectedCardId(tx.card_id ?? null);
+  setEditingId(null);
+  window.scrollTo({ top: 0, behavior: "smooth" } as any);
+};
+
+const handleDelete = async (tx: Tx) => {
+  if (!isOnline) return alert("No puedes eliminar movimientos mientras estás sin conexión.");
+  if (!user) return alert("Debes iniciar sesión para eliminar movimientos.");
+
+  try {
+    const { error } = await supabase.from("transactions").delete().eq("id", tx.id).eq("user_id", user.id);
+    if (error) throw error;
+    setTransactions((prev) => prev.filter((t) => t.id !== tx.id));
+  } catch (err) {
+    console.error(err);
+    alert("No se pudo eliminar el movimiento.");
+  }
+};
 
   // =========================================================
   // Custom cat/method
@@ -1530,19 +1677,17 @@ export default function GastosPage() {
           <form onSubmit={authMode === "login" ? handleSignIn : handleSignUp} className="space-y-3 text-sm">
             <div>
               <Label>Correo electrónico</Label>
-              <Input type="email" required value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="tucorreo@ejemplo.com" />
+              <UIInput type="email" required value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="tucorreo@ejemplo.com" />
             </div>
 
             <div>
               <Label>Contraseña</Label>
-              <Input type="password" required value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
+              <UIInput type="password" required value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
             </div>
 
             {authError && <p className="text-xs text-rose-500">{authError}</p>}
 
-            <Button type="submit">
-              {authMode === "login" ? "Entrar" : "Crear cuenta"}
-            </Button>
+            <Button type="submit">{authMode === "login" ? "Entrar" : "Crear cuenta"}</Button>
           </form>
 
           <div className="text-center text-xs text-slate-600 dark:text-slate-300">
@@ -1620,7 +1765,7 @@ export default function GastosPage() {
           <div className="grid gap-3 md:grid-cols-3 md:items-end">
             <div>
               <Label>Mes</Label>
-              <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} aria-label={`Mes: ${monthLabel}`} />
+              <UIInput type="month" value={month} onChange={(e) => setMonth(e.target.value)} aria-label={`Mes: ${monthLabel}`} />
             </div>
 
             <div className="flex gap-2">
@@ -1628,11 +1773,7 @@ export default function GastosPage() {
                 {showExportOptions ? "Cerrar exportar" : "Exportar"}
               </Button>
 
-              <Button
-                type="button"
-                onClick={() => (window.location.href = "/patrimonio")}
-                title="Ir a Patrimonio"
-              >
+              <Button type="button" onClick={() => (window.location.href = "/patrimonio")} title="Ir a Patrimonio">
                 Ver Patrimonio
               </Button>
             </div>
@@ -1700,7 +1841,7 @@ export default function GastosPage() {
         <Card>
           <Section title="Presupuesto del mes" subtitle="Guarda tu tope mensual (local en este dispositivo).">
             <div className="flex gap-2">
-              <Input type="number" value={budgetInput} onChange={(e) => setBudgetInput(e.target.value)} placeholder="Ej. 50000" />
+              <UIInput type="number" value={budgetInput} onChange={(e) => setBudgetInput(e.target.value)} placeholder="Ej. 50000" />
               {String(budget ?? "") !== budgetInput && (
                 <Button type="button" onClick={handleSaveBudget} className="w-auto px-4">
                   Guardar
@@ -1745,7 +1886,7 @@ export default function GastosPage() {
           <form onSubmit={handleAddCard} className="mt-2 grid gap-3 md:grid-cols-3 md:items-end">
             <div className="md:col-span-2">
               <Label>Nombre de la tarjeta</Label>
-              <Input value={newCardName} onChange={(e) => setNewCardName(e.target.value)} placeholder="Ej. BBVA Negra David, Amex Platino…" />
+              <UIInput value={newCardName} onChange={(e) => setNewCardName(e.target.value)} placeholder="Ej. BBVA Negra David, Amex Platino…" />
               {familyCtx && canUseFamilyScope && (
                 <label className="mt-2 flex items-start gap-2">
                   <input
@@ -1932,7 +2073,7 @@ export default function GastosPage() {
 
               <div>
                 <Label>Fecha</Label>
-                <Input type="date" value={form.date} onChange={(e) => handleChangeForm("date", e.target.value)} />
+                <UIInput type="date" value={form.date} onChange={(e) => handleChangeForm("date", e.target.value)} />
               </div>
 
               <div>
@@ -1948,7 +2089,7 @@ export default function GastosPage() {
 
               <div>
                 <Label>Monto</Label>
-                <Input type="number" step="0.01" value={form.amount} onChange={(e) => handleChangeForm("amount", e.target.value)} placeholder="0.00" />
+                <UIInput type="number" step="0.01" value={form.amount} onChange={(e) => handleChangeForm("amount", e.target.value)} placeholder="0.00" />
               </div>
 
               <div>
@@ -2007,7 +2148,7 @@ export default function GastosPage() {
                   <div>
                     <Label>Nueva categoría</Label>
                     <div className="flex gap-2">
-                      <Input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="Ej. Vacaciones…" />
+                      <UIInput value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="Ej. Vacaciones…" />
                       <Button type="button" className="w-auto px-4" onClick={handleAddCategory}>
                         +
                       </Button>
@@ -2017,7 +2158,7 @@ export default function GastosPage() {
                   <div>
                     <Label>Nuevo método</Label>
                     <div className="flex gap-2">
-                      <Input value={newMethod} onChange={(e) => setNewMethod(e.target.value)} placeholder="Ej. Tarjeta Amazon…" />
+                      <UIInput value={newMethod} onChange={(e) => setNewMethod(e.target.value)} placeholder="Ej. Tarjeta Amazon…" />
                       <Button type="button" className="w-auto px-4" onClick={handleAddMethod}>
                         +
                       </Button>
@@ -2093,7 +2234,12 @@ export default function GastosPage() {
 
             <div>
               <Label>Buscar</Label>
-              <Input ref={searchInputRef} value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Notas, categoría, fecha..." />
+              <RefInput
+                ref={searchInputRef}
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                placeholder="Notas, categoría, fecha..."
+              />
             </div>
           </div>
         </Section>
@@ -2165,10 +2311,7 @@ export default function GastosPage() {
 
       {/* Tabla */}
       <Card>
-        <Section
-          title={`Movimientos de ${month}`}
-          subtitle={`Mostrando ${filteredTransactions.length} de ${transactions.length} movimientos`}
-        >
+        <Section title={`Movimientos de ${month}`} subtitle={`Mostrando ${filteredTransactions.length} de ${transactions.length} movimientos`}>
           <div className="overflow-x-auto">
             <table className="min-w-[980px] w-full border border-slate-200 text-left text-xs dark:border-slate-700 md:text-sm">
               <thead className="bg-slate-50 dark:bg-slate-900">
