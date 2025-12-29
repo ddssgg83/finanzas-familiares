@@ -5,7 +5,7 @@ import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
 import { PageShell } from "@/components/ui/PageShell";
-import { formatDateDisplay, formatMoney, toNumberSafe } from "@/lib/format";
+import { formatDateDisplay, formatMoney as fmtMoney, toNumberSafe } from "@/lib/format";
 import { useFamilyContext } from "@/hooks/useFamilyContext";
 import {
   Button,
@@ -28,7 +28,6 @@ export const dynamic = "force-dynamic";
 // =========================================================
 // Tipos
 // =========================================================
-
 type Asset = {
   id: string;
   name: string;
@@ -82,6 +81,9 @@ type DebtForm = {
 
 type ViewScope = "personal" | "family";
 
+// =========================================================
+// Constantes
+// =========================================================
 const ASSET_CATEGORIES = [
   "Cuenta bancaria",
   "Inversión",
@@ -120,6 +122,9 @@ function getMonthRange(monthKey: string) {
 }
 
 export default function PatrimonioPage() {
+  // 💵 helper consistente con Gastos
+  const formatMoney = (n: number) => fmtMoney(n, "MXN");
+
   // -------- AUTH --------
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -170,32 +175,30 @@ export default function PatrimonioPage() {
   const [editingDebtId, setEditingDebtId] = useState<string | null>(null);
 
   // =========================================================
-  // AUTH
+  // AUTH (offline-safe)
   // =========================================================
-useEffect(() => {
-  let ignore = false;
+  useEffect(() => {
+    let ignore = false;
 
-  async function loadUser() {
-    setAuthLoading(true);
-    setAuthError(null);
+    async function loadUser() {
+      setAuthLoading(true);
+      setAuthError(null);
 
-    try {
-      // ✅ OFFLINE-SAFE
-      const { data } = await supabase.auth.getSession();
-      const sessionUser = data.session?.user ?? null;
-
-      if (!ignore) setUser(sessionUser);
-    } catch (err) {
-      if (!ignore) {
-        setUser(null);
-        setAuthError("Hubo un problema al cargar tu sesión.");
+      try {
+        const { data } = await supabase.auth.getSession();
+        const sessionUser = data.session?.user ?? null;
+        if (!ignore) setUser(sessionUser);
+      } catch {
+        if (!ignore) {
+          setUser(null);
+          setAuthError("Hubo un problema al cargar tu sesión.");
+        }
+      } finally {
+        if (!ignore) setAuthLoading(false);
       }
-    } finally {
-      if (!ignore) setAuthLoading(false);
     }
-  }
 
-  loadUser();
+    loadUser();
 
     const {
       data: { subscription },
@@ -243,12 +246,14 @@ useEffect(() => {
           supabase
             .from("assets")
             .select("id,name,category,current_value,owner,notes,created_at,family_id,user_id")
-            .match(isFamilyView ? { family_id: familyCtx!.familyId } : { user_id: user.id }),
+            .match(isFamilyView ? { family_id: familyCtx!.familyId } : { user_id: user.id })
+            .order("created_at", { ascending: false }),
 
           supabase
             .from("debts")
             .select("id,name,type,total_amount,current_balance,notes,created_at,family_id,user_id")
-            .match(isFamilyView ? { family_id: familyCtx!.familyId } : { user_id: user.id }),
+            .match(isFamilyView ? { family_id: familyCtx!.familyId } : { user_id: user.id })
+            .order("created_at", { ascending: false }),
         ]);
 
         if (assetsRes.error) console.warn("Error cargando activos", assetsRes.error);
@@ -265,7 +270,7 @@ useEffect(() => {
     }
 
     load();
-  }, [user, familyCtx, isFamilyOwner, viewScope]);
+  }, [user, familyCtx?.familyId, isFamilyOwner, viewScope]);
 
   // =========================================================
   // LOAD FLUJO DEL MES (transactions)
@@ -296,11 +301,9 @@ useEffect(() => {
           query = query.eq("family_group_id", familyCtx.familyId);
 
           if (!isFamilyView) {
-            // personal dentro del grupo familiar
             query = query.or(`spender_user_id.eq.${user.id},user_id.eq.${user.id},owner_user_id.eq.${user.id}`);
           }
         } else {
-          // sin familia
           query = query.or(`spender_user_id.eq.${user.id},user_id.eq.${user.id},owner_user_id.eq.${user.id}`);
         }
 
@@ -331,7 +334,7 @@ useEffect(() => {
   }, [user, month, familyCtx?.familyId, isFamilyOwner, viewScope]);
 
   // =========================================================
-  // CALCULOS (patrimonio)
+  // Cálculos (patrimonio)
   // =========================================================
   const totalActivos = useMemo(() => assets.reduce((sum, a) => sum + (a.current_value ?? 0), 0), [assets]);
   const totalDeudas = useMemo(() => debts.reduce((sum, d) => sum + Number(d.current_balance ?? d.total_amount ?? 0), 0), [debts]);
@@ -348,7 +351,7 @@ useEffect(() => {
   }, [month]);
 
   // =========================================================
-  // FORM HELPERS
+  // Form helpers
   // =========================================================
   const resetAssetForm = () => {
     setAssetForm({
@@ -373,7 +376,7 @@ useEffect(() => {
   };
 
   // =========================================================
-  // SUBMIT ASSET
+  // Submit Asset
   // =========================================================
   const handleSubmitAsset = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -436,7 +439,7 @@ useEffect(() => {
   };
 
   // =========================================================
-  // SUBMIT DEBT
+  // Submit Debt
   // =========================================================
   const handleSubmitDebt = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -448,7 +451,6 @@ useEffect(() => {
     }
 
     const currentBalance = debtForm.current_balance?.trim() ? toNumberSafe(debtForm.current_balance) : total;
-
     if (!Number.isFinite(currentBalance) || currentBalance < 0) {
       return alert("Revisa el saldo actual de la deuda.");
     }
@@ -508,7 +510,7 @@ useEffect(() => {
   };
 
   // =========================================================
-  // DELETE
+  // Delete
   // =========================================================
   const handleDeleteAsset = async (id: string) => {
     if (!window.confirm("¿Seguro que quieres eliminar este activo?")) return;
@@ -537,7 +539,7 @@ useEffect(() => {
   };
 
   // =========================================================
-  // EDIT
+  // Edit
   // =========================================================
   const startEditAsset = (asset: Asset) => {
     setEditingAssetId(asset.id);
@@ -548,6 +550,7 @@ useEffect(() => {
       owner: asset.owner ?? "",
       notes: asset.notes ?? "",
     });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const startEditDebt = (debt: Debt) => {
@@ -559,10 +562,11 @@ useEffect(() => {
       current_balance: debt.current_balance != null ? debt.current_balance.toString() : "",
       notes: debt.notes ?? "",
     });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   // =========================================================
-  // RENDER (AUTH)
+  // Render AUTH
   // =========================================================
   if (authLoading) {
     return (
@@ -582,7 +586,7 @@ useEffect(() => {
   }
 
   // =========================================================
-  // RENDER (PAGE)
+  // Render PAGE
   // =========================================================
   return (
     <PageShell>
@@ -591,6 +595,7 @@ useEffect(() => {
         subtitle="Foto completa de lo que tienes y lo que debes. Conectado a tu flujo mensual."
         activeTab="patrimonio"
         userEmail={user.email}
+        userId={user.id}
         onSignOut={handleSignOut}
       />
 
@@ -663,7 +668,12 @@ useEffect(() => {
             <div className="grid gap-4 md:grid-cols-3">
               <StatCard label={`Ingresos (${monthLabel})`} value={formatMoney(monthIngresos)} tone="good" />
               <StatCard label={`Gastos (${monthLabel})`} value={formatMoney(monthGastos)} tone="bad" />
-              <StatCard label={`Flujo neto (${monthLabel})`} value={formatMoney(flujoMes)} tone={flujoMes >= 0 ? "good" : "bad"} hint={txLoading ? "Calculando…" : "Dato calculado desde tu módulo de Gastos."} />
+              <StatCard
+                label={`Flujo neto (${monthLabel})`}
+                value={formatMoney(flujoMes)}
+                tone={flujoMes >= 0 ? "good" : "bad"}
+                hint={txLoading ? "Calculando…" : "Dato calculado desde tu módulo de Gastos."}
+              />
             </div>
 
             <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">

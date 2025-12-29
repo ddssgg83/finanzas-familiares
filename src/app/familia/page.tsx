@@ -1,3 +1,4 @@
+// src/app/familia/page.tsx
 "use client";
 
 import type { FormEvent } from "react";
@@ -5,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
+import { PageShell } from "@/components/ui/PageShell";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -58,39 +60,37 @@ export default function FamiliaPage() {
   const [savingFamilyName, setSavingFamilyName] = useState(false);
   const [creatingFamily, setCreatingFamily] = useState(false);
   const [inviting, setInviting] = useState(false);
-  const [acceptingInviteId, setAcceptingInviteId] = useState<string | null>(
-    null
-  );
+  const [acceptingInviteId, setAcceptingInviteId] = useState<string | null>(null);
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
 
   // NUEVO: estado para guardar nombres de miembros
   const [savingMemberId, setSavingMemberId] = useState<string | null>(null);
 
   // -------- AUTH EFFECT --------
- useEffect(() => {
-  let ignore = false;
+  useEffect(() => {
+    let ignore = false;
 
-  async function loadUser() {
-    setAuthLoading(true);
-    setAuthError(null);
+    async function loadUser() {
+      setAuthLoading(true);
+      setAuthError(null);
 
-    try {
-      // ✅ OFFLINE-SAFE
-      const { data } = await supabase.auth.getSession();
-      const sessionUser = data.session?.user ?? null;
+      try {
+        // ✅ OFFLINE-SAFE
+        const { data } = await supabase.auth.getSession();
+        const sessionUser = data.session?.user ?? null;
 
-      if (!ignore) setUser(sessionUser);
-    } catch (err) {
-      if (!ignore) {
-        setUser(null);
-        setAuthError("Hubo un problema al cargar tu sesión.");
+        if (!ignore) setUser(sessionUser);
+      } catch (err) {
+        if (!ignore) {
+          setUser(null);
+          setAuthError("Hubo un problema al cargar tu sesión.");
+        }
+      } finally {
+        if (!ignore) setAuthLoading(false);
       }
-    } finally {
-      if (!ignore) setAuthLoading(false);
     }
-  }
 
-  loadUser();
+    loadUser();
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -116,144 +116,134 @@ export default function FamiliaPage() {
   };
 
   // -------- Función para cargar familia / miembros / invitaciones --------
-  const loadFamilyInfo = useCallback(
-    async (currentUser: User) => {
-      setLoadingFamily(true);
-      setError(null);
-      setPendingInvites([]);
+  const loadFamilyInfo = useCallback(async (currentUser: User) => {
+    setLoadingFamily(true);
+    setError(null);
+    setPendingInvites([]);
 
-      try {
-        const userId = currentUser.id;
-        const email = (currentUser.email ?? "").toLowerCase();
+    try {
+      const userId = currentUser.id;
+      const email = (currentUser.email ?? "").toLowerCase();
 
-        // 1) Buscar membresía activa del usuario en family_members
-        const { data: membershipRows, error: membershipError } = await supabase
+      // 1) Buscar membresía activa del usuario en family_members
+      const { data: membershipRows, error: membershipError } = await supabase
+        .from("family_members")
+        .select(
+          "id,family_id,user_id,invited_email,role,status,created_at,full_name,short_label"
+        )
+        .or(`user_id.eq.${userId},invited_email.eq.${email}`)
+        .eq("status", "active")
+        .limit(1);
+
+      if (membershipError) {
+        console.error("Error buscando membresía de familia:", membershipError);
+        throw membershipError;
+      }
+
+      // Si NO tiene familia activa, revisamos si tiene invitaciones pendientes
+      if (!membershipRows || membershipRows.length === 0) {
+        const { data: pendingRows, error: pendingError } = await supabase
           .from("family_members")
           .select(
             "id,family_id,user_id,invited_email,role,status,created_at,full_name,short_label"
           )
-          .or(`user_id.eq.${userId},invited_email.eq.${email}`)
-          .eq("status", "active")
-          .limit(1);
+          .eq("invited_email", email)
+          .eq("status", "pending");
 
-        if (membershipError) {
-          console.error("Error buscando membresía de familia:", membershipError);
-          throw membershipError;
+        if (pendingError) {
+          console.error("Error buscando invitaciones pendientes:", pendingError);
+          throw pendingError;
         }
 
-        // Si NO tiene familia activa, revisamos si tiene invitaciones pendientes
-        if (!membershipRows || membershipRows.length === 0) {
-          const { data: pendingRows, error: pendingError } = await supabase
-            .from("family_members")
-            .select(
-              "id,family_id,user_id,invited_email,role,status,created_at,full_name,short_label"
-            )
-            .eq("invited_email", email)
-            .eq("status", "pending");
-
-          if (pendingError) {
-            console.error(
-              "Error buscando invitaciones pendientes:",
-              pendingError
-            );
-            throw pendingError;
-          }
-
-          if (!pendingRows || pendingRows.length === 0) {
-            // Sin familia y sin invitaciones
-            setFamily(null);
-            setMembers([]);
-            setEditFamilyName("");
-            setPendingInvites([]);
-            return;
-          }
-
-          // Hay invitaciones pendientes, cargamos info de las familias
-          const familyIds = Array.from(
-            new Set(pendingRows.map((p: any) => p.family_id))
-          );
-
-          const { data: familyRows, error: famsError } = await supabase
-            .from("families")
-            .select("id,name,user_id")
-            .in("id", familyIds);
-
-          if (famsError) {
-            console.error("Error cargando familias de invitaciones:", famsError);
-            throw famsError;
-          }
-
-          const famMap = new Map<string, { id: string; name: string }>();
-          (familyRows ?? []).forEach((f: any) => {
-            famMap.set(f.id, { id: f.id, name: f.name });
-          });
-
-          const invites: PendingInvite[] = (pendingRows ?? []).map(
-            (p: any) => {
-              const f = famMap.get(p.family_id);
-              return {
-                memberId: p.id,
-                familyId: p.family_id,
-                familyName: f?.name ?? "Familia sin nombre",
-                role: p.role as "owner" | "member",
-                created_at: p.created_at,
-              };
-            }
-          );
-
+        if (!pendingRows || pendingRows.length === 0) {
+          // Sin familia y sin invitaciones
           setFamily(null);
           setMembers([]);
           setEditFamilyName("");
-          setPendingInvites(invites);
+          setPendingInvites([]);
           return;
         }
 
-        // 2) Sí tiene una familia activa
-        const membership = membershipRows[0];
+        // Hay invitaciones pendientes, cargamos info de las familias
+        const familyIds = Array.from(new Set(pendingRows.map((p: any) => p.family_id)));
 
-        const { data: familyRow, error: familyError } = await supabase
+        const { data: familyRows, error: famsError } = await supabase
           .from("families")
-          .select("id,name,user_id,created_at")
-          .eq("id", membership.family_id)
-          .single();
+          .select("id,name,user_id")
+          .in("id", familyIds);
 
-        if (familyError) {
-          console.error("Error cargando familia:", familyError);
-          throw familyError;
+        if (famsError) {
+          console.error("Error cargando familias de invitaciones:", famsError);
+          throw famsError;
         }
 
-        const fam = familyRow as Family;
-        setFamily(fam);
-        setEditFamilyName(fam.name);
+        const famMap = new Map<string, { id: string; name: string }>();
+        (familyRows ?? []).forEach((f: any) => {
+          famMap.set(f.id, { id: f.id, name: f.name });
+        });
 
-        // 3) Cargar todos los miembros de esa familia (incluyendo nombres)
-        const { data: allMembers, error: membersError } = await supabase
-          .from("family_members")
-          .select(
-            "id,family_id,user_id,invited_email,role,status,created_at,full_name,short_label"
-          )
-          .eq("family_id", fam.id)
-          .order("created_at", { ascending: true });
+        const invites: PendingInvite[] = (pendingRows ?? []).map((p: any) => {
+          const f = famMap.get(p.family_id);
+          return {
+            memberId: p.id,
+            familyId: p.family_id,
+            familyName: f?.name ?? "Familia sin nombre",
+            role: p.role as "owner" | "member",
+            created_at: p.created_at,
+          };
+        });
 
-        if (membersError) {
-          console.error("Error cargando miembros de familia:", membersError);
-          throw membersError;
-        }
-
-        setMembers((allMembers ?? []) as FamilyMember[]);
-        setPendingInvites([]);
-      } catch (err: any) {
-        console.error("Error cargando familia (detalle):", err?.message ?? err);
-        setError("No se pudo cargar la información de familia.");
         setFamily(null);
         setMembers([]);
-        setPendingInvites([]);
-      } finally {
-        setLoadingFamily(false);
+        setEditFamilyName("");
+        setPendingInvites(invites);
+        return;
       }
-    },
-    []
-  );
+
+      // 2) Sí tiene una familia activa
+      const membership = membershipRows[0];
+
+      const { data: familyRow, error: familyError } = await supabase
+        .from("families")
+        .select("id,name,user_id,created_at")
+        .eq("id", membership.family_id)
+        .single();
+
+      if (familyError) {
+        console.error("Error cargando familia:", familyError);
+        throw familyError;
+      }
+
+      const fam = familyRow as Family;
+      setFamily(fam);
+      setEditFamilyName(fam.name);
+
+      // 3) Cargar todos los miembros de esa familia (incluyendo nombres)
+      const { data: allMembers, error: membersError } = await supabase
+        .from("family_members")
+        .select(
+          "id,family_id,user_id,invited_email,role,status,created_at,full_name,short_label"
+        )
+        .eq("family_id", fam.id)
+        .order("created_at", { ascending: true });
+
+      if (membersError) {
+        console.error("Error cargando miembros de familia:", membersError);
+        throw membersError;
+      }
+
+      setMembers((allMembers ?? []) as FamilyMember[]);
+      setPendingInvites([]);
+    } catch (err: any) {
+      console.error("Error cargando familia (detalle):", err?.message ?? err);
+      setError("No se pudo cargar la información de familia.");
+      setFamily(null);
+      setMembers([]);
+      setPendingInvites([]);
+    } finally {
+      setLoadingFamily(false);
+    }
+  }, []);
 
   // -------- Cargar info cuando cambie user --------
   useEffect(() => {
@@ -313,9 +303,6 @@ export default function FamiliaPage() {
           invited_email: email,
           role: "owner",
           status: "active",
-          // Opcional: podrías poner aquí un nombre por default
-          // full_name: currentUser.email ?? null,
-          // short_label: "Yo",
         })
         .select(
           "id,family_id,user_id,invited_email,role,status,created_at,full_name,short_label"
@@ -513,9 +500,7 @@ export default function FamiliaPage() {
     value: string
   ) => {
     setMembers((prev) =>
-      prev.map((m) =>
-        m.id === memberId ? { ...m, [field]: value } : m
-      )
+      prev.map((m) => (m.id === memberId ? { ...m, [field]: value } : m))
     );
   };
 
@@ -544,13 +529,8 @@ export default function FamiliaPage() {
         console.error("Error actualizando nombres de miembro:", updateError);
         throw updateError;
       }
-
-      // No recargo porque el estado ya está actualizado
     } catch (err: any) {
-      console.error(
-        "Error al guardar nombres del miembro:",
-        err?.message ?? err
-      );
+      console.error("Error al guardar nombres del miembro:", err?.message ?? err);
       setError("No se pudieron guardar los nombres del miembro.");
     } finally {
       setSavingMemberId(null);
@@ -572,13 +552,11 @@ export default function FamiliaPage() {
         <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <p className="text-sm font-semibold">Familia</p>
           <p className="text-slate-500 dark:text-slate-400">
-            Inicia sesión desde el dashboard para configurar tu grupo familiar y
-            ver el patrimonio consolidado más adelante.
+            Inicia sesión desde el dashboard para configurar tu grupo familiar y ver el patrimonio
+            consolidado más adelante.
           </p>
           {authError && (
-            <p className="text-[11px] text-rose-600 dark:text-rose-400">
-              {authError}
-            </p>
+            <p className="text-[11px] text-rose-600 dark:text-rose-400">{authError}</p>
           )}
         </div>
       </div>
@@ -587,319 +565,268 @@ export default function FamiliaPage() {
 
   // -------- UI APP --------
   return (
-    <main className="flex flex-1 flex-col gap-4">
+    <main className="flex min-h-screen flex-col pb-16 md:pb-4">
       <AppHeader
         title="Familia"
         subtitle="Configura tu grupo familiar para ver gastos y patrimonio consolidado."
         activeTab="familia"
         userEmail={user.email}
+        userId={user.id}
         onSignOut={handleSignOut}
       />
 
-      {/* Encabezado Familia + acceso al dashboard familiar */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-lg font-semibold">Familia</h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Configura tu grupo familiar para ver un resumen consolidado de
-              gastos y patrimonio entre todos.
-            </p>
-          </div>
+      <PageShell maxWidth="5xl">
+        {/* Encabezado Familia + acceso al dashboard familiar */}
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h1 className="text-lg font-semibold">Familia</h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Configura tu grupo familiar para ver un resumen consolidado de gastos y patrimonio
+                entre todos.
+              </p>
+            </div>
 
-          <Link href="/familia/dashboard">
-            <button className="rounded-full bg-sky-500 px-4 py-2 text-xs font-medium text-white hover:bg-sky-600">
+            <Link
+              href="/familia/dashboard"
+              className="inline-flex items-center justify-center rounded-full bg-sky-500 px-4 py-2 text-xs font-medium text-white hover:bg-sky-600"
+            >
               Ver dashboard familiar
-            </button>
-          </Link>
-        </div>
-      </section>
+            </Link>
+          </div>
+        </section>
 
-      {/* Estado de familia */}
-      <section className="space-y-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          {loadingFamily ? (
-            <p className="text-sm text-slate-600 dark:text-slate-300">
-              Cargando información de tu familia...
-            </p>
-          ) : family ? (
-            <>
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <h2 className="mb-1 text-sm font-semibold">
-                    Tu familia: {family.name}
-                  </h2>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    {isOwner
-                      ? "Eres el jefe de familia. Más adelante podrás ver aquí el resumen consolidado de gastos y patrimonio de todos."
-                      : "Perteneces a este grupo familiar. Más adelante podrás ver aquí el resumen consolidado que ve el jefe de familia."}
-                  </p>
-                </div>
-
-                {isOwner && (
-                  <form
-                    onSubmit={handleRenameFamily}
-                    className="flex flex-col gap-2 text-xs md:flex-row md:items-center"
-                  >
-                    <input
-                      type="text"
-                      value={editFamilyName}
-                      onChange={(e) => setEditFamilyName(e.target.value)}
-                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-xs outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 md:w-56"
-                      placeholder="Nombre de la familia"
-                    />
-                    <button
-                      type="submit"
-                      disabled={savingFamilyName}
-                      className="rounded-lg bg-sky-500 px-3 py-1 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-60"
-                    >
-                      {savingFamilyName ? "Guardando..." : "Guardar nombre"}
-                    </button>
-                  </form>
-                )}
-              </div>
-            </>
-          ) : (
-            <>
-              {/* Invitaciones pendientes */}
-              {pendingInvites.length > 0 && (
-                <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/40">
-                  <h3 className="mb-2 text-sm font-semibold">
-                    Invitaciones a familia
-                  </h3>
-                  <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
-                    Estas familias te han invitado a unirte. Acepta una para
-                    formar parte de su grupo.
-                  </p>
-                  <div className="space-y-2">
-                    {pendingInvites.map((inv) => (
-                      <div
-                        key={inv.memberId}
-                        className="flex flex-col justify-between gap-2 rounded-lg border border-slate-200 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-900 md:flex-row md:items-center"
-                      >
-                        <div>
-                          <div className="text-sm font-semibold">
-                            {inv.familyName}
-                          </div>
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                            Rol:{" "}
-                            {inv.role === "owner"
-                              ? "Jefe de familia"
-                              : "Miembro"}
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleAcceptInvite(inv)}
-                            disabled={acceptingInviteId === inv.memberId}
-                            className="rounded-lg bg-emerald-500 px-3 py-1 text-[11px] font-medium text-white hover:bg-emerald-600 disabled:opacity-60"
-                          >
-                            {acceptingInviteId === inv.memberId
-                              ? "Uniéndome..."
-                              : "Unirme a esta familia"}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <h2 className="mb-2 text-sm font-semibold">
-                Aún no tienes familia configurada
-              </h2>
-              <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-                Crea una familia para agrupar a tu pareja, hijos u otros
-                miembros. Después podremos conectar sus gastos y patrimonio para
-                mostrar un resumen consolidado.
-              </p>
-
-              <form
-                onSubmit={handleCreateFamily}
-                className="flex flex-col gap-2 text-sm sm:flex-row"
-              >
-                <input
-                  type="text"
-                  value={newFamilyName}
-                  onChange={(e) => setNewFamilyName(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-                  placeholder="Ej. Familia Garza Sloane"
-                />
-                <button
-                  type="submit"
-                  disabled={creatingFamily}
-                  className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-600 disabled:opacity-60"
-                >
-                  {creatingFamily ? "Creando..." : "Crear familia"}
-                </button>
-              </form>
-            </>
-          )}
-
-          {error && (
-            <p className="mt-2 text-xs text-rose-500 dark:text-rose-400">
-              {error}
-            </p>
-          )}
-        </div>
-
-        {/* Miembros */}
-        {family && (
+        {/* Estado de familia */}
+        <section className="space-y-4">
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <h2 className="mb-2 text-sm font-semibold">Miembros de la familia</h2>
-
-            {members.length === 0 ? (
-              <p className="text-xs text-slate-500">
-                Aún no hay miembros registrados.
+            {loadingFamily ? (
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                Cargando información de tu familia...
               </p>
-            ) : (
-              <div className="overflow-x-auto text-sm">
-                <table className="min-w-full border border-slate-200 text-left text-xs dark:border-slate-700 md:text-sm">
-                  <thead className="bg-slate-50 dark:bg-slate-900">
-                    <tr>
-                      <th className="border-b px-2 py-2">Correo</th>
-                      <th className="border-b px-2 py-2">Rol</th>
-                      <th className="border-b px-2 py-2">Estado</th>
-                      <th className="border-b px-2 py-2">Vinculado</th>
-                      <th className="border-b px-2 py-2">Nombre completo</th>
-                      <th className="border-b px-2 py-2">
-                        Nombre en gastos
-                      </th>
-                      <th className="border-b px-2 py-2 text-center">
-                        Acciones
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {members.map((m) => (
-                      <tr
-                        key={m.id}
-                        className="odd:bg-white even:bg-slate-50 dark:odd:bg-slate-800 dark:even:bg-slate-900"
+            ) : family ? (
+              <>
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <h2 className="mb-1 text-sm font-semibold">Tu familia: {family.name}</h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {isOwner
+                        ? "Eres el jefe de familia. Más adelante podrás ver aquí el resumen consolidado de gastos y patrimonio de todos."
+                        : "Perteneces a este grupo familiar. Más adelante podrás ver aquí el resumen consolidado que ve el jefe de familia."}
+                    </p>
+                  </div>
+
+                  {isOwner && (
+                    <form
+                      onSubmit={handleRenameFamily}
+                      className="flex flex-col gap-2 text-xs md:flex-row md:items-center"
+                    >
+                      <input
+                        type="text"
+                        value={editFamilyName}
+                        onChange={(e) => setEditFamilyName(e.target.value)}
+                        className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1 text-xs outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 md:w-56"
+                        placeholder="Nombre de la familia"
+                      />
+                      <button
+                        type="submit"
+                        disabled={savingFamilyName}
+                        className="rounded-lg bg-sky-500 px-3 py-1 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-60"
                       >
-                        <td className="border-t px-2 py-1">
-                          {m.invited_email}
-                        </td>
-                        <td className="border-t px-2 py-1">
-                          {m.role === "owner" ? "Jefe de familia" : "Miembro"}
-                        </td>
-                        <td className="border-t px-2 py-1">
-                          {m.status === "active"
-                            ? "Activo"
-                            : m.status === "pending"
-                            ? "Pendiente"
-                            : "Inactivo"}
-                        </td>
-                        <td className="border-t px-2 py-1">
-                          {m.user_id ? "Sí" : "No todavía"}
-                        </td>
+                        {savingFamilyName ? "Guardando..." : "Guardar nombre"}
+                      </button>
+                    </form>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Invitaciones pendientes */}
+                {pendingInvites.length > 0 && (
+                  <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/40">
+                    <h3 className="mb-2 text-sm font-semibold">Invitaciones a familia</h3>
+                    <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
+                      Estas familias te han invitado a unirte. Acepta una para formar parte de su
+                      grupo.
+                    </p>
+                    <div className="space-y-2">
+                      {pendingInvites.map((inv) => (
+                        <div
+                          key={inv.memberId}
+                          className="flex flex-col justify-between gap-2 rounded-lg border border-slate-200 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-900 md:flex-row md:items-center"
+                        >
+                          <div>
+                            <div className="text-sm font-semibold">{inv.familyName}</div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                              Rol: {inv.role === "owner" ? "Jefe de familia" : "Miembro"}
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleAcceptInvite(inv)}
+                              disabled={acceptingInviteId === inv.memberId}
+                              className="rounded-lg bg-emerald-500 px-3 py-1 text-[11px] font-medium text-white hover:bg-emerald-600 disabled:opacity-60"
+                            >
+                              {acceptingInviteId === inv.memberId ? "Uniéndome..." : "Unirme a esta familia"}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-                        {/* NUEVO: Nombre completo */}
-                        <td className="border-t px-2 py-1">
-                          <input
-                            type="text"
-                            value={m.full_name ?? ""}
-                            onChange={(e) =>
-                              handleChangeMemberField(
-                                m.id,
-                                "full_name",
-                                e.target.value
-                              )
-                            }
-                            disabled={!isOwner}
-                            className="w-40 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-                            placeholder="Ej. Dibri Sloane"
-                          />
-                        </td>
-
-                        {/* NUEVO: Nombre en gastos (etiqueta corta) */}
-                        <td className="border-t px-2 py-1">
-                          <input
-                            type="text"
-                            value={m.short_label ?? ""}
-                            onChange={(e) =>
-                              handleChangeMemberField(
-                                m.id,
-                                "short_label",
-                                e.target.value
-                              )
-                            }
-                            disabled={!isOwner}
-                            className="w-32 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-                            placeholder="Ej. Esposa, Hijo..."
-                          />
-                        </td>
-
-                        <td className="border-t px-2 py-1 text-center">
-                          {isOwner && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleSaveMemberNames(m)}
-                                disabled={savingMemberId === m.id}
-                                className="mr-2 text-[11px] text-sky-600 hover:underline disabled:opacity-60"
-                              >
-                                {savingMemberId === m.id
-                                  ? "Guardando..."
-                                  : "Guardar nombres"}
-                              </button>
-
-                              {m.role !== "owner" && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveMember(m.id)}
-                                  disabled={removingMemberId === m.id}
-                                  className="text-[11px] text-rose-500 hover:underline disabled:opacity-60"
-                                >
-                                  {removingMemberId === m.id
-                                    ? "Quitando..."
-                                    : "Quitar"}
-                                </button>
-                              )}
-                            </>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {isOwner && (
-              <div className="mt-4 border-t border-slate-200 pt-3 text-xs dark:border-slate-700">
-                <h3 className="mb-2 text-sm font-semibold">
-                  Invitar nuevo miembro
-                </h3>
-                <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
-                  Por ahora sólo registramos el correo y el estado. Más adelante
-                  podemos automatizar las invitaciones y enlazar automáticamente
-                  con la cuenta de cada miembro.
+                <h2 className="mb-2 text-sm font-semibold">Aún no tienes familia configurada</h2>
+                <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+                  Crea una familia para agrupar a tu pareja, hijos u otros miembros. Después podremos
+                  conectar sus gastos y patrimonio para mostrar un resumen consolidado.
                 </p>
-                <form
-                  onSubmit={handleInvite}
-                  className="flex flex-col gap-2 sm:flex-row"
-                >
+
+                <form onSubmit={handleCreateFamily} className="flex flex-col gap-2 text-sm sm:flex-row">
                   <input
-                    type="email"
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
+                    type="text"
+                    value={newFamilyName}
+                    onChange={(e) => setNewFamilyName(e.target.value)}
                     className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
-                    placeholder="correo@ejemplo.com"
+                    placeholder="Ej. Familia Garza Sloane"
                   />
                   <button
                     type="submit"
-                    disabled={inviting}
-                    className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600 disabled:opacity-60"
+                    disabled={creatingFamily}
+                    className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-600 disabled:opacity-60"
                   >
-                    {inviting ? "Agregando..." : "Agregar miembro"}
+                    {creatingFamily ? "Creando..." : "Crear familia"}
                   </button>
                 </form>
-              </div>
+              </>
             )}
+
+            {error && <p className="mt-2 text-xs text-rose-500 dark:text-rose-400">{error}</p>}
           </div>
-        )}
-      </section>
+
+          {/* Miembros */}
+          {family && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <h2 className="mb-2 text-sm font-semibold">Miembros de la familia</h2>
+
+              {members.length === 0 ? (
+                <p className="text-xs text-slate-500">Aún no hay miembros registrados.</p>
+              ) : (
+                <div className="overflow-x-auto text-sm">
+                  <table className="min-w-full border border-slate-200 text-left text-xs dark:border-slate-700 md:text-sm">
+                    <thead className="bg-slate-50 dark:bg-slate-900">
+                      <tr>
+                        <th className="border-b px-2 py-2">Correo</th>
+                        <th className="border-b px-2 py-2">Rol</th>
+                        <th className="border-b px-2 py-2">Estado</th>
+                        <th className="border-b px-2 py-2">Vinculado</th>
+                        <th className="border-b px-2 py-2">Nombre completo</th>
+                        <th className="border-b px-2 py-2">Nombre en gastos</th>
+                        <th className="border-b px-2 py-2 text-center">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {members.map((m) => (
+                        <tr
+                          key={m.id}
+                          className="odd:bg-white even:bg-slate-50 dark:odd:bg-slate-800 dark:even:bg-slate-900"
+                        >
+                          <td className="border-t px-2 py-1">{m.invited_email}</td>
+                          <td className="border-t px-2 py-1">
+                            {m.role === "owner" ? "Jefe de familia" : "Miembro"}
+                          </td>
+                          <td className="border-t px-2 py-1">
+                            {m.status === "active" ? "Activo" : m.status === "pending" ? "Pendiente" : "Inactivo"}
+                          </td>
+                          <td className="border-t px-2 py-1">{m.user_id ? "Sí" : "No todavía"}</td>
+
+                          <td className="border-t px-2 py-1">
+                            <input
+                              type="text"
+                              value={m.full_name ?? ""}
+                              onChange={(e) =>
+                                handleChangeMemberField(m.id, "full_name", e.target.value)
+                              }
+                              disabled={!isOwner}
+                              className="w-40 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                              placeholder="Ej. Dibri Sloane"
+                            />
+                          </td>
+
+                          <td className="border-t px-2 py-1">
+                            <input
+                              type="text"
+                              value={m.short_label ?? ""}
+                              onChange={(e) =>
+                                handleChangeMemberField(m.id, "short_label", e.target.value)
+                              }
+                              disabled={!isOwner}
+                              className="w-32 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                              placeholder="Ej. Esposa, Hijo..."
+                            />
+                          </td>
+
+                          <td className="border-t px-2 py-1 text-center">
+                            {isOwner && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveMemberNames(m)}
+                                  disabled={savingMemberId === m.id}
+                                  className="mr-2 text-[11px] text-sky-600 hover:underline disabled:opacity-60"
+                                >
+                                  {savingMemberId === m.id ? "Guardando..." : "Guardar nombres"}
+                                </button>
+
+                                {m.role !== "owner" && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveMember(m.id)}
+                                    disabled={removingMemberId === m.id}
+                                    className="text-[11px] text-rose-500 hover:underline disabled:opacity-60"
+                                  >
+                                    {removingMemberId === m.id ? "Quitando..." : "Quitar"}
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {isOwner && (
+                <div className="mt-4 border-t border-slate-200 pt-3 text-xs dark:border-slate-700">
+                  <h3 className="mb-2 text-sm font-semibold">Invitar nuevo miembro</h3>
+                  <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
+                    Por ahora sólo registramos el correo y el estado. Más adelante podemos automatizar las invitaciones y
+                    enlazar automáticamente con la cuenta de cada miembro.
+                  </p>
+                  <form onSubmit={handleInvite} className="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      type="email"
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none transition focus:border-sky-500 focus:bg-white focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
+                      placeholder="correo@ejemplo.com"
+                    />
+                    <button
+                      type="submit"
+                      disabled={inviting}
+                      className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600 disabled:opacity-60"
+                    >
+                      {inviting ? "Agregando..." : "Agregar miembro"}
+                    </button>
+                  </form>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      </PageShell>
     </main>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 
@@ -59,37 +59,79 @@ const STEPS: Step[] = [
 
 const ONBOARDING_STORAGE_KEY = "ff_seen_onboarding_v1";
 
+function markSeenOnboarding() {
+  try {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "true");
+    }
+  } catch {
+    // ignore (modo privado / storage bloqueado)
+  }
+}
+
 export default function OnboardingPage() {
   const router = useRouter();
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const currentStep = STEPS[currentStepIndex];
 
   const totalSteps = STEPS.length;
+  const currentStep = STEPS[currentStepIndex];
   const isLastStep = currentStepIndex === totalSteps - 1;
-  const progressPercent = ((currentStepIndex + 1) / totalSteps) * 100;
+
+  const progressPercent = useMemo(
+    () => ((currentStepIndex + 1) / totalSteps) * 100,
+    [currentStepIndex, totalSteps]
+  );
+
+  const finishOnboarding = () => {
+    markSeenOnboarding();
+    router.replace("/gastos"); // ✅ mejor que push (evita back al onboarding)
+  };
 
   const handleNext = () => {
-    if (isLastStep) {
-      finishOnboarding();
-    } else {
-      setCurrentStepIndex((prev) => Math.min(prev + 1, totalSteps - 1));
-    }
+    if (isLastStep) finishOnboarding();
+    else setCurrentStepIndex((prev) => Math.min(prev + 1, totalSteps - 1));
   };
 
   const handlePrev = () => {
     setCurrentStepIndex((prev) => Math.max(prev - 1, 0));
   };
 
-  const finishOnboarding = () => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "true");
-    }
-    router.push("/gastos");
-  };
+  const handleSkip = () => finishOnboarding();
 
-  const handleSkip = () => {
-    finishOnboarding();
-  };
+  // ✅ UX teclado
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+
+      if (key === "escape") {
+        e.preventDefault();
+        finishOnboarding();
+        return;
+      }
+
+      if (key === "enter") {
+        e.preventDefault();
+        handleNext();
+        return;
+      }
+
+      if (key === "arrowleft") {
+        e.preventDefault();
+        handlePrev();
+        return;
+      }
+
+      if (key === "arrowright") {
+        e.preventDefault();
+        handleNext();
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStepIndex, isLastStep]);
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-slate-950 px-4 py-6 text-slate-50">
@@ -216,40 +258,27 @@ export default function OnboardingPage() {
                         <div className="flex items-center justify-between">
                           <span className="text-[10px] font-medium uppercase tracking-wide text-slate-200">
                             {currentStep.id === "overview" && "Gastos e ingresos"}
-                            {currentStep.id === "patrimonio" &&
-                              "Patrimonio neto"}
+                            {currentStep.id === "patrimonio" && "Patrimonio neto"}
                             {currentStep.id === "familia" && "Gasto familiar"}
                           </span>
-                          <span className="text-[9px] text-slate-100/80">
-                            Demo
-                          </span>
+                          <span className="text-[9px] text-slate-100/80">Demo</span>
                         </div>
 
                         {currentStep.id === "overview" && (
                           <>
-                            <p className="text-lg font-semibold text-sky-50">
-                              $ 24,870
-                            </p>
-                            <p className="text-[10px] text-sky-100/80">
-                              Disponible este mes
-                            </p>
+                            <p className="text-lg font-semibold text-sky-50">$ 24,870</p>
+                            <p className="text-[10px] text-sky-100/80">Disponible este mes</p>
                             <div className="mt-2 grid grid-cols-3 gap-1.5 text-[9px] text-slate-100/90">
                               <div className="rounded-lg bg-slate-900/70 px-2 py-1">
-                                <p className="text-[9px] text-slate-300">
-                                  Ingresos
-                                </p>
+                                <p className="text-[9px] text-slate-300">Ingresos</p>
                                 <p className="font-semibold">$ 65,000</p>
                               </div>
                               <div className="rounded-lg bg-slate-900/70 px-2 py-1">
-                                <p className="text-[9px] text-slate-300">
-                                  Gastos
-                                </p>
+                                <p className="text-[9px] text-slate-300">Gastos</p>
                                 <p className="font-semibold">$ 40,130</p>
                               </div>
                               <div className="rounded-lg bg-slate-900/70 px-2 py-1">
-                                <p className="text-[9px] text-slate-300">
-                                  Movimientos
-                                </p>
+                                <p className="text-[9px] text-slate-300">Movimientos</p>
                                 <p className="font-semibold">132</p>
                               </div>
                             </div>
@@ -258,40 +287,26 @@ export default function OnboardingPage() {
 
                         {currentStep.id === "patrimonio" && (
                           <>
-                            <p className="text-lg font-semibold text-emerald-50">
-                              $ 1,250,000
-                            </p>
-                            <p className="text-[10px] text-emerald-100/90">
-                              Patrimonio neto
-                            </p>
+                            <p className="text-lg font-semibold text-emerald-50">$ 1,250,000</p>
+                            <p className="text-[10px] text-emerald-100/90">Patrimonio neto</p>
                             <div className="mt-2 grid grid-cols-2 gap-1.5 text-[9px] text-slate-100/90">
                               <div className="rounded-lg bg-slate-900/70 px-2 py-1">
-                                <p className="text-[9px] text-slate-300">
-                                  Activos
-                                </p>
+                                <p className="text-[9px] text-slate-300">Activos</p>
                                 <p className="font-semibold">$ 1,800,000</p>
                               </div>
                               <div className="rounded-lg bg-slate-900/70 px-2 py-1">
-                                <p className="text-[9px] text-slate-300">
-                                  Deudas
-                                </p>
+                                <p className="text-[9px] text-slate-300">Deudas</p>
                                 <p className="font-semibold">$ 550,000</p>
                               </div>
                             </div>
-                            <p className="mt-1 text-[9px] text-emerald-200/90">
-                              + $ 35,000 vs. mes anterior
-                            </p>
+                            <p className="mt-1 text-[9px] text-emerald-200/90">+ $ 35,000 vs. mes anterior</p>
                           </>
                         )}
 
                         {currentStep.id === "familia" && (
                           <>
-                            <p className="text-lg font-semibold text-amber-50">
-                              $ 18,430
-                            </p>
-                            <p className="text-[10px] text-amber-100/90">
-                              Gasto familiar este mes
-                            </p>
+                            <p className="text-lg font-semibold text-amber-50">$ 18,430</p>
+                            <p className="text-[10px] text-amber-100/90">Gasto familiar este mes</p>
                             <div className="mt-2 space-y-1.5 text-[9px]">
                               <div className="flex items-center justify-between rounded-lg bg-slate-900/70 px-2 py-1">
                                 <span className="text-slate-200">Dibri</span>
@@ -369,9 +384,7 @@ export default function OnboardingPage() {
                       onClick={() => setCurrentStepIndex(idx)}
                       className={cn(
                         "h-1.5 rounded-full transition-all",
-                        idx === currentStepIndex
-                          ? "w-6 bg-sky-400"
-                          : "w-1.5 bg-slate-600 hover:bg-slate-400"
+                        idx === currentStepIndex ? "w-6 bg-sky-400" : "w-1.5 bg-slate-600 hover:bg-slate-400"
                       )}
                       aria-label={`Ir al paso ${idx + 1}`}
                     />
@@ -382,9 +395,7 @@ export default function OnboardingPage() {
                   onClick={handleNext}
                   className={cn(
                     "rounded-full px-4 py-1.5 text-[11px] font-semibold text-slate-900 transition-all",
-                    isLastStep
-                      ? "bg-emerald-400 hover:bg-emerald-300"
-                      : "bg-sky-400 hover:bg-sky-300"
+                    isLastStep ? "bg-emerald-400 hover:bg-emerald-300" : "bg-sky-400 hover:bg-sky-300"
                   )}
                 >
                   {isLastStep ? "Entrar a mi app" : "Siguiente"}

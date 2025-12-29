@@ -12,15 +12,15 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
     title: "Finanzas Familiares",
   },
-  icons: {
-    icon: [
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
-      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
-    ],
-    // Si agregas /icons/apple-touch-icon.png (180x180), cambia esta línea:
-    apple: [{ url: "/icons/icon-192.png" }],
-  },
-};
+ icons: {
+  icon: [
+    { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+    { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+  ],
+  apple: [{ url: "/apple-touch-icon.png" }],
+},
+
+  }
 
 export const viewport: Viewport = {
   themeColor: "#0ea5e9",

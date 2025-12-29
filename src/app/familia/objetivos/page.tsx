@@ -4,9 +4,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import Link from "next/link";
-import { useTheme } from "next-themes";
 import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
+import { PageShell } from "@/components/ui/PageShell";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +47,12 @@ type Tx = {
   category: string;
   amount: number;
   goal_id?: string | null;
-  track_category?: string | null;
+
+  // compatibilidad (por si tu tabla trae estos campos)
+  owner_user_id?: string | null;
+  created_by?: string | null;
+  family_group_id?: string | null;
+  user_id?: string | null;
 };
 
 type GoalWithProgress = FamilyGoal & {
@@ -74,10 +79,9 @@ function formatDate(dateStr?: string | null): string {
   });
 }
 
-// Componente pequeño para progreso circular tipo Apple/Activity
+// Progreso circular tipo “Activity”
 function GoalProgressCircle({ progress }: { progress: number }) {
-  const pct = Math.max(0, Math.min(progress, 120)); // limitamos a 120%
-  const normalized = Math.min(progress, 100);
+  const normalized = Math.max(0, Math.min(progress, 100));
 
   return (
     <div className="relative h-14 w-14">
@@ -95,34 +99,83 @@ function GoalProgressCircle({ progress }: { progress: number }) {
 }
 
 export default function FamilyGoalsPage() {
-  const { theme } = useTheme();
+  // Auth
   const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  // Data
   const [goals, setGoals] = useState<FamilyGoal[]>([]);
   const [txs, setTxs] = useState<Tx[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // ---------- AUTH ----------
   useEffect(() => {
+    let ignore = false;
+
+    async function loadUser() {
+      setAuthLoading(true);
+      setAuthError(null);
+
+      try {
+        const { data } = await supabase.auth.getSession();
+        const sessionUser = data.session?.user ?? null;
+        if (!ignore) setUser(sessionUser);
+      } catch (_err) {
+        if (!ignore) {
+          setUser(null);
+          setAuthError("Hubo un problema al cargar tu sesión.");
+        }
+      } finally {
+        if (!ignore) setAuthLoading(false);
+      }
+    }
+
+    loadUser();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      ignore = true;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleSignOut = async () => {
+    try {
+      await supabase.auth.signOut();
+      setUser(null);
+      setGoals([]);
+      setTxs([]);
+    } catch (err) {
+      console.error("Error cerrando sesión", err);
+    }
+  };
+
+  // ---------- DATA ----------
+  useEffect(() => {
+    if (!user) {
+      setGoals([]);
+      setTxs([]);
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
     const fetchData = async () => {
       try {
         setLoading(true);
         setError(null);
 
-        const { data } = await supabase.auth.getSession();
-const user = data.session?.user ?? null;
-
-if (!user) {
-  setError("No se encontró el usuario. Inicia sesión de nuevo.");
-  setLoading(false);
-  return;
-}
-
-setUser(user);
-
-
+        // leer family_group_id si existe profiles (sin romper si no existe)
         let familyGroupId: string | null = null;
 
-        // Igual que en el dashboard: intentamos usar profiles pero no tronamos si no existe
         try {
           const { data: profile, error: profileError } = await supabase
             .from("profiles")
@@ -133,27 +186,39 @@ setUser(user);
           if (!profileError && profile) {
             familyGroupId = profile.family_group_id ?? null;
           }
-        } catch (innerErr) {
-          console.warn(
-            "No se pudo leer profiles para objetivos, se usa modo individual."
-          );
+        } catch {
+          // ok: modo individual
         }
 
         const now = new Date();
         const startOfYear = new Date(now.getFullYear(), 0, 1).toISOString();
 
-        let goalsQuery = supabase.from("family_goals").select("*").order("created_at", { ascending: true });
+        // Goals query (compatibilidad: si hay familyGroupId, también aceptamos metas sin family_group_id pero del owner)
+        let goalsQuery = supabase
+          .from("family_goals")
+          .select("*")
+          .order("created_at", { ascending: true });
+
+        // Txs query (compatibilidad: family_group_id, owner_user_id, created_by, user_id)
         let txsQuery = supabase
           .from("transactions")
-          .select("id, date, type, category, amount, goal_id")
+          .select("id, date, type, category, amount, goal_id, owner_user_id, created_by, family_group_id, user_id")
           .gte("date", startOfYear);
 
         if (familyGroupId) {
-          goalsQuery = goalsQuery.eq("family_group_id", familyGroupId);
-          txsQuery = txsQuery.eq("family_group_id", familyGroupId);
+          goalsQuery = goalsQuery.or(
+            `family_group_id.eq.${familyGroupId},owner_user_id.eq.${user.id}`
+          );
+
+          txsQuery = txsQuery.or(
+            `family_group_id.eq.${familyGroupId},owner_user_id.eq.${user.id},created_by.eq.${user.id},user_id.eq.${user.id}`
+          );
         } else {
           goalsQuery = goalsQuery.eq("owner_user_id", user.id);
-          txsQuery = txsQuery.eq("user_id", user.id);
+
+          txsQuery = txsQuery.or(
+            `owner_user_id.eq.${user.id},created_by.eq.${user.id},user_id.eq.${user.id}`
+          );
         }
 
         const [
@@ -164,21 +229,29 @@ setUser(user);
         if (goalsError) throw goalsError;
         if (txsError) throw txsError;
 
-        setGoals((goalsData || []) as FamilyGoal[]);
-        setTxs((txsData || []) as Tx[]);
+        if (!cancelled) {
+          setGoals((goalsData || []) as FamilyGoal[]);
+          setTxs((txsData || []) as Tx[]);
+        }
       } catch (err: any) {
         console.error("Error cargando metas familiares:", err);
-        setError(
-          err?.message ||
-            "Ocurrió un error al cargar las metas familiares. Intenta de nuevo."
-        );
+        if (!cancelled) {
+          setError(
+            err?.message ||
+              "Ocurrió un error al cargar las metas familiares. Intenta de nuevo."
+          );
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     fetchData();
-  }, []);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   const goalsWithProgress: GoalWithProgress[] = useMemo(() => {
     if (!goals.length) return [];
@@ -212,34 +285,61 @@ setUser(user);
       const progressPct =
         target > 0 ? Math.min((totalContributed / target) * 100, 200) : 0;
 
-      return {
-        ...goal,
-        totalContributed,
-        progressPct,
-      };
+      return { ...goal, totalContributed, progressPct };
     });
   }, [goals, txs]);
 
-  const isDark = theme === "dark";
+  // ---------- UI ----------
+  if (authLoading) {
+    return (
+      <div className="flex flex-1 items-center justify-center text-sm text-slate-600 dark:text-slate-300">
+        Cargando sesión...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-4">
+        <div className="w-full max-w-md space-y-3 rounded-2xl border border-slate-200 bg-white p-5 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="text-sm font-semibold">Metas familiares</div>
+          <p className="text-slate-500 dark:text-slate-400">
+            Inicia sesión para ver y administrar metas familiares.
+          </p>
+          {authError && (
+            <p className="text-[11px] text-rose-600 dark:text-rose-400">{authError}</p>
+          )}
+          <Link
+            href="/"
+            className="inline-flex w-fit rounded-full bg-sky-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-sky-600"
+          >
+            Ir al inicio
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
+    <main className="flex min-h-screen flex-col pb-16 md:pb-4">
       <AppHeader
         title="Familia"
         subtitle="Metas familiares y planes en conjunto"
         activeTab="familia"
+        userEmail={user.email ?? ""}
+        userId={user.id}
+        onSignOut={handleSignOut}
       />
 
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 pb-10 pt-4 md:px-6 md:pt-6 lg:px-8">
+      <PageShell maxWidth="6xl">
         <section className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
               Metas familiares
             </h1>
             <p className="text-xs text-slate-500 dark:text-slate-400 md:text-sm">
-              Define y administra los objetivos financieros de tu familia.
-              Puedes ligarlos a tus movimientos para que el avance se calcule
-              solo.
+              Define y administra los objetivos financieros de tu familia. Puedes ligarlos
+              a tus movimientos para que el avance se calcule solo.
             </p>
           </div>
 
@@ -253,7 +353,7 @@ setUser(user);
 
             <Link
               href="/familia/objetivos/nuevo"
-              className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+              className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600"
             >
               + Agregar objetivo
             </Link>
@@ -280,14 +380,13 @@ setUser(user);
                   Aún no tienes metas familiares.
                 </p>
                 <p>
-                  Crea tu primera meta para vacaciones, un fondo de emergencia,
-                  el enganche de una casa o cualquier objetivo importante para
-                  tu familia.
+                  Crea tu primera meta para vacaciones, un fondo de emergencia, el enganche
+                  de una casa o cualquier objetivo importante.
                 </p>
                 <div className="mt-4 flex justify-center">
                   <Link
                     href="/familia/objetivos/nuevo"
-                    className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+                    className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600"
                   >
                     Crear mi primera meta
                   </Link>
@@ -380,7 +479,7 @@ setUser(user);
                         <div className="flex flex-wrap gap-2">
                           {goal.auto_track && goal.track_category && (
                             <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                              Se actualiza con categoría:{" "}
+                              Se actualiza con:{" "}
                               <span className="font-semibold">
                                 {goal.track_category}
                               </span>
@@ -410,7 +509,7 @@ setUser(user);
             )}
           </>
         )}
-      </main>
-    </div>
+      </PageShell>
+    </main>
   );
 }
