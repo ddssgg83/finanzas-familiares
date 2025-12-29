@@ -1,9 +1,9 @@
 "use client";
 
-import type { FormEvent } from "react";
-import { useEffect, useState } from "react";
+import type { ChangeEvent, FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
@@ -24,13 +24,15 @@ type GoalFormState = {
   track_category: string;
 };
 
-export default function EditFamilyGoalPage({
-  params,
-}: {
-  params: { id: string };
-}) {
+export default function EditFamilyGoalPage() {
   const router = useRouter();
-  const goalId = params?.id ?? "";
+
+  // ✅ App Router (client): params via useParams()
+  const params = useParams<{ id: string }>();
+  const goalId = useMemo(() => {
+    const raw = params?.id;
+    return Array.isArray(raw) ? raw[0] : raw ?? "";
+  }, [params]);
 
   // Auth
   const [user, setUser] = useState<User | null>(null);
@@ -136,8 +138,7 @@ export default function EditFamilyGoalPage({
             type: goal.type ?? "",
             status: goal.status ?? "",
             auto_track: Boolean(goal.auto_track),
-            track_direction: (goal.track_direction ??
-              "") as GoalFormState["track_direction"],
+            track_direction: (goal.track_direction ?? "") as GoalFormState["track_direction"],
             track_category: goal.track_category ?? "",
           });
         }
@@ -167,9 +168,7 @@ export default function EditFamilyGoalPage({
     }
   };
 
-  const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
-  ) => {
+  const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
     const checked = (e.target as HTMLInputElement).checked;
 
@@ -245,9 +244,7 @@ export default function EditFamilyGoalPage({
           <p className="text-slate-500 dark:text-slate-400">
             Inicia sesión para editar objetivos familiares.
           </p>
-          {authError && (
-            <p className="text-[11px] text-rose-600 dark:text-rose-400">{authError}</p>
-          )}
+          {authError && <p className="text-[11px] text-rose-600 dark:text-rose-400">{authError}</p>}
           <Link
             href="/"
             className="inline-flex w-fit rounded-full bg-sky-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-sky-600"
@@ -409,13 +406,7 @@ export default function EditFamilyGoalPage({
 
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-950">
                 <label className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    name="auto_track"
-                    checked={form.auto_track}
-                    onChange={handleChange}
-                    className="mt-[2px]"
-                  />
+                  <input type="checkbox" name="auto_track" checked={form.auto_track} onChange={handleChange} className="mt-[2px]" />
                   <span>
                     Activar seguimiento automático con movimientos
                     <span className="mt-1 block text-[10px] text-slate-500 dark:text-slate-400">
@@ -442,8 +433,7 @@ export default function EditFamilyGoalPage({
                         <option value="gastos_reducidos">Gastos reducidos</option>
                       </select>
                       <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
-                        Nota: “ahorros” depende de cómo lo estés calculando en tu app (por ahora lo
-                        tratamos como ingresos ligados).
+                        Nota: “ahorros” depende de cómo lo estés calculando en tu app (por ahora lo tratamos como ingresos ligados).
                       </p>
                     </div>
 
