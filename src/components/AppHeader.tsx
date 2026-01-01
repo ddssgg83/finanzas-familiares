@@ -16,7 +16,7 @@ type AppHeaderProps = {
   subtitle?: string;
   activeTab?: "dashboard" | "gastos" | "patrimonio" | "aprende" | "familia";
   userEmail?: string | null;
-  userId?: string | null; // ✅ NUEVO: necesario para syncOfflineTxs(userId)
+  userId?: string | null; // ✅ necesario para offline scope + sync
   onSignOut?: () => void;
 };
 
@@ -77,16 +77,24 @@ export function AppHeader({
   const [pending, setPending] = useState(0);
   const [syncing, setSyncing] = useState(false);
 
+  // ✅ FIX: getOfflineTxs ahora requiere userId (scope)
   const refreshPending = useCallback(async () => {
     try {
-      const txs = await getOfflineTxs();
-      setPending(txs?.length ?? 0);
+      if (!userId) {
+        setPending(0);
+        return 0;
+      }
+      const txs = await getOfflineTxs(userId);
+      const count = txs?.length ?? 0;
+      setPending(count);
+      return count;
     } catch {
       setPending(0);
+      return 0;
     }
-  }, []);
+  }, [userId]);
 
-  // Cargar pendientes al montar
+  // Cargar pendientes al montar / cuando cambie userId
   useEffect(() => {
     refreshPending();
   }, [refreshPending]);
@@ -99,18 +107,17 @@ export function AppHeader({
 
     const run = async () => {
       // Siempre refresca conteo al volver online
-      await refreshPending();
+      const count = await refreshPending();
       if (cancelled) return;
 
       // Si no hay pendientes, listo
-      if (pending <= 0) return;
+      if (count <= 0) return;
 
       // Si no tenemos userId, no podemos sincronizar
       if (!userId) return;
 
       setSyncing(true);
       try {
-        // ✅ Aquí estaba tu error: syncOfflineTxs requiere userId
         await syncOfflineTxs(userId);
         await refreshPending();
       } finally {
@@ -123,14 +130,14 @@ export function AppHeader({
     return () => {
       cancelled = true;
     };
-    // OJO: incluimos pending y userId para que corra bien al cambiar
-  }, [isOnline, pending, userId, refreshPending]);
+  }, [isOnline, userId, refreshPending]);
 
   // Pequeño “retry” (si el usuario presiona)
   const onRetry = useCallback(async () => {
     if (!isOnline) return;
-    await refreshPending();
-    if (pending <= 0) return;
+
+    const count = await refreshPending();
+    if (count <= 0) return;
     if (!userId) return;
 
     setSyncing(true);
@@ -140,7 +147,7 @@ export function AppHeader({
     } finally {
       setSyncing(false);
     }
-  }, [isOnline, pending, userId, refreshPending]);
+  }, [isOnline, userId, refreshPending]);
 
   // Texto de estado (fallback si no quieres SyncBadge)
   const statusText = useMemo(() => {
@@ -168,13 +175,8 @@ export function AppHeader({
           {/* ✅ Badge en header (solo si NO estás en /offline) */}
           {!isOfflineRoute && (
             <div className="hidden sm:block">
-              {/* Si ya tienes SyncBadge, úsalo */}
-              <SyncBadge
-                pendingCount={pending}
-                isOnline={isOnline}
-                syncing={syncing}
-              />
-              {/* Si NO quieres SyncBadge, comenta arriba y descomenta esto:
+              <SyncBadge pendingCount={pending} isOnline={isOnline} syncing={syncing} />
+              {/* Fallback sin SyncBadge:
               <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
                 {statusText}
               </span>
