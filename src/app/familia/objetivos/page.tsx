@@ -7,6 +7,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
 import { PageShell } from "@/components/ui/PageShell";
+import { useFamilyContext } from "@/hooks/useFamilyContext";
 
 export const dynamic = "force-dynamic";
 
@@ -48,8 +49,9 @@ type Tx = {
   amount: number;
   goal_id?: string | null;
 
-  // compatibilidad (por si tu tabla trae estos campos)
+  // compatibilidad
   owner_user_id?: string | null;
+  spender_user_id?: string | null;
   created_by?: string | null;
   family_group_id?: string | null;
   user_id?: string | null;
@@ -61,7 +63,7 @@ type GoalWithProgress = FamilyGoal & {
 };
 
 function formatCurrency(monto: number): string {
-  return monto.toLocaleString("es-MX", {
+  return (monto || 0).toLocaleString("es-MX", {
     style: "currency",
     currency: "MXN",
     maximumFractionDigits: 0,
@@ -98,17 +100,42 @@ function GoalProgressCircle({ progress }: { progress: number }) {
   );
 }
 
+function getIsOnline() {
+  if (typeof window === "undefined") return true;
+  return navigator.onLine;
+}
+
 export default function FamilyGoalsPage() {
   // Auth
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
+  // Online
+  const [isOnline, setIsOnline] = useState(getIsOnline());
+
+  // ✅ Fuente de verdad de familia (igual que dashboard)
+  const { familyCtx, familyLoading, familyError } = useFamilyContext(user);
+
   // Data
   const [goals, setGoals] = useState<FamilyGoal[]>([]);
   const [txs, setTxs] = useState<Tx[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // ---------- ONLINE LISTENERS ----------
+  useEffect(() => {
+    const onOnline = () => setIsOnline(true);
+    const onOffline = () => setIsOnline(false);
+
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, []);
 
   // ---------- AUTH ----------
   useEffect(() => {
@@ -122,7 +149,7 @@ export default function FamilyGoalsPage() {
         const { data } = await supabase.auth.getSession();
         const sessionUser = data.session?.user ?? null;
         if (!ignore) setUser(sessionUser);
-      } catch (_err) {
+      } catch {
         if (!ignore) {
           setUser(null);
           setAuthError("Hubo un problema al cargar tu sesión.");
@@ -166,6 +193,8 @@ export default function FamilyGoalsPage() {
       return;
     }
 
+    if (familyLoading) return; // evitamos parpadeo / queries antes de tener familyCtx
+
     let cancelled = false;
 
     const fetchData = async () => {
@@ -173,36 +202,31 @@ export default function FamilyGoalsPage() {
         setLoading(true);
         setError(null);
 
-        // leer family_group_id si existe profiles (sin romper si no existe)
-        let familyGroupId: string | null = null;
-
-        try {
-          const { data: profile, error: profileError } = await supabase
-            .from("profiles")
-            .select("id, family_group_id")
-            .eq("id", user.id)
-            .maybeSingle();
-
-          if (!profileError && profile) {
-            familyGroupId = profile.family_group_id ?? null;
+        // ✅ Si estás offline, NO pegamos a Supabase (esto elimina el "{}" típico)
+        if (!getIsOnline()) {
+          if (!cancelled) {
+            setGoals([]);
+            setTxs([]);
+            setError("Estás en modo offline. Las metas se cargarán cuando vuelvas a estar en línea.");
           }
-        } catch {
-          // ok: modo individual
+          return;
         }
+
+        const familyGroupId = familyCtx?.familyId ?? null;
 
         const now = new Date();
         const startOfYear = new Date(now.getFullYear(), 0, 1).toISOString();
 
-        // Goals query (compatibilidad: si hay familyGroupId, también aceptamos metas sin family_group_id pero del owner)
         let goalsQuery = supabase
           .from("family_goals")
           .select("*")
           .order("created_at", { ascending: true });
 
-        // Txs query (compatibilidad: family_group_id, owner_user_id, created_by, user_id)
         let txsQuery = supabase
           .from("transactions")
-          .select("id, date, type, category, amount, goal_id, owner_user_id, created_by, family_group_id, user_id")
+          .select(
+            "id,date,type,category,amount,goal_id,owner_user_id,spender_user_id,created_by,family_group_id,user_id"
+          )
           .gte("date", startOfYear);
 
         if (familyGroupId) {
@@ -211,20 +235,24 @@ export default function FamilyGoalsPage() {
           );
 
           txsQuery = txsQuery.or(
-            `family_group_id.eq.${familyGroupId},owner_user_id.eq.${user.id},created_by.eq.${user.id},user_id.eq.${user.id}`
+            [
+              `family_group_id.eq.${familyGroupId}`,
+              `owner_user_id.eq.${user.id}`,
+              `spender_user_id.eq.${user.id}`,
+              `created_by.eq.${user.id}`,
+              `user_id.eq.${user.id}`,
+            ].join(",")
           );
         } else {
           goalsQuery = goalsQuery.eq("owner_user_id", user.id);
 
           txsQuery = txsQuery.or(
-            `owner_user_id.eq.${user.id},created_by.eq.${user.id},user_id.eq.${user.id}`
+            `owner_user_id.eq.${user.id},spender_user_id.eq.${user.id},created_by.eq.${user.id},user_id.eq.${user.id}`
           );
         }
 
-        const [
-          { data: goalsData, error: goalsError },
-          { data: txsData, error: txsError },
-        ] = await Promise.all([goalsQuery, txsQuery]);
+        const [{ data: goalsData, error: goalsError }, { data: txsData, error: txsError }] =
+          await Promise.all([goalsQuery, txsQuery]);
 
         if (goalsError) throw goalsError;
         if (txsError) throw txsError;
@@ -233,13 +261,38 @@ export default function FamilyGoalsPage() {
           setGoals((goalsData || []) as FamilyGoal[]);
           setTxs((txsData || []) as Tx[]);
         }
-      } catch (err: any) {
-        console.error("Error cargando metas familiares:", err);
+      } catch (err: unknown) {
+        const e = err as any;
+        const msg =
+          e?.message ||
+          e?.error_description ||
+          e?.details ||
+          e?.hint ||
+          (typeof e === "string" ? e : "") ||
+          "";
+
+        console.error("Error cargando metas familiares:", {
+          raw: err,
+          msg,
+          name: e?.name,
+          code: e?.code,
+          status: e?.status,
+        });
+
+        const lower = String(msg).toLowerCase();
+        const looksOffline =
+          typeof window !== "undefined" &&
+          (!navigator.onLine ||
+            lower.includes("failed to fetch") ||
+            lower.includes("network") ||
+            lower.includes("offline"));
+
         if (!cancelled) {
-          setError(
-            err?.message ||
-              "Ocurrió un error al cargar las metas familiares. Intenta de nuevo."
-          );
+          if (looksOffline) {
+            setError("Estás en modo offline. No se pudieron cargar metas desde el servidor.");
+          } else {
+            setError(msg || "Ocurrió un error al cargar las metas familiares. Intenta de nuevo.");
+          }
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -251,7 +304,7 @@ export default function FamilyGoalsPage() {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [user, familyCtx?.familyId, familyLoading, isOnline]);
 
   const goalsWithProgress: GoalWithProgress[] = useMemo(() => {
     if (!goals.length) return [];
@@ -262,9 +315,7 @@ export default function FamilyGoalsPage() {
       const relatedTxs = txs.filter((tx) => {
         const byGoalId = tx.goal_id === goal.id;
         const byCategory =
-          goal.auto_track &&
-          goal.track_category &&
-          tx.category === goal.track_category;
+          goal.auto_track && goal.track_category && tx.category === goal.track_category;
 
         if (!byGoalId && !byCategory) return false;
 
@@ -277,13 +328,8 @@ export default function FamilyGoalsPage() {
         return true;
       });
 
-      const totalContributed = relatedTxs.reduce(
-        (sum, tx) => sum + (tx.amount || 0),
-        0
-      );
-
-      const progressPct =
-        target > 0 ? Math.min((totalContributed / target) * 100, 200) : 0;
+      const totalContributed = relatedTxs.reduce((sum, tx) => sum + (tx.amount || 0), 0);
+      const progressPct = target > 0 ? Math.min((totalContributed / target) * 100, 200) : 0;
 
       return { ...goal, totalContributed, progressPct };
     });
@@ -334,13 +380,24 @@ export default function FamilyGoalsPage() {
       <PageShell maxWidth="6xl">
         <section className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
-              Metas familiares
-            </h1>
+            <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Metas familiares</h1>
             <p className="text-xs text-slate-500 dark:text-slate-400 md:text-sm">
-              Define y administra los objetivos financieros de tu familia. Puedes ligarlos
-              a tus movimientos para que el avance se calcule solo.
+              Define y administra los objetivos financieros de tu familia. Puedes ligarlos a tus
+              movimientos para que el avance se calcule solo.
             </p>
+
+            <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+              {familyError ? (
+                <span className="text-rose-600 dark:text-rose-300">{familyError}</span>
+              ) : familyCtx?.familyId ? (
+                <>
+                  Familia: <span className="font-semibold">{familyCtx.familyName}</span> · Miembros
+                  activos: <span className="font-semibold">{familyCtx.activeMembers}</span>
+                </>
+              ) : (
+                <>Aún no tienes familia configurada (modo individual).</>
+              )}
+            </div>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -361,13 +418,13 @@ export default function FamilyGoalsPage() {
         </section>
 
         {loading && (
-          <div className="flex items-center justify-center rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="mt-4 flex items-center justify-center rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             Cargando metas familiares…
           </div>
         )}
 
         {error && !loading && (
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-300">
+          <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-300">
             {error}
           </div>
         )}
@@ -375,13 +432,13 @@ export default function FamilyGoalsPage() {
         {!loading && !error && (
           <>
             {goalsWithProgress.length === 0 ? (
-              <section className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-xs text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
+              <section className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-xs text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
                 <p className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-100">
                   Aún no tienes metas familiares.
                 </p>
                 <p>
-                  Crea tu primera meta para vacaciones, un fondo de emergencia, el enganche
-                  de una casa o cualquier objetivo importante.
+                  Crea tu primera meta para vacaciones, un fondo de emergencia, el enganche de una
+                  casa o cualquier objetivo importante.
                 </p>
                 <div className="mt-4 flex justify-center">
                   <Link
@@ -393,7 +450,7 @@ export default function FamilyGoalsPage() {
                 </div>
               </section>
             ) : (
-              <section className="grid gap-4 md:grid-cols-2">
+              <section className="mt-4 grid gap-4 md:grid-cols-2">
                 {goalsWithProgress.map((goal) => {
                   const normalizedProgress = Math.min(goal.progressPct, 100);
                   const overGoal = goal.progressPct >= 100;
@@ -431,9 +488,7 @@ export default function FamilyGoalsPage() {
                         <div className="flex-1">
                           <div className="mb-1 flex items-start justify-between gap-2">
                             <div>
-                              <h2 className="text-sm font-semibold leading-tight">
-                                {goal.name}
-                              </h2>
+                              <h2 className="text-sm font-semibold leading-tight">{goal.name}</h2>
                               {goal.category && (
                                 <p className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
                                   {goal.category}
@@ -469,8 +524,7 @@ export default function FamilyGoalsPage() {
                           </div>
 
                           <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                            {normalizedProgress.toFixed(1)}% completado ·{" "}
-                            {formatDate(goal.due_date)}
+                            {normalizedProgress.toFixed(1)}% completado · {formatDate(goal.due_date)}
                           </p>
                         </div>
                       </div>
@@ -480,17 +534,12 @@ export default function FamilyGoalsPage() {
                           {goal.auto_track && goal.track_category && (
                             <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                               Se actualiza con:{" "}
-                              <span className="font-semibold">
-                                {goal.track_category}
-                              </span>
+                              <span className="font-semibold">{goal.track_category}</span>
                             </span>
                           )}
                           {goal.track_direction && (
                             <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                              Dirección:{" "}
-                              <span className="font-semibold">
-                                {goal.track_direction}
-                              </span>
+                              Dirección: <span className="font-semibold">{goal.track_direction}</span>
                             </span>
                           )}
                         </div>

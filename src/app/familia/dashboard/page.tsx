@@ -19,6 +19,7 @@ import {
   Line,
 } from "recharts";
 import { PageShell } from "@/components/ui/PageShell";
+import { useFamilyContext } from "@/hooks/useFamilyContext";
 
 export const dynamic = "force-dynamic";
 
@@ -33,18 +34,15 @@ type Tx = {
   method: string;
   notes?: string | null;
   created_by?: string | null;
+  user_id?: string | null;
   owner_user_id?: string | null;
+  spender_user_id?: string | null;
   family_group_id?: string | null;
   goal_id?: string | null;
 };
 
 type FamilyGoalType = "ahorro" | "deuda" | "gasto_controlado" | "otro";
-type FamilyGoalStatus =
-  | "pendiente"
-  | "en_progreso"
-  | "completado"
-  | "pausado"
-  | "cancelado";
+type FamilyGoalStatus = "pendiente" | "en_progreso" | "completado" | "pausado" | "cancelado";
 
 type FamilyGoal = {
   id: string;
@@ -68,10 +66,11 @@ type FamilyGoal = {
 };
 
 type FamilyMember = {
-  id: string;
+  id: string; // id lógico (preferimos user_id)
+  user_id: string | null;
   full_name: string | null;
   role: string | null;
-  family_group_id?: string | null;
+  status?: string | null;
 };
 
 type GoalWithProgress = FamilyGoal & {
@@ -81,6 +80,37 @@ type GoalWithProgress = FamilyGoal & {
   projectedDaysToGoal: number | null;
   intensity: "on_track" | "at_risk" | "off_track";
 };
+
+// =========================
+// Offline cache helpers
+// =========================
+function isOfflineNow() {
+  if (typeof window === "undefined") return false;
+  return !navigator.onLine;
+}
+
+function cacheKey(base: string, scope: { userId: string; familyId?: string | null }) {
+  const fam = scope.familyId ? `fam:${scope.familyId}` : "nofam";
+  return `ff-${base}-v1:${scope.userId}:${fam}`;
+}
+
+function readCache<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeCache<T>(key: string, value: T) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
 
 function formatCurrency(monto: number): string {
   return (monto || 0).toLocaleString("es-MX", {
@@ -111,12 +141,29 @@ export default function FamilyDashboardPage() {
   const isDark = theme === "dark";
 
   const [user, setUser] = useState<User | null>(null);
+
+  // ✅ fuente de verdad de familia
+  const { familyCtx, familyLoading, familyError, isFamilyOwner } = useFamilyContext(user);
+
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
   const [goals, setGoals] = useState<FamilyGoal[]>([]);
   const [txs, setTxs] = useState<Tx[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showGoalsChart, setShowGoalsChart] = useState(false);
+
+  // ✅ offline state para no depender de navigator.onLine en render/SSR
+  const [isOffline, setIsOffline] = useState(false);
+  useEffect(() => {
+    const update = () => setIsOffline(isOfflineNow());
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
 
   const handleSignOut = async () => {
     try {
@@ -127,65 +174,135 @@ export default function FamilyDashboardPage() {
     }
   };
 
+  // =========================================================
+  // AUTH
+  // =========================================================
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadUser() {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const sessionUser = data.session?.user ?? null;
+        if (!ignore) setUser(sessionUser);
+      } catch {
+        if (!ignore) setUser(null);
+      }
+    }
+
+    loadUser();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      ignore = true;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // =========================================================
+  // LOAD DATA (miembros + goals + txs) + OFFLINE CACHE
+  // =========================================================
   useEffect(() => {
     let ignore = false;
 
     const fetchData = async () => {
+      if (!user) {
+        if (!ignore) {
+          setLoading(false);
+          setError("No se encontró el usuario. Inicia sesión de nuevo.");
+        }
+        return;
+      }
+
+      const familyGroupId = familyCtx?.familyId ?? null;
+      const scope = { userId: user.id, familyId: familyGroupId };
+
+      const membersK = cacheKey("famdash_members", scope);
+      const goalsK = cacheKey("famdash_goals", scope);
+      const txsK = cacheKey("famdash_txs", scope);
+
+      // ✅ OFFLINE: leemos cache y NO tronamos
+      if (isOffline) {
+        const cachedMembers = readCache<FamilyMember[]>(membersK, []);
+        const cachedGoals = readCache<FamilyGoal[]>(goalsK, []);
+        const cachedTxs = readCache<Tx[]>(txsK, []);
+
+        if (!ignore) {
+          setFamilyMembers(
+            cachedMembers.length
+              ? cachedMembers
+              : [
+                  {
+                    id: user.id,
+                    user_id: user.id,
+                    full_name: user.email ?? "Tu cuenta",
+                    role: familyGroupId ? "owner" : "jefe",
+                    status: "active",
+                  },
+                ]
+          );
+          setGoals(cachedGoals);
+          setTxs(cachedTxs);
+          setError(null); // 👈 clave: no mostramos error en offline
+          setLoading(false);
+        }
+        return;
+      }
+
       try {
         setLoading(true);
         setError(null);
 
-        // ✅ OFFLINE-SAFE
-        const { data } = await supabase.auth.getSession();
-        const sessionUser = data.session?.user ?? null;
-
-        if (!sessionUser) {
-          if (!ignore) {
-            setUser(null);
-            setError("No se encontró el usuario. Inicia sesión de nuevo.");
-            setLoading(false);
-          }
-          return;
-        }
-
-        if (!ignore) setUser(sessionUser);
-
-        // Intentamos leer perfil/familia si existe `profiles`
-        let familyGroupId: string | null = null;
+        // -----------------------------
+        // MIEMBROS (family_members)
+        // -----------------------------
         let members: FamilyMember[] = [];
 
-        try {
-          const { data: profile, error: profileError } = await supabase
-            .from("profiles")
-            .select("id, family_group_id, full_name, role")
-            .eq("id", sessionUser.id)
-            .maybeSingle();
+        if (familyGroupId) {
+          const { data: mems, error: memErr } = await supabase
+            .from("family_members")
+            .select("id,family_id,user_id,full_name,invited_email,role,status,created_at")
+            .eq("family_id", familyGroupId)
+            .eq("status", "active")
+            .order("created_at", { ascending: true });
 
-          if (!profileError && profile) {
-            familyGroupId = profile.family_group_id ?? null;
+          if (memErr) {
+            console.warn("Error cargando family_members:", memErr.message);
+          } else {
+            members =
+              (mems ?? [])
+                .map((m: any) => {
+                  const uid = (m.user_id ?? null) as string | null;
+                  const label =
+                    m.full_name ??
+                    m.invited_email ??
+                    (uid ? `Usuario ${String(uid).slice(0, 8)}` : "Miembro");
 
-            if (familyGroupId) {
-              const { data: membersData, error: membersError } = await supabase
-                .from("profiles")
-                .select("id, full_name, role, family_group_id")
-                .eq("family_group_id", familyGroupId);
-
-              if (!membersError && membersData) members = membersData as FamilyMember[];
-            }
-          } else if (profileError) {
-            console.warn("No se pudo leer 'profiles', modo individual:", profileError.message);
+                  return {
+                    id: uid ?? m.id,
+                    user_id: uid,
+                    full_name: label,
+                    role: m.role ?? null,
+                    status: m.status ?? null,
+                  } as FamilyMember;
+                })
+                .filter((m: FamilyMember) => Boolean(m.user_id)) ?? [];
           }
-        } catch (innerErr: any) {
-          console.warn("Error leyendo profiles, modo individual:", innerErr?.message);
         }
 
         if (!members.length) {
           members = [
             {
-              id: sessionUser.id,
-              full_name: sessionUser.email ?? "Tu cuenta",
-              role: "jefe",
-              family_group_id: null,
+              id: user.id,
+              user_id: user.id,
+              full_name: user.email ?? "Tu cuenta",
+              role: familyGroupId ? "owner" : "jefe",
+              status: "active",
             },
           ];
         }
@@ -197,16 +314,20 @@ export default function FamilyDashboardPage() {
         let txsQuery = supabase.from("transactions").select("*").gte("date", startOfYear);
 
         if (familyGroupId) {
-          goalsQuery = goalsQuery.or(
-            `family_group_id.eq.${familyGroupId},owner_user_id.eq.${sessionUser.id}`
-          );
+          goalsQuery = goalsQuery.or(`family_group_id.eq.${familyGroupId},owner_user_id.eq.${user.id}`);
           txsQuery = txsQuery.or(
-            `family_group_id.eq.${familyGroupId},owner_user_id.eq.${sessionUser.id},created_by.eq.${sessionUser.id}`
+            [
+              `family_group_id.eq.${familyGroupId}`,
+              `owner_user_id.eq.${user.id}`,
+              `spender_user_id.eq.${user.id}`,
+              `created_by.eq.${user.id}`,
+              `user_id.eq.${user.id}`,
+            ].join(",")
           );
         } else {
-          goalsQuery = goalsQuery.eq("owner_user_id", sessionUser.id);
+          goalsQuery = goalsQuery.eq("owner_user_id", user.id);
           txsQuery = txsQuery.or(
-            `user_id.eq.${sessionUser.id},owner_user_id.eq.${sessionUser.id},created_by.eq.${sessionUser.id}`
+            `user_id.eq.${user.id},spender_user_id.eq.${user.id},owner_user_id.eq.${user.id},created_by.eq.${user.id}`
           );
         }
 
@@ -219,32 +340,72 @@ export default function FamilyDashboardPage() {
         if (txsError) throw txsError;
 
         if (!ignore) {
+          const safeGoals = (goalsData || []) as FamilyGoal[];
+          const safeTxs = (txsData || []) as Tx[];
+
           setFamilyMembers(members);
-          setGoals((goalsData || []) as FamilyGoal[]);
-          setTxs((txsData || []) as Tx[]);
+          setGoals(safeGoals);
+          setTxs(safeTxs);
+
+          // ✅ guardamos cache para offline
+          writeCache(membersK, members);
+          writeCache(goalsK, safeGoals);
+          writeCache(txsK, safeTxs);
         }
       } catch (err: any) {
         console.error("Error cargando dashboard familiar:", err);
         if (!ignore) {
-          setError(
-            err?.message || "Ocurrió un error al cargar el dashboard familiar. Intenta de nuevo."
-          );
+          // ✅ si parece error de red, no mostramos error (leemos cache)
+          const msg = String(err?.message ?? "").toLowerCase();
+          const looksOffline = msg.includes("failed to fetch") || msg.includes("network") || msg.includes("offline");
+
+          if (looksOffline) {
+            const cachedMembers = readCache<FamilyMember[]>(membersK, []);
+            const cachedGoals = readCache<FamilyGoal[]>(goalsK, []);
+            const cachedTxs = readCache<Tx[]>(txsK, []);
+
+            setFamilyMembers(
+              cachedMembers.length
+                ? cachedMembers
+                : [
+                    {
+                      id: user.id,
+                      user_id: user.id,
+                      full_name: user.email ?? "Tu cuenta",
+                      role: familyGroupId ? "owner" : "jefe",
+                      status: "active",
+                    },
+                  ]
+            );
+            setGoals(cachedGoals);
+            setTxs(cachedTxs);
+            setError(null);
+          } else {
+            setError(err?.message || "Ocurrió un error al cargar el dashboard familiar. Intenta de nuevo.");
+          }
         }
       } finally {
         if (!ignore) setLoading(false);
       }
     };
 
+    if (!user) return;
+    if (familyLoading) return;
+
     fetchData();
+
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [user, familyCtx?.familyId, familyLoading, isOffline]);
 
+  // =========================================================
+  // MAPS + KPIs
+  // =========================================================
   const memberMap = useMemo(() => {
     const map = new Map<string, FamilyMember>();
     familyMembers.forEach((m) => {
-      if (m.id) map.set(m.id, m);
+      if (m.user_id) map.set(m.user_id, m);
     });
     return map;
   }, [familyMembers]);
@@ -261,22 +422,16 @@ export default function FamilyDashboardPage() {
 
       const relatedTxs = txs.filter((tx) => {
         const byGoalId = tx.goal_id === goal.id;
-        const byCategory =
-          goal.auto_track && goal.track_category && tx.category === goal.track_category;
+        const byCategory = goal.auto_track && goal.track_category && tx.category === goal.track_category;
 
         if (!byGoalId && !byCategory) return false;
 
-        if (goal.track_direction === "ingresos" || goal.track_direction === "ahorros") {
-          return tx.type === "ingreso";
-        }
-        if (goal.track_direction === "gastos_reducidos") {
-          return tx.type === "gasto";
-        }
+        if (goal.track_direction === "ingresos" || goal.track_direction === "ahorros") return tx.type === "ingreso";
+        if (goal.track_direction === "gastos_reducidos") return tx.type === "gasto";
         return true;
       });
 
       const totalContributed = relatedTxs.reduce((sum, tx) => sum + (tx.amount || 0), 0);
-
       const progressPct = target > 0 ? Math.min((totalContributed / target) * 100, 200) : 0;
 
       const last30Amount = relatedTxs
@@ -301,14 +456,7 @@ export default function FamilyDashboardPage() {
         else if (projectedDaysToGoal > daysToDue * 0.8) intensity = "at_risk";
       }
 
-      return {
-        ...goal,
-        totalContributed,
-        progressPct,
-        last30Amount,
-        projectedDaysToGoal,
-        intensity,
-      };
+      return { ...goal, totalContributed, progressPct, last30Amount, projectedDaysToGoal, intensity };
     });
   }, [goals, txs]);
 
@@ -317,18 +465,12 @@ export default function FamilyDashboardPage() {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
     const totalGoals = goalsWithProgress.length;
-    const completedGoals = goalsWithProgress.filter(
-      (g) => (g.status as string) === "completado" || g.progressPct >= 100
-    ).length;
-
-    const inProgressGoals = goalsWithProgress.filter(
-      (g) => g.progressPct > 0 && g.progressPct < 100 && g.status !== "cancelado"
-    ).length;
+    const completedGoals = goalsWithProgress.filter((g) => (g.status as string) === "completado" || g.progressPct >= 100).length;
+    const inProgressGoals = goalsWithProgress.filter((g) => g.progressPct > 0 && g.progressPct < 100 && g.status !== "cancelado").length;
 
     const globalTarget = goalsWithProgress.reduce((sum, g) => sum + (g.target_amount || 0), 0);
     const globalContributed = goalsWithProgress.reduce((sum, g) => sum + g.totalContributed, 0);
-    const globalProgressPct =
-      globalTarget > 0 ? Math.min((globalContributed / globalTarget) * 100, 200) : 0;
+    const globalProgressPct = globalTarget > 0 ? Math.min((globalContributed / globalTarget) * 100, 200) : 0;
 
     const monthlyGoalContrib = txs
       .filter((tx) => {
@@ -337,40 +479,28 @@ export default function FamilyDashboardPage() {
       })
       .reduce((sum, tx) => sum + (tx.amount || 0), 0);
 
-    return {
-      totalGoals,
-      completedGoals,
-      inProgressGoals,
-      globalTarget,
-      globalContributed,
-      globalProgressPct,
-      monthlyGoalContrib,
-    };
+    return { totalGoals, completedGoals, inProgressGoals, globalTarget, globalContributed, globalProgressPct, monthlyGoalContrib };
   }, [goalsWithProgress, txs]);
 
-  const goalsChartData = useMemo(
-    () =>
-      goalsWithProgress.map((g) => ({
-        name: g.name,
-        progreso: Number(g.progressPct.toFixed(1)),
-      })),
-    [goalsWithProgress]
-  );
+  const goalsChartData = useMemo(() => goalsWithProgress.map((g) => ({ name: g.name, progreso: Number(g.progressPct.toFixed(1)) })), [goalsWithProgress]);
 
   const memberContributionChartData = useMemo(() => {
     const map = new Map<string, number>();
-
     txs.forEach((tx) => {
       if (!tx.goal_id) return;
-      const key = tx.owner_user_id || tx.created_by || "desconocido";
+      const key = tx.spender_user_id || tx.owner_user_id || tx.created_by || tx.user_id || "desconocido";
       map.set(key, (map.get(key) || 0) + (tx.amount || 0));
     });
-
     return Array.from(map.entries()).map(([userId, total]) => {
       const member = memberMap.get(userId);
       return { name: member?.full_name || "Miembro", aporte: total };
     });
   }, [txs, memberMap]);
+
+  const headerRoleLabel = useMemo(() => {
+    if (!familyCtx?.familyId) return "Cuenta individual";
+    return isFamilyOwner ? "Jefe de familia" : "Miembro";
+  }, [familyCtx?.familyId, isFamilyOwner]);
 
   return (
     <main className="flex min-h-screen flex-col pb-16 md:pb-4">
@@ -384,13 +514,11 @@ export default function FamilyDashboardPage() {
       />
 
       <PageShell maxWidth="6xl">
-        {/* Header interno */}
         <section className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Dashboard familiar</h1>
             <p className="text-xs text-slate-500 dark:text-slate-400 md:text-sm">
-              Visualiza el avance de tus objetivos familiares, quién está aportando más y qué tan
-              cerca están de lograrse.
+              Visualiza el avance de tus objetivos familiares, quién está aportando más y qué tan cerca están de lograrse.
             </p>
 
             <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
@@ -407,28 +535,39 @@ export default function FamilyDashboardPage() {
                 Crear nueva meta
               </Link>
             </div>
+
+            <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+              {isOffline ? (
+                <span className="text-amber-700 dark:text-amber-300">Modo offline: mostrando datos guardados.</span>
+              ) : familyError ? (
+                <span className="text-rose-600 dark:text-rose-300">{familyError}</span>
+              ) : familyCtx?.familyId ? (
+                <>
+                  Familia: <span className="font-semibold">{familyCtx.familyName}</span> · Miembros activos:{" "}
+                  <span className="font-semibold">{familyCtx.activeMembers}</span>
+                </>
+              ) : (
+                <>Aún no tienes familia configurada (modo individual).</>
+              )}
+            </div>
           </div>
 
           {user && (
             <div className="rounded-full bg-gradient-to-r from-emerald-500/10 via-sky-500/10 to-indigo-500/10 px-4 py-2 text-right text-[11px] text-slate-600 dark:text-slate-300">
-              <div className="text-[10px] uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
-                Jefe de familia
-              </div>
-              <div className="font-medium">
-                {familyMembers.find((m) => m.id === user.id)?.full_name || "Tu cuenta"}
-              </div>
+              <div className="text-[10px] uppercase tracking-wide text-emerald-600 dark:text-emerald-400">{headerRoleLabel}</div>
+              <div className="font-medium">{familyMembers.find((m) => m.user_id === user.id)?.full_name || "Tu cuenta"}</div>
             </div>
           )}
         </section>
 
         {loading && (
-          <div className="flex items-center justify-center rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="mt-4 flex items-center justify-center rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             Cargando dashboard familiar…
           </div>
         )}
 
         {error && !loading && (
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-300">
+          <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-300">
             {error}
           </div>
         )}
@@ -436,11 +575,9 @@ export default function FamilyDashboardPage() {
         {!loading && !error && (
           <>
             {/* Resumen */}
-            <section className="grid gap-4 md:grid-cols-3">
+            <section className="mt-4 grid gap-4 md:grid-cols-3">
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Metas familiares
-                </div>
+                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Metas familiares</div>
                 <div className="flex items-baseline gap-2">
                   <div className="text-2xl font-semibold">{globalSummary.totalGoals}</div>
                   <div className="text-[11px] text-slate-500 dark:text-slate-400">totales</div>
@@ -458,12 +595,9 @@ export default function FamilyDashboardPage() {
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Ahorro enfocado a metas
-                </div>
+                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Ahorro enfocado a metas</div>
                 <div className="text-xs text-slate-500 dark:text-slate-400">
-                  {formatCurrency(globalSummary.globalContributed)} /{" "}
-                  {formatCurrency(globalSummary.globalTarget || 0)}
+                  {formatCurrency(globalSummary.globalContributed)} / {formatCurrency(globalSummary.globalTarget || 0)}
                 </div>
                 <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                   <div
@@ -473,39 +607,28 @@ export default function FamilyDashboardPage() {
                 </div>
                 <div className="mt-1 text-right text-[11px] text-slate-500 dark:text-slate-400">
                   Avance global{" "}
-                  <span className="font-semibold text-slate-800 dark:text-slate-100">
-                    {globalSummary.globalProgressPct.toFixed(1)}%
-                  </span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-100">{globalSummary.globalProgressPct.toFixed(1)}%</span>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Aportado a metas este mes
-                </div>
-                <div className="text-2xl font-semibold">
-                  {formatCurrency(globalSummary.monthlyGoalContrib || 0)}
-                </div>
-                <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                  Suma de movimientos ligados a objetivos durante el mes actual.
-                </p>
+                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Aportado a metas este mes</div>
+                <div className="text-2xl font-semibold">{formatCurrency(globalSummary.monthlyGoalContrib || 0)}</div>
+                <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Suma de movimientos ligados a objetivos durante el mes actual.</p>
               </div>
             </section>
 
             {/* Metas + Panel */}
-            <section className="grid gap-4 lg:grid-cols-3">
+            <section className="mt-4 grid gap-4 lg:grid-cols-3">
               <div className="lg:col-span-2">
                 <div className="mb-3">
                   <h2 className="text-sm font-semibold">Objetivos familiares</h2>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Objetivos vinculados a tus movimientos. El avance se calcula automáticamente.
-                  </p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Objetivos vinculados a tus movimientos. El avance se calcula automáticamente.</p>
                 </div>
 
                 {goalsWithProgress.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
-                    Aún no tienes objetivos familiares. Crea metas para vacaciones, estudios, fondo
-                    de emergencia, etc.
+                    Aún no tienes objetivos familiares. Crea metas para vacaciones, estudios, fondo de emergencia, etc.
                   </div>
                 ) : (
                   <div className="grid gap-3 md:grid-cols-2">
@@ -516,22 +639,10 @@ export default function FamilyDashboardPage() {
 
                       const intensityBadge =
                         goal.intensity === "on_track"
-                          ? {
-                              label: "En ruta",
-                              className:
-                                "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-                            }
+                          ? { label: "En ruta", className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" }
                           : goal.intensity === "at_risk"
-                          ? {
-                              label: "En riesgo",
-                              className:
-                                "bg-amber-50 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-                            }
-                          : {
-                              label: "Fuera de ruta",
-                              className:
-                                "bg-rose-50 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
-                            };
+                          ? { label: "En riesgo", className: "bg-amber-50 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" }
+                          : { label: "Fuera de ruta", className: "bg-rose-50 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" };
 
                       return (
                         <article
@@ -543,41 +654,25 @@ export default function FamilyDashboardPage() {
                           <div className="mb-2 flex items-start justify-between gap-2">
                             <div>
                               <h3 className="text-sm font-semibold leading-tight">{goal.name}</h3>
-                              {goal.description && (
-                                <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-500 dark:text-slate-400">
-                                  {goal.description}
-                                </p>
-                              )}
+                              {goal.description && <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-500 dark:text-slate-400">{goal.description}</p>}
                             </div>
-                            <span
-                              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${intensityBadge.className}`}
-                            >
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${intensityBadge.className}`}>
                               {intensityBadge.label}
                             </span>
                           </div>
 
                           <div className="mb-2 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
                             <span>
-                              Meta:{" "}
-                              <span className="font-semibold text-slate-800 dark:text-slate-100">
-                                {formatCurrency(goal.target_amount || 0)}
-                              </span>
+                              Meta: <span className="font-semibold text-slate-800 dark:text-slate-100">{formatCurrency(goal.target_amount || 0)}</span>
                             </span>
                             <span>
-                              Avance:{" "}
-                              <span className="font-semibold text-slate-800 dark:text-slate-100">
-                                {formatCurrency(goal.totalContributed)}
-                              </span>
+                              Avance: <span className="font-semibold text-slate-800 dark:text-slate-100">{formatCurrency(goal.totalContributed)}</span>
                             </span>
                           </div>
 
                           <div className="mb-1 h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                             <div
-                              className={`h-full rounded-full ${
-                                overGoal
-                                  ? "bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-700"
-                                  : "bg-gradient-to-r from-sky-500 via-indigo-500 to-violet-500"
-                              }`}
+                              className={`h-full rounded-full ${overGoal ? "bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-700" : "bg-gradient-to-r from-sky-500 via-indigo-500 to-violet-500"}`}
                               style={{ width: `${progressClamped}%` }}
                             />
                           </div>
@@ -585,19 +680,12 @@ export default function FamilyDashboardPage() {
                           <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
                             <span>
                               {goal.progressPct.toFixed(1)}% completado
-                              {goal.due_date && (
-                                <>
-                                  {" · "}meta al {formatDate(goal.due_date)}
-                                </>
-                              )}
+                              {goal.due_date && <> {" · "}meta al {formatDate(goal.due_date)}</>}
                             </span>
                             {member?.full_name && (
                               <span className="inline-flex items-center gap-1">
                                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                Líder:{" "}
-                                <span className="font-medium text-slate-700 dark:text-slate-200">
-                                  {member.full_name}
-                                </span>
+                                Líder: <span className="font-medium text-slate-700 dark:text-slate-200">{member.full_name}</span>
                               </span>
                             )}
                           </div>
@@ -606,26 +694,17 @@ export default function FamilyDashboardPage() {
                             {goal.last30Amount > 0 ? (
                               <p>
                                 En los últimos 30 días se han aportado{" "}
-                                <span className="font-semibold text-slate-800 dark:text-slate-100">
-                                  {formatCurrency(goal.last30Amount)}
-                                </span>
-                                .
+                                <span className="font-semibold text-slate-800 dark:text-slate-100">{formatCurrency(goal.last30Amount)}</span>.
                                 {goal.projectedDaysToGoal && (
                                   <>
                                     {" "}
                                     A este ritmo, podrían completarla en{" "}
-                                    <span className="font-semibold text-slate-800 dark:text-slate-100">
-                                      ~{Math.round(goal.projectedDaysToGoal)} días
-                                    </span>
-                                    .
+                                    <span className="font-semibold text-slate-800 dark:text-slate-100">~{Math.round(goal.projectedDaysToGoal)} días</span>.
                                   </>
                                 )}
                               </p>
                             ) : (
-                              <p>
-                                Todavía no hay aportaciones recientes. Vincula movimientos o define
-                                una categoría para que avance automáticamente.
-                              </p>
+                              <p>Todavía no hay aportaciones recientes. Vincula movimientos o define una categoría para que avance automáticamente.</p>
                             )}
                           </div>
                         </article>
@@ -638,25 +717,12 @@ export default function FamilyDashboardPage() {
               <div className="space-y-4">
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <h3 className="text-xs font-semibold">Termómetro familiar</h3>
-                  <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                    Resumen rápido del estado de tus objetivos.
-                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Resumen rápido del estado de tus objetivos.</p>
 
                   <ul className="mt-3 space-y-2 text-[11px] text-slate-600 dark:text-slate-300">
-                    <li className="flex items-start gap-2">
-                      <span className="mt-1 h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                      <span>
-                        {globalSummary.completedGoals} objetivo(s) completado(s).
-                      </span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="mt-1 h-1.5 w-1.5 rounded-full bg-amber-500" />
-                      <span>{globalSummary.inProgressGoals} objetivo(s) en progreso.</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <span className="mt-1 h-1.5 w-1.5 rounded-full bg-sky-500" />
-                      <span>Avance global: {globalSummary.globalProgressPct.toFixed(1)}%.</span>
-                    </li>
+                    <li className="flex items-start gap-2"><span className="mt-1 h-1.5 w-1.5 rounded-full bg-emerald-500" /><span>{globalSummary.completedGoals} objetivo(s) completado(s).</span></li>
+                    <li className="flex items-start gap-2"><span className="mt-1 h-1.5 w-1.5 rounded-full bg-amber-500" /><span>{globalSummary.inProgressGoals} objetivo(s) en progreso.</span></li>
+                    <li className="flex items-start gap-2"><span className="mt-1 h-1.5 w-1.5 rounded-full bg-sky-500" /><span>Avance global: {globalSummary.globalProgressPct.toFixed(1)}%.</span></li>
                   </ul>
                 </div>
 
@@ -664,15 +730,9 @@ export default function FamilyDashboardPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="text-xs font-semibold">Progreso por objetivo</h3>
-                      <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                        Cada barra representa el avance de una meta.
-                      </p>
+                      <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Cada barra representa el avance de una meta.</p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowGoalsChart((v) => !v)}
-                      className="text-[11px] font-medium text-sky-600 hover:underline"
-                    >
+                    <button type="button" onClick={() => setShowGoalsChart((v) => !v)} className="text-[11px] font-medium text-sky-600 hover:underline">
                       {showGoalsChart ? "Ocultar" : "Ver gráfica"}
                     </button>
                   </div>
@@ -680,24 +740,14 @@ export default function FamilyDashboardPage() {
                   {showGoalsChart && (
                     <>
                       {goalsChartData.length === 0 ? (
-                        <div className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">
-                          Crea al menos una meta para ver la gráfica.
-                        </div>
+                        <div className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">Crea al menos una meta para ver la gráfica.</div>
                       ) : (
                         <div className="mt-3 h-40">
                           <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={goalsChartData}>
-                              <CartesianGrid
-                                strokeDasharray="3 3"
-                                stroke={isDark ? "#1e293b" : "#e2e8f0"}
-                                vertical={false}
-                              />
+                              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
                               <XAxis dataKey="name" tick={{ fontSize: 10 }} tickLine={false} />
-                              <YAxis
-                                tick={{ fontSize: 10 }}
-                                domain={[0, 120]}
-                                tickFormatter={(v) => `${v}%`}
-                              />
+                              <YAxis tick={{ fontSize: 10 }} domain={[0, 120]} tickFormatter={(v) => `${v}%`} />
                               <Tooltip formatter={(v: any) => `${v}%`} />
                               <Bar dataKey="progreso" radius={[6, 6, 0, 0]} />
                             </BarChart>
@@ -710,33 +760,18 @@ export default function FamilyDashboardPage() {
 
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <h3 className="text-xs font-semibold">Aportaciones por miembro</h3>
-                  <p className="mb-2 mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                    Quién está aportando más a las metas (según movimientos ligados).
-                  </p>
+                  <p className="mb-2 mt-1 text-[11px] text-slate-500 dark:text-slate-400">Quién está aportando más a las metas (según movimientos ligados).</p>
 
                   {memberContributionChartData.length === 0 ? (
-                    <div className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">
-                      Aún no hay aportaciones ligadas a metas por miembro.
-                    </div>
+                    <div className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">Aún no hay aportaciones ligadas a metas por miembro.</div>
                   ) : (
                     <div className="h-40">
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={memberContributionChartData}>
-                          <CartesianGrid
-                            strokeDasharray="3 3"
-                            stroke={isDark ? "#1e293b" : "#e2e8f0"}
-                            vertical={false}
-                          />
+                          <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
                           <XAxis dataKey="name" tick={{ fontSize: 10 }} tickLine={false} />
-                          <YAxis
-                            tick={{ fontSize: 10 }}
-                            tickLine={false}
-                            tickFormatter={(value) => formatCurrency(Number(value))}
-                          />
-                          <Tooltip
-                            contentStyle={{ fontSize: 11 }}
-                            formatter={(value: any) => formatCurrency(Number(value))}
-                          />
+                          <YAxis tick={{ fontSize: 10 }} tickLine={false} tickFormatter={(value) => formatCurrency(Number(value))} />
+                          <Tooltip contentStyle={{ fontSize: 11 }} formatter={(value: any) => formatCurrency(Number(value))} />
                           <Legend wrapperStyle={{ fontSize: 10 }} />
                           <Line type="monotone" dataKey="aporte" dot={false} strokeWidth={2} />
                         </LineChart>

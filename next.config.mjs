@@ -3,17 +3,23 @@ import createNextPWA from "@ducanh2912/next-pwa";
 
 const withPWA = createNextPWA({
   dest: "public",
+
+  // ✅ Dev OFF (no estorba)
+  // ✅ Prod ON salvo que tú lo apagues con env var
   disable:
     process.env.NODE_ENV === "development" ||
     process.env.NEXT_PUBLIC_DISABLE_PWA === "1",
 
   cacheOnFrontEndNav: false,
   aggressiveFrontEndNavCaching: false,
+
+  // ✅ útil para salir del offline “atorado”
   reloadOnOnline: true,
 
   workboxOptions: {
     maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
 
+    // ✅ fallback de navegación cuando no hay red
     navigateFallback: "/offline",
 
     navigateFallbackDenylist: [
@@ -31,7 +37,7 @@ const withPWA = createNextPWA({
     cleanupOutdatedCaches: true,
 
     runtimeCaching: [
-      // ✅ Next static chunks (works in localhost + prod)
+      // Next static chunks
       {
         urlPattern: ({ url }) => url.pathname.startsWith("/_next/static/"),
         handler: "StaleWhileRevalidate",
@@ -49,7 +55,19 @@ const withPWA = createNextPWA({
         },
       },
 
-      // icons
+      // ✅ manifest (para instalación estable)
+      {
+        urlPattern: ({ url }) =>
+          url.origin === self.location.origin &&
+          url.pathname === "/manifest.webmanifest",
+        handler: "StaleWhileRevalidate",
+        options: {
+          cacheName: "manifest",
+          expiration: { maxEntries: 5, maxAgeSeconds: 60 * 60 * 24 * 30 },
+        },
+      },
+
+      // icons folder
       {
         urlPattern: ({ url }) =>
           url.origin === self.location.origin &&
@@ -61,7 +79,7 @@ const withPWA = createNextPWA({
         },
       },
 
-      // public assets png/svg
+      // public png/svg (incluye apple-touch-icon.png)
       {
         urlPattern: ({ url }) =>
           url.origin === self.location.origin &&
@@ -73,17 +91,12 @@ const withPWA = createNextPWA({
         },
       },
 
-      // Supabase SOLO GET
+      // ✅ Supabase: NO cache (evita datos privados en SW cache)
       {
         urlPattern:
           /^https:\/\/[^/]+\.supabase\.co\/(rest\/v1|storage\/v1)\/.*/i,
-        handler: "NetworkFirst",
-        options: {
-          cacheName: "supabase-api",
-          networkTimeoutSeconds: 3,
-          expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 },
-          cacheableResponse: { statuses: [0, 200] },
-        },
+        handler: "NetworkOnly",
+        options: { cacheName: "supabase-bypass" },
       },
     ],
   },

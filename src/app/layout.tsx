@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SupabaseAutoRefreshGuard } from "@/components/SupabaseAutoRefreshGuard";
+import { SyncBar } from "@/components/SyncBar";
 
 export const metadata: Metadata = {
   title: "Finanzas Familiares",
@@ -36,6 +37,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <SupabaseAutoRefreshGuard />
           <div className="mx-auto flex min-h-screen max-w-5xl flex-col px-4 py-4 sm:px-6 lg:px-8">
+            <SyncBar />
             {children}
           </div>
         </ThemeProvider>

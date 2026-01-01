@@ -10,6 +10,9 @@ export type OfflineTx = {
   method: string;
   notes?: string | null;
 
+  // 👇 IMPORTANTES para filtrar por usuario
+  user_id: string;
+
   owner_user_id?: string | null;
   spender_user_id?: string | null;
   spender_label?: string | null;
@@ -17,6 +20,8 @@ export type OfflineTx = {
   card_id?: string | null;
   family_group_id?: string | null;
   goal_id?: string | null;
+
+  created_at?: string | null;
 };
 
 const KEY = "ff-offline-txs-v1";
@@ -39,37 +44,45 @@ function writeLocal(list: OfflineTx[]) {
   } catch {}
 }
 
-export async function saveOfflineTx(tx: OfflineTx) {
+export async function saveOfflineTx(tx: Omit<OfflineTx, "user_id"> & { user_id?: string }) {
+  // ✅ si por accidente te mandan tx sin user_id, no la guardamos “huérfana”
+  const userId = tx.user_id;
+  if (!userId) throw new Error("saveOfflineTx: falta user_id");
+
   const prev = readLocal();
-  const next = [tx, ...prev.filter((p) => p.id !== tx.id)];
+  const normalized: OfflineTx = {
+    ...tx,
+    user_id: userId,
+    notes: tx.notes ?? null,
+  };
+
+  const next = [normalized, ...prev.filter((p) => p.id !== normalized.id)];
   writeLocal(next);
 }
 
-export async function getOfflineTxs(): Promise<OfflineTx[]> {
-  return readLocal();
+export async function getOfflineTxs(userId: string): Promise<OfflineTx[]> {
+  const all = readLocal();
+  return all.filter((t) => t.user_id === userId);
 }
 
 export async function syncOfflineTxs(userId: string) {
-  // ✅ si no hay window o no hay internet: NO intentes supabase
   if (typeof window === "undefined") return [];
   if (!navigator.onLine) return [];
 
-  const offline = readLocal();
-  if (!offline.length) return [];
+  const pending = await getOfflineTxs(userId);
+  if (!pending.length) return [];
 
-  // ✅ Si aún no hay sesión (o falla la red en el intento), no sincronices
+  // ✅ si aún no hay sesión, no intentes sync
   let sessionData: any = null;
   try {
     sessionData = await supabase.auth.getSession();
-  } catch (e) {
-    // típico tras hard refresh/recuperación de sesión
+  } catch {
     return [];
   }
-  if (!sessionData?.data?.session) {
-    return [];
-  }
+  if (!sessionData?.data?.session) return [];
 
-  const payload = offline.map((t) => ({
+  // ✅ payload SOLO de las pendientes (no de “todas”)
+  const payload = pending.map((t) => ({
     id: t.id,
     date: t.date,
     type: t.type,
@@ -95,7 +108,6 @@ export async function syncOfflineTxs(userId: string) {
     .select("id");
 
   if (error) {
-    // ✅ log útil
     console.error("syncOfflineTxs error:", {
       message: (error as any)?.message,
       details: (error as any)?.details,
@@ -107,12 +119,20 @@ export async function syncOfflineTxs(userId: string) {
   }
 
   const syncedIds = new Set((data ?? []).map((r: any) => r.id));
-  const remaining = offline.filter((t) => !syncedIds.has(t.id));
+
+  // ✅ borra SOLO las que sí se sincronizaron y SOLO de este user
+  const all = readLocal();
+  const remaining = all.filter((t) => !(t.user_id === userId && syncedIds.has(t.id)));
   writeLocal(remaining);
 
   return data ?? [];
 }
 
-export async function clearOfflineTxs() {
-  writeLocal([]);
+export async function clearOfflineTxs(userId?: string) {
+  if (!userId) {
+    writeLocal([]);
+    return;
+  }
+  const all = readLocal();
+  writeLocal(all.filter((t) => t.user_id !== userId));
 }

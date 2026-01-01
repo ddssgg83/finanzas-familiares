@@ -10,14 +10,18 @@ export type FamilyContext = {
   ownerUserId: string;
   activeMembers: number;
   activeMemberUserIds: string[];
+  cachedAt?: string; // ✅ metadata (no rompe nada)
 };
 
-const FAMILY_CACHE_KEY = "ff-family-cache-v1";
+// ✅ Cache por usuario (evita que un user pise a otro)
+function familyCacheKey(userId: string) {
+  return `ff-family-cache-v2:${userId}`;
+}
 
-function readFamilyCache(): FamilyContext | null {
+function readFamilyCache(userId: string): FamilyContext | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(FAMILY_CACHE_KEY);
+    const raw = localStorage.getItem(familyCacheKey(userId));
     if (!raw) return null;
 
     const parsed = JSON.parse(raw);
@@ -39,14 +43,17 @@ function readFamilyCache(): FamilyContext | null {
   }
 }
 
-function writeFamilyCache(ctx: FamilyContext | null) {
+function writeFamilyCache(userId: string, ctx: FamilyContext | null) {
   if (typeof window === "undefined") return;
   try {
     if (!ctx) {
-      localStorage.removeItem(FAMILY_CACHE_KEY);
+      localStorage.removeItem(familyCacheKey(userId));
       return;
     }
-    localStorage.setItem(FAMILY_CACHE_KEY, JSON.stringify(ctx));
+    localStorage.setItem(
+      familyCacheKey(userId),
+      JSON.stringify({ ...ctx, cachedAt: new Date().toISOString() })
+    );
   } catch {
     // ignore
   }
@@ -64,7 +71,6 @@ export function useFamilyContext(user: User | null) {
       setFamilyCtx(null);
       setFamilyError(null);
       setFamilyLoading(false);
-      writeFamilyCache(null);
       return;
     }
 
@@ -73,13 +79,16 @@ export function useFamilyContext(user: User | null) {
     const userId = currentUser.id;
     const email = (currentUser.email ?? "").toLowerCase();
 
+    // ✅ IMPORTANTE: hidrata inmediatamente desde cache (evita flash a null/0)
+    const cached = readFamilyCache(userId);
+    if (cached) setFamilyCtx((prev) => prev ?? cached);
+
     const loadFamily = async () => {
       setFamilyLoading(true);
       setFamilyError(null);
 
-      // ✅ OFFLINE: no intentes pegar a Supabase
+      // ✅ OFFLINE: NO pegar a Supabase, solo cache
       if (typeof window !== "undefined" && !navigator.onLine) {
-        const cached = readFamilyCache();
         if (!cancelled) {
           setFamilyCtx(cached);
           setFamilyError(null);
@@ -101,7 +110,7 @@ export function useFamilyContext(user: User | null) {
         if (!memberRows || memberRows.length === 0) {
           if (!cancelled) {
             setFamilyCtx(null);
-            writeFamilyCache(null);
+            writeFamilyCache(userId, null);
           }
           return;
         }
@@ -138,14 +147,14 @@ export function useFamilyContext(user: User | null) {
 
         if (!cancelled) {
           setFamilyCtx(nextCtx);
-          writeFamilyCache(nextCtx);
+          writeFamilyCache(userId, nextCtx);
         }
       } catch (err) {
-        // ✅ si se fue el internet a mitad, cae a cache y NO spamees error
+        // ✅ Si se fue el internet a mitad: cae a cache, sin error
         if (typeof window !== "undefined" && !navigator.onLine) {
+          const fallback = readFamilyCache(userId);
           if (!cancelled) {
-            const cached = readFamilyCache();
-            setFamilyCtx(cached);
+            setFamilyCtx(fallback);
             setFamilyError(null);
             setFamilyLoading(false);
           }
@@ -166,8 +175,19 @@ export function useFamilyContext(user: User | null) {
 
     loadFamily();
 
+    // ✅ Opcional pero útil: al volver online, refresca solo el ctx
+    const onOnline = () => {
+      if (!cancelled) loadFamily();
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("online", onOnline);
+    }
+
     return () => {
       cancelled = true;
+      if (typeof window !== "undefined") {
+        window.removeEventListener("online", onOnline);
+      }
     };
   }, [user]);
 
@@ -176,5 +196,11 @@ export function useFamilyContext(user: User | null) {
     return familyCtx.ownerUserId === user.id;
   }, [familyCtx, user]);
 
-  return { familyCtx, familyLoading, familyError, isFamilyOwner };
+  // ✅ extra: si estás offline y hay cache, te sirve para mostrar un badge
+  const isUsingCachedFamily = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return !navigator.onLine && !!familyCtx;
+  }, [familyCtx]);
+
+  return { familyCtx, familyLoading, familyError, isFamilyOwner, isUsingCachedFamily };
 }

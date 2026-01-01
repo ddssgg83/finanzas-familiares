@@ -1,22 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import nextDynamic from "next/dynamic";
 import type { User } from "@supabase/supabase-js";
+import { useTheme } from "next-themes";
+
 import { supabase } from "@/lib/supabase";
 import { saveOfflineTx, getOfflineTxs, syncOfflineTxs } from "@/lib/offline";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-  Legend,
-  LineChart,
-  Line,
-} from "recharts";
-import { useTheme } from "next-themes";
+
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AppHeader } from "@/components/AppHeader";
 import { PageShell } from "@/components/ui/PageShell";
@@ -45,6 +36,10 @@ import {
 } from "@/components/ui/kit";
 
 export const dynamic = "force-dynamic";
+
+// ✅ Charts (Recharts) CLIENT-ONLY para evitar errores de types/SSR
+const GastosCharts = nextDynamic(() => import("./GastosCharts"), { ssr: false });
+
 
 type TxType = "ingreso" | "gasto";
 type ExportType = "todos" | "ingresos" | "gastos";
@@ -555,25 +550,28 @@ export default function GastosPage() {
           const cached = cacheRaw ? JSON.parse(cacheRaw) : [];
           const cachedMapped = mapRows(cached);
 
-          const offline = await getOfflineTxs();
-          const offlineMapped: Tx[] = offline.map((t) => ({
-            id: t.id,
-            date: t.date,
-            type: t.type,
-            category: t.category,
-            amount: Number(t.amount),
-            method: t.method,
-            notes: t.notes ?? null,
-            owner_user_id: t.owner_user_id ?? null,
-            spender_user_id: t.spender_user_id ?? null,
-            spender_label: t.spender_label ?? "Yo",
-            created_by: t.created_by ?? null,
-            card_id: t.card_id ?? null,
-            family_group_id: t.family_group_id ?? null,
-            goal_id: t.goal_id ?? null,
-            created_at: null,
-            localOnly: true,
-          }));
+          // 👇 IMPORTANTE: si no hay user todavía, no intentes leer offline por usuario
+const uid = user?.id ?? null;
+const offline = uid ? await getOfflineTxs(uid) : [];
+
+const offlineMapped: Tx[] = offline.map((t) => ({
+  id: t.id,
+  date: t.date,
+  type: t.type,
+  category: t.category,
+  amount: Number(t.amount),
+  method: t.method,
+  notes: t.notes ?? null,
+  owner_user_id: t.owner_user_id ?? null,
+  spender_user_id: t.spender_user_id ?? null,
+  spender_label: t.spender_label ?? "Yo",
+  created_by: t.created_by ?? null,
+  card_id: t.card_id ?? null,
+  family_group_id: t.family_group_id ?? null,
+  goal_id: t.goal_id ?? null,
+  created_at: null,
+  localOnly: true,
+}));
 
           if (!cancelled) {
             setTransactions(dedupeAndSortTx([...offlineMapped, ...cachedMapped]));
@@ -1294,22 +1292,27 @@ export default function GastosPage() {
 
         try {
           await saveOfflineTx({
-            id: localTx.id,
-            date: localTx.date,
-            type: localTx.type,
-            category: localTx.category,
-            amount: localTx.amount,
-            method: localTx.method,
-            notes: localTx.notes ?? null,
+  id: localTx.id,
+  date: localTx.date,
+  type: localTx.type,
+  category: localTx.category,
+  amount: localTx.amount,
+  method: localTx.method,
+  notes: localTx.notes ?? null,
 
-            owner_user_id: ownerUserId,
-            spender_user_id: spenderUserId,
-            spender_label: spenderLabel,
-            created_by: user.id,
-            card_id: selectedCardId ?? null,
-            family_group_id: familyCtx?.familyId ?? null,
-            goal_id: goalId || null,
-          });
+  // ✅ CLAVE: para que getOfflineTxs(uid) funcione
+  user_id: user.id,
+
+  owner_user_id: ownerUserId ?? user.id,
+  spender_user_id: spenderUserId ?? user.id,
+  spender_label: spenderLabel ?? "Yo",
+  created_by: user.id,
+
+  card_id: selectedCardId ?? null,
+  family_group_id: familyCtx?.familyId ?? null,
+  goal_id: goalId || null,
+});
+
         } catch (err) {
           console.error("Error guardando movimiento offline", err);
         }
@@ -1879,66 +1882,31 @@ export default function GastosPage() {
       </Card>
 
       {/* Gráficas */}
-      <Card>
-        <Section
-          title="Gráficas"
-          subtitle="Visualiza categorías y tendencia por día."
-          right={
-            <button
-              type="button"
-              onClick={() => setShowCharts((v) => !v)}
-              className="rounded-lg bg-sky-500 px-3 py-2 text-xs font-medium text-white hover:bg-sky-600"
-            >
-              {showCharts ? "Ocultar" : "Ver"}
-            </button>
-          }
-        >
-          {!showCharts ? (
-            <EmptyState>Gráficas ocultas. Ábrelas cuando quieras revisar tendencias.</EmptyState>
-          ) : (
-            <div className="mt-2 grid gap-4 md:grid-cols-2">
-              <Card>
-                <Section title="Gastos por categoría">
-                  {chartDataCategorias.length === 0 ? (
-                    <EmptyState>Aún no hay gastos registrados.</EmptyState>
-                  ) : (
-                    <ResponsiveContainer width="100%" height={260}>
-                      <BarChart data={chartDataCategorias} margin={{ top: 10, right: 10, left: 0, bottom: 40 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="category" tick={{ fontSize: 10, fill: isDark ? "#e5e7eb" : "#374151" }} angle={-30} textAnchor="end" />
-                        <YAxis tick={{ fontSize: 10, fill: isDark ? "#e5e7eb" : "#374151" }} />
-                        <Tooltip />
-                        <Legend />
-                        <Bar dataKey="total" name="Gasto" radius={4} fill={isDark ? "#38bdf8" : "#0ea5e9"} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )}
-                </Section>
-              </Card>
-
-              <Card>
-                <Section title="Ingresos vs Gastos por día">
-                  {chartDataLinea.length === 0 ? (
-                    <EmptyState>Aún no hay movimientos suficientes.</EmptyState>
-                  ) : (
-                    <ResponsiveContainer width="100%" height={260}>
-                      <LineChart data={chartDataLinea}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="dateLabel" tick={{ fontSize: 10, fill: isDark ? "#e5e7eb" : "#374151" }} />
-                        <YAxis tick={{ fontSize: 10, fill: isDark ? "#e5e7eb" : "#374151" }} />
-                        <Tooltip />
-                        <Legend />
-                        <Line type="monotone" dataKey="ingresos" name="Ingresos" dot={false} stroke={isDark ? "#22c55e" : "#16a34a"} strokeWidth={2} />
-                        <Line type="monotone" dataKey="gastos" name="Gastos" dot={false} stroke={isDark ? "#fb7185" : "#ef4444"} strokeWidth={2} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  )}
-                </Section>
-              </Card>
-            </div>
-          )}
-        </Section>
-      </Card>
+<Card>
+  <Section
+    title="Gráficas"
+    subtitle="Visualiza categorías y tendencia por día."
+    right={
+      <button
+        type="button"
+        onClick={() => setShowCharts((v) => !v)}
+        className="rounded-lg bg-sky-500 px-3 py-2 text-xs font-medium text-white hover:bg-sky-600"
+      >
+        {showCharts ? "Ocultar" : "Ver"}
+      </button>
+    }
+  >
+    {!showCharts ? (
+      <EmptyState>Gráficas ocultas. Ábrelas cuando quieras revisar tendencias.</EmptyState>
+    ) : (
+      <GastosCharts
+        isDark={isDark}
+        chartDataCategorias={chartDataCategorias}
+        chartDataLinea={chartDataLinea}
+      />
+    )}
+  </Section>
+</Card>
 
       {/* Formulario */}
       <Card>

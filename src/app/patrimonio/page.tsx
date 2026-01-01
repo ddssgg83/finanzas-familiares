@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, useCallback } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
@@ -121,8 +121,107 @@ function getMonthRange(monthKey: string) {
   return { from, to };
 }
 
+// =========================================================
+// OFFLINE helpers (cache + cola de sync) — Patrimonio
+// =========================================================
+function isOfflineNow() {
+  if (typeof window === "undefined") return false;
+  return !navigator.onLine;
+}
+
+function cacheKey(base: string, scope: { userId: string; familyId?: string | null; view: "personal" | "family" }) {
+  const fam = scope.view === "family" && scope.familyId ? `fam:${scope.familyId}` : "personal";
+  return `ff-${base}-v1:${scope.userId}:${fam}`;
+}
+
+function readCache<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeCache<T>(key: string, value: T) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+function safeUUID() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const w: any = typeof window !== "undefined" ? window : null;
+  if (w?.crypto?.randomUUID) return w.crypto.randomUUID();
+  return `local_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+type OfflineOp =
+  | {
+      kind: "asset_upsert";
+      id: string;
+      payload: Omit<Asset, "created_at"> & { created_at?: string };
+    }
+  | {
+      kind: "asset_delete";
+      id: string;
+      payload: { id: string; family_id?: string | null; user_id?: string | null };
+    }
+  | {
+      kind: "debt_upsert";
+      id: string;
+      payload: Omit<Debt, "created_at"> & { created_at?: string };
+    }
+  | {
+      kind: "debt_delete";
+      id: string;
+      payload: { id: string; family_id?: string | null; user_id?: string | null };
+    };
+
+function opsKey(userId: string) {
+  return `ff-patrimonio-ops-v1:${userId}`;
+}
+
+function readOps(userId: string): OfflineOp[] {
+  return readCache<OfflineOp[]>(opsKey(userId), []);
+}
+
+function writeOps(userId: string, ops: OfflineOp[]) {
+  writeCache(opsKey(userId), ops);
+}
+
+function applyOpsToState(baseAssets: Asset[], baseDebts: Debt[], ops: OfflineOp[]) {
+  let assets = [...baseAssets];
+  let debts = [...baseDebts];
+
+  for (const op of ops) {
+    if (op.kind === "asset_upsert") {
+      const next = op.payload as Asset;
+      const idx = assets.findIndex((a) => a.id === next.id);
+      if (idx >= 0) assets[idx] = { ...assets[idx], ...next };
+      else assets = [next, ...assets];
+    }
+    if (op.kind === "asset_delete") {
+      assets = assets.filter((a) => a.id !== op.payload.id);
+    }
+    if (op.kind === "debt_upsert") {
+      const next = op.payload as Debt;
+      const idx = debts.findIndex((d) => d.id === next.id);
+      if (idx >= 0) debts[idx] = { ...debts[idx], ...next };
+      else debts = [next, ...debts];
+    }
+    if (op.kind === "debt_delete") {
+      debts = debts.filter((d) => d.id !== op.payload.id);
+    }
+  }
+
+  return { assets, debts };
+}
+
 export default function PatrimonioPage() {
-  // 💵 helper consistente con Gastos
   const formatMoney = (n: number) => fmtMoney(n, "MXN");
 
   // -------- AUTH --------
@@ -136,6 +235,7 @@ export default function PatrimonioPage() {
   // Vista: sólo yo vs familia (para jefes de familia)
   const [viewScope, setViewScope] = useState<ViewScope>("personal");
   const effectiveScope: ViewScope = familyCtx && isFamilyOwner ? viewScope : "personal";
+  const isFamilyView = effectiveScope === "family";
 
   // -------- DATA --------
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -173,6 +273,10 @@ export default function PatrimonioPage() {
   // Edición
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
   const [editingDebtId, setEditingDebtId] = useState<string | null>(null);
+
+  // Cola offline
+  const [pendingOpsCount, setPendingOpsCount] = useState(0);
+  const syncInFlight = useRef(false);
 
   // =========================================================
   // AUTH (offline-safe)
@@ -220,62 +324,229 @@ export default function PatrimonioPage() {
       setDebts([]);
       setMonthIngresos(0);
       setMonthGastos(0);
+      setPendingOpsCount(0);
     } catch (err) {
       console.error("Error cerrando sesión", err);
     }
   };
 
   // =========================================================
-  // LOAD DATA (assets/debts)
+  // Helpers: cache actual (por scope) después de cambios locales
+  // =========================================================
+  const writeCurrentScopeCache = useCallback(
+    (nextAssets: Asset[], nextDebts: Debt[]) => {
+      if (!user) return;
+      const scope = {
+        userId: user.id,
+        familyId: familyCtx?.familyId ?? null,
+        view: isFamilyView ? ("family" as const) : ("personal" as const),
+      };
+      writeCache(cacheKey("assets", scope), nextAssets);
+      writeCache(cacheKey("debts", scope), nextDebts);
+    },
+    [user, familyCtx?.familyId, isFamilyView]
+  );
+
+  // =========================================================
+  // SYNC OFFLINE OPS (assets/debts) — cuando vuelva internet
+  // =========================================================
+  const syncOfflineOps = useCallback(async () => {
+    if (!user) return;
+    if (isOfflineNow()) return;
+    if (syncInFlight.current) return;
+
+    syncInFlight.current = true;
+    try {
+      const ops = readOps(user.id);
+      setPendingOpsCount(ops.length);
+      if (ops.length === 0) return;
+
+      const remaining: OfflineOp[] = [];
+
+      for (const op of ops) {
+        try {
+          if (op.kind === "asset_upsert") {
+            const a = op.payload;
+            const { error } = await supabase.from("assets").upsert(
+              [
+                {
+                  id: a.id,
+                  user_id: a.user_id ?? user.id,
+                  family_id: a.family_id ?? null,
+                  name: a.name,
+                  category: a.category ?? null,
+                  current_value: a.current_value ?? 0,
+                  owner: a.owner ?? null,
+                  notes: a.notes ?? null,
+                },
+              ],
+              { onConflict: "id" }
+            );
+            if (error) throw error;
+          }
+
+          if (op.kind === "asset_delete") {
+            const { error } = await supabase.from("assets").delete().eq("id", op.payload.id);
+            if (error) throw error;
+          }
+
+          if (op.kind === "debt_upsert") {
+            const d = op.payload;
+            const { error } = await supabase.from("debts").upsert(
+              [
+                {
+                  id: d.id,
+                  user_id: d.user_id ?? user.id,
+                  family_id: d.family_id ?? null,
+                  name: d.name,
+                  type: d.type,
+                  total_amount: d.total_amount ?? 0,
+                  current_balance: d.current_balance ?? null,
+                  notes: d.notes ?? null,
+                },
+              ],
+              { onConflict: "id" }
+            );
+            if (error) throw error;
+          }
+
+          if (op.kind === "debt_delete") {
+            const { error } = await supabase.from("debts").delete().eq("id", op.payload.id);
+            if (error) throw error;
+          }
+        } catch {
+          remaining.push(op);
+        }
+      }
+
+      writeOps(user.id, remaining);
+      setPendingOpsCount(remaining.length);
+    } finally {
+      syncInFlight.current = false;
+    }
+  }, [user]);
+
+  // Sync al volver online
+  useEffect(() => {
+    if (!user) return;
+
+    const onOnline = () => {
+      syncOfflineOps();
+    };
+
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [user, syncOfflineOps]);
+
+  // =========================================================
+  // LOAD DATA (assets/debts) — OFFLINE SAFE + cache + overlay ops
   // =========================================================
   useEffect(() => {
+    let alive = true;
+
     async function load() {
       if (!user) {
         setAssets([]);
         setDebts([]);
+        setPendingOpsCount(0);
         return;
       }
 
+      const scope = {
+        userId: user.id,
+        familyId: familyCtx?.familyId ?? null,
+        view: isFamilyView ? ("family" as const) : ("personal" as const),
+      };
+
+      const assetsK = cacheKey("assets", scope);
+      const debtsK = cacheKey("debts", scope);
+
+      const ops = readOps(user.id);
+      setPendingOpsCount(ops.length);
+
+      // ✅ OFFLINE: cache + ops
+      if (isOfflineNow()) {
+        setLoading(false);
+        setDataError(null);
+
+        const cachedAssets = readCache<Asset[]>(assetsK, []);
+        const cachedDebts = readCache<Debt[]>(debtsK, []);
+
+        const patched = applyOpsToState(cachedAssets, cachedDebts, ops);
+        setAssets(patched.assets);
+        setDebts(patched.debts);
+        return;
+      }
+
+      // ✅ ONLINE
       try {
         setLoading(true);
         setDataError(null);
-
-        const isFamilyView = Boolean(familyCtx) && isFamilyOwner && viewScope === "family";
 
         const [assetsRes, debtsRes] = await Promise.all([
           supabase
             .from("assets")
             .select("id,name,category,current_value,owner,notes,created_at,family_id,user_id")
-            .match(isFamilyView ? { family_id: familyCtx!.familyId } : { user_id: user.id })
+            .match(isFamilyView ? { family_id: familyCtx?.familyId } : { user_id: user.id })
             .order("created_at", { ascending: false }),
 
           supabase
             .from("debts")
             .select("id,name,type,total_amount,current_balance,notes,created_at,family_id,user_id")
-            .match(isFamilyView ? { family_id: familyCtx!.familyId } : { user_id: user.id })
+            .match(isFamilyView ? { family_id: familyCtx?.familyId } : { user_id: user.id })
             .order("created_at", { ascending: false }),
         ]);
+
+        if (!alive) return;
 
         if (assetsRes.error) console.warn("Error cargando activos", assetsRes.error);
         if (debtsRes.error) console.warn("Error cargando deudas", debtsRes.error);
 
-        setAssets((assetsRes.data ?? []) as Asset[]);
-        setDebts((debtsRes.data ?? []) as Debt[]);
-      } catch (err) {
-        console.error("Error cargando patrimonio:", err);
-        setDataError("No se pudo cargar el patrimonio. Intenta de nuevo más tarde.");
+        const nextAssets = (assetsRes.data ?? []) as Asset[];
+        const nextDebts = (debtsRes.data ?? []) as Debt[];
+
+        writeCache(assetsK, nextAssets);
+        writeCache(debtsK, nextDebts);
+
+        const patched = applyOpsToState(nextAssets, nextDebts, ops);
+        setAssets(patched.assets);
+        setDebts(patched.debts);
+
+        syncOfflineOps();
+      } catch (err: any) {
+        if (!alive) return;
+
+        const msg = String(err?.message ?? "").toLowerCase();
+        const looksOffline = msg.includes("offline") || msg.includes("failed to fetch") || msg.includes("network");
+
+        if (looksOffline) {
+          const cachedAssets = readCache<Asset[]>(assetsK, []);
+          const cachedDebts = readCache<Debt[]>(debtsK, []);
+          const patched = applyOpsToState(cachedAssets, cachedDebts, ops);
+          setAssets(patched.assets);
+          setDebts(patched.debts);
+          setDataError(null);
+        } else {
+          console.error("Error cargando patrimonio:", err);
+          setDataError("No se pudo cargar el patrimonio. Intenta de nuevo más tarde.");
+        }
       } finally {
-        setLoading(false);
+        if (alive) setLoading(false);
       }
     }
 
     load();
-  }, [user, familyCtx?.familyId, isFamilyOwner, viewScope]);
+    return () => {
+      alive = false;
+    };
+  }, [user, familyCtx?.familyId, isFamilyView, syncOfflineOps]);
 
   // =========================================================
-  // LOAD FLUJO DEL MES (transactions)
+  // LOAD FLUJO DEL MES (transactions) — OFFLINE SAFE (cache)
   // =========================================================
   useEffect(() => {
+    let alive = true;
+
     async function loadTx() {
       if (!user) {
         setMonthIngresos(0);
@@ -286,6 +557,23 @@ export default function PatrimonioPage() {
       setTxLoading(true);
       setTxError(null);
 
+      const scope = {
+        userId: user.id,
+        familyId: familyCtx?.familyId ?? null,
+        view: isFamilyView ? ("family" as const) : ("personal" as const),
+      };
+      const flowK = cacheKey(`flow:${month}`, scope);
+
+      // ✅ OFFLINE
+      if (isOfflineNow()) {
+        const cached = readCache<{ ingresos: number; gastos: number }>(flowK, { ingresos: 0, gastos: 0 });
+        setMonthIngresos(cached.ingresos ?? 0);
+        setMonthGastos(cached.gastos ?? 0);
+        setTxLoading(false);
+        setTxError(null);
+        return;
+      }
+
       try {
         const { from, to } = getMonthRange(month);
 
@@ -294,8 +582,6 @@ export default function PatrimonioPage() {
           .select("id,date,type,amount,family_group_id,user_id,owner_user_id,spender_user_id")
           .gte("date", from)
           .lte("date", to);
-
-        const isFamilyView = Boolean(familyCtx) && isFamilyOwner && viewScope === "family";
 
         if (familyCtx?.familyId) {
           query = query.eq("family_group_id", familyCtx.familyId);
@@ -318,20 +604,36 @@ export default function PatrimonioPage() {
           else gastos += amt;
         });
 
+        if (!alive) return;
+
         setMonthIngresos(ingresos);
         setMonthGastos(gastos);
-      } catch (err) {
-        console.error("Error cargando flujo del mes:", err);
-        setTxError("No se pudo calcular el flujo del mes desde Gastos.");
-        setMonthIngresos(0);
-        setMonthGastos(0);
+        writeCache(flowK, { ingresos, gastos });
+      } catch (err: any) {
+        if (!alive) return;
+
+        const cached = readCache<{ ingresos: number; gastos: number }>(flowK, { ingresos: 0, gastos: 0 });
+        setMonthIngresos(cached.ingresos ?? 0);
+        setMonthGastos(cached.gastos ?? 0);
+
+        const msg = String(err?.message ?? "").toLowerCase();
+        const looksOffline = msg.includes("offline") || msg.includes("failed to fetch") || msg.includes("network");
+
+        if (looksOffline) setTxError(null);
+        else {
+          console.error("Error cargando flujo del mes:", err);
+          setTxError("No se pudo calcular el flujo del mes desde Gastos.");
+        }
       } finally {
-        setTxLoading(false);
+        if (alive) setTxLoading(false);
       }
     }
 
     loadTx();
-  }, [user, month, familyCtx?.familyId, isFamilyOwner, viewScope]);
+    return () => {
+      alive = false;
+    };
+  }, [user, month, familyCtx?.familyId, isFamilyView]);
 
   // =========================================================
   // Cálculos (patrimonio)
@@ -340,14 +642,13 @@ export default function PatrimonioPage() {
   const totalDeudas = useMemo(() => debts.reduce((sum, d) => sum + Number(d.current_balance ?? d.total_amount ?? 0), 0), [debts]);
   const patrimonioNeto = totalActivos - totalDeudas;
 
-  // ✅ conexión: flujo neto del mes
   const flujoMes = monthIngresos - monthGastos;
 
   const monthLabel = useMemo(() => {
+    const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
     const [y, m] = month.split("-");
-    const date = new Date(Number(y), Number(m) - 1, 1);
-    const raw = date.toLocaleDateString("es-MX", { year: "numeric", month: "long" });
-    return raw.charAt(0).toUpperCase() + raw.slice(1);
+    const mi = Math.max(1, Math.min(12, Number(m))) - 1;
+    return `${meses[mi]} ${y}`;
   }, [month]);
 
   // =========================================================
@@ -376,9 +677,9 @@ export default function PatrimonioPage() {
   };
 
   // =========================================================
-  // Submit Asset
+  // Submit Asset — ONLINE + OFFLINE (optimistic + cola)
   // =========================================================
-  const handleSubmitAsset = async (e: React.FormEvent) => {
+  const handleSubmitAsset = async (e: FormEvent) => {
     e.preventDefault();
     if (!user) return alert("Tu sesión expiró. Vuelve a iniciar sesión.");
 
@@ -387,9 +688,45 @@ export default function PatrimonioPage() {
       return alert("Revisa el nombre y el valor del activo.");
     }
 
+    const familyIdToUse = familyCtx?.familyId ?? null;
+
     try {
       setSavingAsset(true);
 
+      // OFFLINE (o se cae red)
+      if (isOfflineNow()) {
+        const id = editingAssetId ?? safeUUID();
+        const local: Asset = {
+          id,
+          user_id: user.id,
+          family_id: familyIdToUse,
+          name: assetForm.name.trim(),
+          category: assetForm.category || null,
+          current_value: val,
+          owner: assetForm.owner.trim() || null,
+          notes: assetForm.notes.trim() || null,
+          created_at: new Date().toISOString(),
+        };
+
+        setAssets((prev) => {
+          const next = editingAssetId ? prev.map((a) => (a.id === id ? { ...a, ...local } : a)) : [local, ...prev];
+          writeCurrentScopeCache(next, debts);
+          return next;
+        });
+
+        const ops = readOps(user.id);
+        const nextOps: OfflineOp[] = [
+          ...ops.filter((o) => !(o.kind === "asset_upsert" && o.id === id)),
+          { kind: "asset_upsert", id, payload: local },
+        ];
+        writeOps(user.id, nextOps);
+        setPendingOpsCount(nextOps.length);
+
+        resetAssetForm();
+        return;
+      }
+
+      // ONLINE
       if (editingAssetId) {
         const { data, error } = await supabase
           .from("assets")
@@ -405,7 +742,13 @@ export default function PatrimonioPage() {
           .single();
 
         if (error) throw error;
-        setAssets((prev) => prev.map((a) => (a.id === editingAssetId ? (data as Asset) : a)));
+
+        setAssets((prev) => {
+          const next = prev.map((a) => (a.id === editingAssetId ? (data as Asset) : a));
+          writeCurrentScopeCache(next, debts);
+          return next;
+        });
+
         resetAssetForm();
         return;
       }
@@ -415,7 +758,7 @@ export default function PatrimonioPage() {
         .insert([
           {
             user_id: user.id,
-            family_id: familyCtx?.familyId ?? null,
+            family_id: familyIdToUse,
             name: assetForm.name.trim(),
             category: assetForm.category || null,
             current_value: val,
@@ -428,20 +771,59 @@ export default function PatrimonioPage() {
 
       if (error) throw error;
 
-      setAssets((prev) => [data as Asset, ...prev]);
+      setAssets((prev) => {
+        const next = [data as Asset, ...prev];
+        writeCurrentScopeCache(next, debts);
+        return next;
+      });
+
       resetAssetForm();
-    } catch (err) {
-      console.error("Error guardando activo:", err);
-      alert("No se pudo guardar el activo. Intenta de nuevo.");
+    } catch (err: any) {
+      const msg = String(err?.message ?? "").toLowerCase();
+      const looksOffline = msg.includes("offline") || msg.includes("failed to fetch") || msg.includes("network");
+
+      if (looksOffline) {
+        const id = editingAssetId ?? safeUUID();
+        const local: Asset = {
+          id,
+          user_id: user.id,
+          family_id: familyCtx?.familyId ?? null,
+          name: assetForm.name.trim(),
+          category: assetForm.category || null,
+          current_value: val,
+          owner: assetForm.owner.trim() || null,
+          notes: assetForm.notes.trim() || null,
+          created_at: new Date().toISOString(),
+        };
+
+        setAssets((prev) => {
+          const next = editingAssetId ? prev.map((a) => (a.id === id ? { ...a, ...local } : a)) : [local, ...prev];
+          writeCurrentScopeCache(next, debts);
+          return next;
+        });
+
+        const ops = readOps(user.id);
+        const nextOps: OfflineOp[] = [
+          ...ops.filter((o) => !(o.kind === "asset_upsert" && o.id === id)),
+          { kind: "asset_upsert", id, payload: local },
+        ];
+        writeOps(user.id, nextOps);
+        setPendingOpsCount(nextOps.length);
+
+        resetAssetForm();
+      } else {
+        console.error("Error guardando activo:", err);
+        alert("No se pudo guardar el activo. Intenta de nuevo.");
+      }
     } finally {
       setSavingAsset(false);
     }
   };
 
   // =========================================================
-  // Submit Debt
+  // Submit Debt — ONLINE + OFFLINE (optimistic + cola)
   // =========================================================
-  const handleSubmitDebt = async (e: React.FormEvent) => {
+  const handleSubmitDebt = async (e: FormEvent) => {
     e.preventDefault();
     if (!user) return alert("Tu sesión expiró. Vuelve a iniciar sesión.");
 
@@ -456,10 +838,45 @@ export default function PatrimonioPage() {
     }
 
     const debtType = DEBT_TYPES.includes(debtForm.type) ? debtForm.type : "Otro";
+    const familyIdToUse = familyCtx?.familyId ?? null;
 
     try {
       setSavingDebt(true);
 
+      // OFFLINE
+      if (isOfflineNow()) {
+        const id = editingDebtId ?? safeUUID();
+        const local: Debt = {
+          id,
+          user_id: user.id,
+          family_id: familyIdToUse,
+          name: debtForm.name.trim(),
+          type: debtType,
+          total_amount: total,
+          current_balance: currentBalance,
+          notes: debtForm.notes.trim() || null,
+          created_at: new Date().toISOString(),
+        };
+
+        setDebts((prev) => {
+          const next = editingDebtId ? prev.map((d) => (d.id === id ? { ...d, ...local } : d)) : [local, ...prev];
+          writeCurrentScopeCache(assets, next);
+          return next;
+        });
+
+        const ops = readOps(user.id);
+        const nextOps: OfflineOp[] = [
+          ...ops.filter((o) => !(o.kind === "debt_upsert" && o.id === id)),
+          { kind: "debt_upsert", id, payload: local },
+        ];
+        writeOps(user.id, nextOps);
+        setPendingOpsCount(nextOps.length);
+
+        resetDebtForm();
+        return;
+      }
+
+      // ONLINE
       if (editingDebtId) {
         const { data, error } = await supabase
           .from("debts")
@@ -476,7 +893,12 @@ export default function PatrimonioPage() {
 
         if (error) throw error;
 
-        setDebts((prev) => prev.map((d) => (d.id === editingDebtId ? (data as Debt) : d)));
+        setDebts((prev) => {
+          const next = prev.map((d) => (d.id === editingDebtId ? (data as Debt) : d));
+          writeCurrentScopeCache(assets, next);
+          return next;
+        });
+
         resetDebtForm();
         return;
       }
@@ -486,7 +908,7 @@ export default function PatrimonioPage() {
         .insert([
           {
             user_id: user.id,
-            family_id: familyCtx?.familyId ?? null,
+            family_id: familyIdToUse,
             name: debtForm.name.trim(),
             type: debtType,
             total_amount: total,
@@ -499,42 +921,143 @@ export default function PatrimonioPage() {
 
       if (error) throw error;
 
-      setDebts((prev) => [data as Debt, ...prev]);
+      setDebts((prev) => {
+        const next = [data as Debt, ...prev];
+        writeCurrentScopeCache(assets, next);
+        return next;
+      });
+
       resetDebtForm();
-    } catch (err) {
-      console.error("Error guardando deuda:", err);
-      alert("No se pudo guardar la deuda.");
+    } catch (err: any) {
+      const msg = String(err?.message ?? "").toLowerCase();
+      const looksOffline = msg.includes("offline") || msg.includes("failed to fetch") || msg.includes("network");
+
+      if (looksOffline) {
+        const id = editingDebtId ?? safeUUID();
+        const local: Debt = {
+          id,
+          user_id: user.id,
+          family_id: familyCtx?.familyId ?? null,
+          name: debtForm.name.trim(),
+          type: debtType,
+          total_amount: total,
+          current_balance: currentBalance,
+          notes: debtForm.notes.trim() || null,
+          created_at: new Date().toISOString(),
+        };
+
+        setDebts((prev) => {
+          const next = editingDebtId ? prev.map((d) => (d.id === id ? { ...d, ...local } : d)) : [local, ...prev];
+          writeCurrentScopeCache(assets, next);
+          return next;
+        });
+
+        const ops = readOps(user.id);
+        const nextOps: OfflineOp[] = [
+          ...ops.filter((o) => !(o.kind === "debt_upsert" && o.id === id)),
+          { kind: "debt_upsert", id, payload: local },
+        ];
+        writeOps(user.id, nextOps);
+        setPendingOpsCount(nextOps.length);
+
+        resetDebtForm();
+      } else {
+        console.error("Error guardando deuda:", err);
+        alert("No se pudo guardar la deuda.");
+      }
     } finally {
       setSavingDebt(false);
     }
   };
 
   // =========================================================
-  // Delete
+  // Delete — ONLINE + OFFLINE (optimistic + cola)
   // =========================================================
   const handleDeleteAsset = async (id: string) => {
     if (!window.confirm("¿Seguro que quieres eliminar este activo?")) return;
+    if (!user) return;
+
+    setAssets((prev) => {
+      const next = prev.filter((a) => a.id !== id);
+      writeCurrentScopeCache(next, debts);
+      return next;
+    });
+    if (editingAssetId === id) resetAssetForm();
+
+    if (isOfflineNow()) {
+      const ops = readOps(user.id);
+      const nextOps: OfflineOp[] = [
+        ...ops.filter((o) => !(o.kind === "asset_upsert" && o.id === id)),
+        { kind: "asset_delete", id, payload: { id } },
+      ];
+      writeOps(user.id, nextOps);
+      setPendingOpsCount(nextOps.length);
+      return;
+    }
+
     try {
       const { error } = await supabase.from("assets").delete().eq("id", id);
       if (error) throw error;
-      setAssets((prev) => prev.filter((a) => a.id !== id));
-      if (editingAssetId === id) resetAssetForm();
-    } catch (err) {
-      console.error("Error eliminando activo:", err);
-      alert("No se pudo eliminar el activo.");
+      syncOfflineOps();
+    } catch (err: any) {
+      const msg = String(err?.message ?? "").toLowerCase();
+      const looksOffline = msg.includes("offline") || msg.includes("failed to fetch") || msg.includes("network");
+      if (looksOffline) {
+        const ops = readOps(user.id);
+        const nextOps: OfflineOp[] = [
+          ...ops.filter((o) => !(o.kind === "asset_upsert" && o.id === id)),
+          { kind: "asset_delete", id, payload: { id } },
+        ];
+        writeOps(user.id, nextOps);
+        setPendingOpsCount(nextOps.length);
+      } else {
+        console.error("Error eliminando activo:", err);
+        alert("No se pudo eliminar el activo.");
+      }
     }
   };
 
   const handleDeleteDebt = async (id: string) => {
     if (!window.confirm("¿Seguro que quieres eliminar esta deuda?")) return;
+    if (!user) return;
+
+    setDebts((prev) => {
+      const next = prev.filter((d) => d.id !== id);
+      writeCurrentScopeCache(assets, next);
+      return next;
+    });
+    if (editingDebtId === id) resetDebtForm();
+
+    if (isOfflineNow()) {
+      const ops = readOps(user.id);
+      const nextOps: OfflineOp[] = [
+        ...ops.filter((o) => !(o.kind === "debt_upsert" && o.id === id)),
+        { kind: "debt_delete", id, payload: { id } },
+      ];
+      writeOps(user.id, nextOps);
+      setPendingOpsCount(nextOps.length);
+      return;
+    }
+
     try {
       const { error } = await supabase.from("debts").delete().eq("id", id);
       if (error) throw error;
-      setDebts((prev) => prev.filter((d) => d.id !== id));
-      if (editingDebtId === id) resetDebtForm();
-    } catch (err) {
-      console.error("Error eliminando deuda:", err);
-      alert("No se pudo eliminar la deuda.");
+      syncOfflineOps();
+    } catch (err: any) {
+      const msg = String(err?.message ?? "").toLowerCase();
+      const looksOffline = msg.includes("offline") || msg.includes("failed to fetch") || msg.includes("network");
+      if (looksOffline) {
+        const ops = readOps(user.id);
+        const nextOps: OfflineOp[] = [
+          ...ops.filter((o) => !(o.kind === "debt_upsert" && o.id === id)),
+          { kind: "debt_delete", id, payload: { id } },
+        ];
+        writeOps(user.id, nextOps);
+        setPendingOpsCount(nextOps.length);
+      } else {
+        console.error("Error eliminando deuda:", err);
+        alert("No se pudo eliminar la deuda.");
+      }
     }
   };
 
@@ -599,6 +1122,21 @@ export default function PatrimonioPage() {
         onSignOut={handleSignOut}
       />
 
+      {/* Banner offline/sync */}
+      {(isOfflineNow() || pendingOpsCount > 0) && (
+        <section className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200">
+          {isOfflineNow() ? (
+            <div>
+              Estás en <span className="font-semibold">modo offline</span>. Puedes agregar/editar/eliminar y se sincroniza al volver el internet.
+            </div>
+          ) : (
+            <div>
+              Sincronizando… Cambios pendientes: <span className="font-semibold">{pendingOpsCount}</span>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Resumen */}
       <section className="space-y-4">
         <Card>
@@ -644,10 +1182,14 @@ export default function PatrimonioPage() {
         <div className="grid gap-4 md:grid-cols-3">
           <StatCard label="Activos" value={formatMoney(totalActivos)} hint="Todo lo que tienes a valor aproximado actual." tone="good" />
           <StatCard label="Deudas" value={formatMoney(totalDeudas)} hint="Saldo pendiente considerando tarjetas, créditos y préstamos." tone="bad" />
-          <StatCard label="Neto" value={formatMoney(patrimonioNeto)} hint="Activos – Deudas. Número clave para ver crecer." tone={patrimonioNeto >= 0 ? "good" : "bad"} />
+          <StatCard
+            label="Neto"
+            value={formatMoney(patrimonioNeto)}
+            hint="Activos – Deudas. Número clave para ver crecer."
+            tone={patrimonioNeto >= 0 ? "good" : "bad"}
+          />
         </div>
 
-        {/* ✅ Conexión con Gastos */}
         <Card>
           <Section
             title="Conexión con Gastos"
@@ -672,7 +1214,7 @@ export default function PatrimonioPage() {
                 label={`Flujo neto (${monthLabel})`}
                 value={formatMoney(flujoMes)}
                 tone={flujoMes >= 0 ? "good" : "bad"}
-                hint={txLoading ? "Calculando…" : "Dato calculado desde tu módulo de Gastos."}
+                hint={txLoading ? "Calculando…" : "Dato calculado desde tu módulo de Gastos (con cache offline)."}
               />
             </div>
 
@@ -847,10 +1389,10 @@ export default function PatrimonioPage() {
                           {a.owner ? `A nombre de: ${a.owner}` : "Propietario: N/D"}
                         </div>
 
-                        {(a.created_at || effectiveScope === "family" || a.notes) && (
+                        {(a.created_at || isFamilyView || a.notes) && (
                           <div className="mt-1 space-y-1">
                             {a.created_at && <div className="text-[10px] text-slate-400 dark:text-slate-500">{formatDateDisplay(a.created_at)}</div>}
-                            {effectiveScope === "family" && (
+                            {isFamilyView && (
                               <div className="text-[10px] text-slate-400 dark:text-slate-500">
                                 Registrado por: {a.user_id === user.id ? "Tú" : "Otro miembro"}
                               </div>
@@ -899,10 +1441,10 @@ export default function PatrimonioPage() {
                           {(d.type || "Sin tipo") + " · Total: "} {formatMoney(d.total_amount ?? 0)}
                         </div>
 
-                        {(d.created_at || effectiveScope === "family" || d.notes) && (
+                        {(d.created_at || isFamilyView || d.notes) && (
                           <div className="mt-1 space-y-1">
                             {d.created_at && <div className="text-[10px] text-slate-400 dark:text-slate-500">{formatDateDisplay(d.created_at)}</div>}
-                            {effectiveScope === "family" && (
+                            {isFamilyView && (
                               <div className="text-[10px] text-slate-400 dark:text-slate-500">
                                 Registrada por: {d.user_id === user.id ? "Tú" : "Otro miembro"}
                               </div>
