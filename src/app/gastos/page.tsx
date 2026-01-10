@@ -927,7 +927,8 @@ const offlineMapped: Tx[] = offline.map((t) => ({
     if (typeof window === "undefined") return;
 
     const onKeyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
+      const key = (e as KeyboardEvent)?.key?.toLowerCase?.() ?? "";
+if (!key) return;
       const isMeta = e.metaKey || e.ctrlKey;
 
       const active = document.activeElement as HTMLElement | null;
