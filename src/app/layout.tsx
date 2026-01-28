@@ -1,47 +1,42 @@
-import type { Metadata, Viewport } from "next";
+// src/app/layout.tsx
+import type { Metadata } from "next";
 import "./globals.css";
-import { ThemeProvider } from "@/components/theme-provider";
-import { SupabaseAutoRefreshGuard } from "@/components/SupabaseAutoRefreshGuard";
-import { SyncBar } from "@/components/SyncBar";
 
 export const metadata: Metadata = {
-  title: "Finanzas Familiares",
-  description: "Control de ingresos y gastos",
-  manifest: "/manifest.webmanifest",
+  title: {
+    default: "RINDAY",
+    template: "%s · RINDAY",
+  },
+  description:
+    "App de finanzas familiares para gestionar ingresos y gastos de forma clara y colaborativa.",
+  applicationName: "RINDAY",
   appleWebApp: {
     capable: true,
+    title: "RINDAY",
     statusBarStyle: "default",
-    title: "Finanzas Familiares",
   },
- icons: {
-  icon: [
-    { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
-    { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
-  ],
-  apple: [{ url: "/apple-touch-icon.png" }],
-},
-
-  }
-
-export const viewport: Viewport = {
-  themeColor: "#0ea5e9",
-  width: "device-width",
-  initialScale: 1,
-  viewportFit: "cover",
+  formatDetection: {
+    telephone: false,
+  },
+  themeColor: "#5B5FFF",
+  icons: {
+    icon: [
+      { url: "/icons/icon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icons/icon-16.png", sizes: "16x16", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  manifest: "/manifest.webmanifest",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html lang="es" suppressHydrationWarning>
-      <body className="min-h-screen antialiased">
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <SupabaseAutoRefreshGuard />
-          <div className="mx-auto flex min-h-screen max-w-5xl flex-col px-4 py-4 sm:px-6 lg:px-8">
-            <SyncBar />
-            {children}
-          </div>
-        </ThemeProvider>
-      </body>
+    <html lang="es">
+      <body>{children}</body>
     </html>
   );
 }

@@ -1,0 +1,23 @@
+<svg width="1200" height="300" viewBox="0 0 1200 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path
+    d="M40 40
+       H120
+       C180 40 220 90 220 140
+       C220 190 180 240 120 240
+       H90
+       L160 300
+       H120
+       L40 180
+       V40Z"
+    fill="#5B5FFF"/>
+  <text
+    x="260"
+    y="210"
+    font-family="Inter, system-ui, sans-serif"
+    font-size="160"
+    font-weight="600"
+    letter-spacing="-0.04em"
+    fill="#0F172A">
+    RINDAY
+  </text>
+</svg>

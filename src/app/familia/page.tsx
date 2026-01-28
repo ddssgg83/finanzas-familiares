@@ -330,18 +330,45 @@ export default function FamiliaPage() {
           }
 
           if (op.kind === "invite") {
-            const { error } = await supabase.from("family_invites").insert([
-              {
-                family_id: op.payload.family_id,
-                email: op.payload.email,
-                role: op.payload.role,
-                status: "pending",
-                invited_by: user.id,
-                token: op.payload.token,
-              },
-            ]);
-            if (error) throw error;
-          }
+  // 1️⃣ Crear invitación en BD
+  const { data: invite, error } = await supabase
+    .from("family_invites")
+    .insert([
+      {
+        family_id: op.payload.family_id,
+        email: op.payload.email,
+        role: op.payload.role,
+        status: "pending",
+        invited_by: user.id,
+        token: op.payload.token,
+      },
+    ])
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  // 2️⃣ Enviar correo vía Edge Function (Resend)
+  try {
+    const inviteLink =
+  `${window.location.origin}/familia/aceptar?token=${encodeURIComponent(invite.token)}`;
+
+const { error: mailError } = await supabase.functions.invoke("send-family-invite", {
+  body: {
+    to: invite.email,
+    inviterName: user.email ?? "Jefe de familia",
+    familyName: familyCtx?.familyName || "Tu familia",
+    inviteLink,
+  },
+});
+
+    if (mailError) {
+      console.warn("Invitación creada pero email no enviado", mailError);
+    }
+  } catch (err) {
+    console.warn("Error enviando email de invitación", err);
+  }
+}
 
           if (op.kind === "revoke_invite") {
             const { error } = await supabase
@@ -628,462 +655,497 @@ export default function FamiliaPage() {
     }
   };
 
-  // =========================================================
-  // Invite
-  // =========================================================
-  const handleInvite = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!user) return alert("Tu sesión expiró. Vuelve a iniciar sesión.");
+// =========================================================
+// Invite
+// =========================================================
+const handleInvite = async (e: FormEvent) => {
+  e.preventDefault();
+  if (!user) return alert("Tu sesión expiró. Vuelve a iniciar sesión.");
 
-    const famId = effectiveFamilyId;
-    if (!famId) return alert("Primero crea tu familia.");
-    if (!isFamilyOwner) return alert("Sólo el jefe de familia puede invitar miembros.");
+  const famId = effectiveFamilyId;
+  if (!famId) return alert("Primero crea tu familia.");
+  if (!isFamilyOwner) return alert("Sólo el jefe de familia puede invitar miembros.");
 
-    const email = inviteForm.email.trim().toLowerCase();
-    if (!email || !email.includes("@")) return alert("Escribe un email válido.");
+  const email = inviteForm.email.trim().toLowerCase();
+  if (!email || !email.includes("@")) return alert("Escribe un email válido.");
 
-    const token = safeUUID();
+  const token = safeUUID();
 
-    try {
-      setSavingInvite(true);
+  try {
+    setSavingInvite(true);
 
-      const localInvite: FamilyInviteRow = {
-        id: safeUUID(),
+    // 1) Crear invitación en BD
+    const { data: invite, error } = await supabase
+      .from("family_invites")
+      .insert({
         family_id: famId,
         email,
         role: inviteForm.role === "admin" ? "admin" : "member",
         status: "pending",
         invited_by: user.id,
         token,
-        created_at: new Date().toISOString(),
-      };
+      })
+      .select("id,family_id,email,role,status,invited_by,token,created_at")
+      .single();
 
-      setInvites((prev) => [localInvite, ...prev]);
+    if (error) throw error;
 
-      const scope = { userId: user.id, familyId: famId };
-      const invitesK = cacheKey("family_invites", scope);
-      writeCache(invitesK, [localInvite, ...readCache<FamilyInviteRow[]>(invitesK, [])]);
+    // 2) UI inmediata
+    setInvites((prev) => [invite as any, ...prev]);
 
-      if (isOfflineNow()) {
-        const ops = readOps(user.id);
-        const nextOps: OfflineOp[] = [
-          ...ops,
-          {
-            kind: "invite",
-            id: safeUUID(),
-            payload: { family_id: famId, email, role: localInvite.role, token },
-          },
-        ];
-        writeOps(user.id, nextOps);
-        setPendingOpsCount(nextOps.length);
+    // 3) Link (usa dominio si existe, si no usa el origin actual)
+    const baseUrl =
+      (process.env.NEXT_PUBLIC_SITE_URL as string | undefined)?.replace(/\/$/, "") ||
+      window.location.origin;
 
-        setInviteForm({ email: "", role: "member", message: "" });
-        return;
-      }
+    const inviteLink = `${baseUrl}/familia/aceptar?token=${encodeURIComponent(
+      (invite as any).token
+    )}`;
 
-      const { error } = await supabase.from("family_invites").insert([
-        {
-          family_id: famId,
-          email,
-          role: localInvite.role,
-          status: "pending",
-          invited_by: user.id,
-          token,
+    // 4) Enviar correo real vía Edge Function (Resend)
+    const { data: mailData, error: mailError } = await supabase.functions.invoke(
+      "send-family-invite",
+      {
+        body: {
+          to: (invite as any).email,
+          inviterName: user.email ?? "Un familiar",
+          familyName: familyCtx?.familyName || "Tu familia",
+          inviteLink,
         },
-      ]);
-      if (error) throw error;
-
-      setInviteForm({ email: "", role: "member", message: "" });
-      await syncOfflineOps();
-      setReloadTick((n) => n + 1);
-    } catch (err) {
-      console.error("Error invitando:", err);
-      alert("No se pudo enviar la invitación.");
-    } finally {
-      setSavingInvite(false);
-    }
-  };
-
-  const handleRevokeInvite = async (inviteId: string) => {
-    if (!user) return;
-    if (!isFamilyOwner) return;
-    if (!window.confirm("¿Revocar invitación?")) return;
-
-    setInvites((prev) => prev.map((i) => (i.id === inviteId ? { ...i, status: "revoked" } : i)));
-
-    if (isOfflineNow()) {
-      const ops = readOps(user.id);
-      const nextOps: OfflineOp[] = [
-        ...ops,
-        { kind: "revoke_invite", id: safeUUID(), payload: { invite_id: inviteId } },
-      ];
-      writeOps(user.id, nextOps);
-      setPendingOpsCount(nextOps.length);
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from("family_invites")
-        .update({ status: "revoked" })
-        .eq("id", inviteId);
-      if (error) throw error;
-      await syncOfflineOps();
-      setReloadTick((n) => n + 1);
-    } catch (err) {
-      console.error("Error revocando invitación:", err);
-      alert("No se pudo revocar la invitación.");
-    }
-  };
-
-  // =========================================================
-  // Members actions
-  // =========================================================
-  const handleRemoveMember = async (memberId: string) => {
-    if (!user) return;
-    if (!isFamilyOwner) return alert("Sólo el jefe de familia puede remover miembros.");
-    if (!window.confirm("¿Remover miembro de la familia?")) return;
-
-    setMembers((prev) => prev.map((m) => (m.id === memberId ? { ...m, status: "removed" } : m)));
-
-    if (isOfflineNow()) {
-      const ops = readOps(user.id);
-      const nextOps: OfflineOp[] = [
-        ...ops,
-        { kind: "remove_member", id: safeUUID(), payload: { member_id: memberId } },
-      ];
-      writeOps(user.id, nextOps);
-      setPendingOpsCount(nextOps.length);
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from("family_members")
-        .update({ status: "removed" })
-        .eq("id", memberId);
-      if (error) throw error;
-      await syncOfflineOps();
-      setReloadTick((n) => n + 1);
-    } catch (err) {
-      console.error("Error removiendo miembro:", err);
-      alert("No se pudo remover el miembro.");
-    }
-  };
-
-  const handleChangeRole = async (memberId: string, role: "admin" | "member") => {
-    if (!user) return;
-    if (!isFamilyOwner) return;
-
-    setMembers((prev) => prev.map((m) => (m.id === memberId ? { ...m, role } : m)));
-
-    if (isOfflineNow()) {
-      const ops = readOps(user.id);
-      const nextOps: OfflineOp[] = [
-        ...ops,
-        { kind: "change_role", id: safeUUID(), payload: { member_id: memberId, role } },
-      ];
-      writeOps(user.id, nextOps);
-      setPendingOpsCount(nextOps.length);
-      return;
-    }
-
-    try {
-      const { error } = await supabase.from("family_members").update({ role }).eq("id", memberId);
-      if (error) throw error;
-      await syncOfflineOps();
-      setReloadTick((n) => n + 1);
-    } catch (err) {
-      console.error("Error cambiando rol:", err);
-      alert("No se pudo cambiar el rol.");
-    }
-  };
-
-  // =========================================================
-  // Render AUTH
-  // =========================================================
-  if (authLoading) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
-        Cargando sesión...
-      </div>
+      }
     );
+
+    if (mailError) {
+      console.error("Error enviando email:", mailError);
+      alert("Invitación creada ✅ (pero el correo falló). Usa 'Copiar link' por ahora.");
+    } else {
+      console.log("Mail OK:", mailData);
+      alert("Invitación enviada ✅");
+    }
+
+    setInviteForm({ email: "", role: "member", message: "" });
+    setReloadTick((n) => n + 1);
+  } catch (err) {
+    console.error("Error invitando:", err);
+    alert("No se pudo enviar la invitación.");
+  } finally {
+    setSavingInvite(false);
+  }
+};
+
+// =========================================================
+// Members actions
+// =========================================================
+const handleRemoveMember = async (memberId: string) => {
+  if (!user) return;
+  if (!isFamilyOwner) return alert("Sólo el jefe de familia puede remover miembros.");
+  if (!window.confirm("¿Remover miembro de la familia?")) return;
+
+  setMembers((prev) => prev.map((m) => (m.id === memberId ? { ...m, status: "removed" } : m)));
+
+  if (isOfflineNow()) {
+    const ops = readOps(user.id);
+    const nextOps: OfflineOp[] = [
+      ...ops,
+      { kind: "remove_member", id: safeUUID(), payload: { member_id: memberId } },
+    ];
+    writeOps(user.id, nextOps);
+    setPendingOpsCount(nextOps.length);
+    return;
   }
 
-  if (!user) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
-        Necesitas iniciar sesión para ver y gestionar tu familia.
-        {authError && <p className="mt-2 text-xs text-rose-500">{authError}</p>}
-      </div>
-    );
+  try {
+    const { error } = await supabase
+      .from("family_members")
+      .update({ status: "removed" })
+      .eq("id", memberId);
+    if (error) throw error;
+    await syncOfflineOps();
+    setReloadTick((n) => n + 1);
+  } catch (err) {
+    console.error("Error removiendo miembro:", err);
+    alert("No se pudo remover el miembro.");
+  }
+};
+
+const handleChangeRole = async (memberId: string, role: "admin" | "member") => {
+  if (!user) return;
+  if (!isFamilyOwner) return;
+
+  setMembers((prev) => prev.map((m) => (m.id === memberId ? { ...m, role } : m)));
+
+  if (isOfflineNow()) {
+    const ops = readOps(user.id);
+    const nextOps: OfflineOp[] = [
+      ...ops,
+      { kind: "change_role", id: safeUUID(), payload: { member_id: memberId, role } },
+    ];
+    writeOps(user.id, nextOps);
+    setPendingOpsCount(nextOps.length);
+    return;
   }
 
-  // =========================================================
-  // Render PAGE
-  // =========================================================
-  const showSnapshotBadge = isOfflineNow() && (isUsingCachedFamily || members.length > 0 || !!cachedFamilyId);
+  try {
+    const { error } = await supabase.from("family_members").update({ role }).eq("id", memberId);
+    if (error) throw error;
+    await syncOfflineOps();
+    setReloadTick((n) => n + 1);
+  } catch (err) {
+    console.error("Error cambiando rol:", err);
+    alert("No se pudo cambiar el rol.");
+  }
+};
+// =========================================================
+// Invite actions
+// =========================================================
+const handleRevokeInvite = async (inviteId: string) => {
+  if (!user) return;
+  if (!isFamilyOwner) return;
+  if (!window.confirm("¿Revocar invitación?")) return;
 
+  // UI optimista
+  setInvites((prev) =>
+    prev.map((i) => (i.id === inviteId ? { ...i, status: "revoked" } : i))
+  );
+
+  if (isOfflineNow()) {
+    const ops = readOps(user.id);
+    const nextOps: OfflineOp[] = [
+      ...ops,
+      { kind: "revoke_invite", id: safeUUID(), payload: { invite_id: inviteId } },
+    ];
+    writeOps(user.id, nextOps);
+    setPendingOpsCount(nextOps.length);
+    return;
+  }
+
+  try {
+    const { error } = await supabase
+      .from("family_invites")
+      .update({ status: "revoked" })
+      .eq("id", inviteId);
+
+    if (error) throw error;
+
+    await syncOfflineOps();
+    setReloadTick((n) => n + 1);
+  } catch (err) {
+    console.error("Error revocando invitación:", err);
+    alert("No se pudo revocar la invitación.");
+  }
+};
+// =========================================================
+// Render AUTH
+// =========================================================
+if (authLoading) {
   return (
-    <PageShell>
-      <AppHeader
-        title="Familia"
-        subtitle="Invita miembros, define roles y mantén control del dashboard familiar."
-        activeTab="familia"
-        userEmail={user.email ?? ""}
-        userId={user.id}
-        onSignOut={handleSignOut}
-      />
+    <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
+      Cargando sesión...
+    </div>
+  );
+}
 
-      {(isOfflineNow() || pendingOpsCount > 0 || showSnapshotBadge) && (
-        <section className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200">
-          {isOfflineNow() ? (
-            <div className="space-y-1">
-              <div>
-                Estás en <span className="font-semibold">modo offline</span>. Puedes invitar/remover/cambiar roles y se sincroniza al volver el internet.
-              </div>
-              {showSnapshotBadge && (
-                <div className="text-[11px] text-slate-600 dark:text-slate-300">
-                  Mostrando <span className="font-semibold">último estado guardado</span>.
-                </div>
-              )}
-            </div>
-          ) : pendingOpsCount > 0 ? (
+if (!user) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
+      Necesitas iniciar sesión para ver y gestionar tu familia.
+      {authError && <p className="mt-2 text-xs text-rose-500">{authError}</p>}
+    </div>
+  );
+}
+
+// =========================================================
+// Render PAGE
+// =========================================================
+const showSnapshotBadge =
+  isOfflineNow() && (isUsingCachedFamily || members.length > 0 || !!cachedFamilyId);
+
+return (
+  <PageShell>
+    <AppHeader
+      title="Familia"
+      subtitle="Invita miembros, define roles y mantén control del dashboard familiar."
+      activeTab="familia"
+      userEmail={user.email ?? ""}
+      userId={user.id}
+      onSignOut={handleSignOut}
+    />
+
+    {(isOfflineNow() || pendingOpsCount > 0 || showSnapshotBadge) && (
+      <section className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200">
+        {isOfflineNow() ? (
+          <div className="space-y-1">
             <div>
-              Sincronizando… Cambios pendientes: <span className="font-semibold">{pendingOpsCount}</span>
+              Estás en <span className="font-semibold">modo offline</span>. Puedes invitar/remover/cambiar roles y se sincroniza al volver el internet.
             </div>
-          ) : null}
-        </section>
-      )}
-
-      {/* Resumen */}
-      <section className="space-y-4">
-        <Card>
-          <Section
-            title="Resumen"
-            subtitle="Tu grupo familiar y su estado."
-            right={
-              familyCtx || familyGroup ? (
-                <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
-                  Familia:{" "}
-                  <span className="font-semibold">
-                    {familyCtx?.familyName ?? familyGroup?.name ?? "Mi familia"}
-                  </span>{" "}
-                  ·{" "}
-                  {isFamilyOwner ? (
-                    <span className="font-semibold">Jefe de familia</span>
-                  ) : (
-                    <span className="font-semibold">Miembro</span>
-                  )}
-                </div>
-              ) : (
-                <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
-                  Aún no tienes familia configurada.
-                </div>
-              )
-            }
-          >
-            {familyLoading && (
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                Actualizando información de familia…
+            {showSnapshotBadge && (
+              <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                Mostrando <span className="font-semibold">último estado guardado</span>.
               </div>
             )}
-            {familyError && <p className="mt-2 text-[11px] text-rose-500">{familyError}</p>}
-          </Section>
-        </Card>
-
-        <div className="grid gap-4 md:grid-cols-3">
-          <StatCard
-            label="Miembros activos"
-            value={String(activeMembers)}
-            hint="Personas que cuentan en el dashboard familiar."
-            tone="good"
-          />
-          <StatCard
-            label="Invitaciones pendientes"
-            value={String(pendingInvites)}
-            hint="Invitaciones enviadas que aún no aceptan."
-            tone="neutral"
-          />
-          <StatCard
-            label="Tu rol"
-            value={isFamilyOwner ? "Owner" : "Member"}
-            hint={
-              isFamilyOwner
-                ? "Controlas invitaciones y roles."
-                : "Tu jefe de familia controla invitaciones y roles."
-            }
-            tone={isFamilyOwner ? "good" : "neutral"}
-          />
-        </div>
+          </div>
+        ) : pendingOpsCount > 0 ? (
+          <div>
+            Sincronizando… Cambios pendientes: <span className="font-semibold">{pendingOpsCount}</span>
+          </div>
+        ) : null}
       </section>
+    )}
 
-      {/* Crear familia (si no existe) */}
-      {!familyCtx && !familyGroup && (
-        <section className="mt-4">
-          <Card>
-            <Section
-              title="Crear familia"
-              subtitle="Crea tu grupo familiar para invitar miembros y habilitar el Dashboard familiar."
-            >
-              <form onSubmit={handleCreateFamily} className="mt-2 space-y-3">
-                <div>
-                  <Label>Nombre de la familia</Label>
-                  <Input
-                    value={createFamilyForm.name}
-                    onChange={(e) => setCreateFamilyForm((p) => ({ ...p, name: e.target.value }))}
-                    placeholder="Ej. Familia Sloane"
-                    required
-                  />
-                </div>
+    {/* Resumen */}
+    <section className="space-y-4">
+      <Card>
+        <Section
+          title="Resumen"
+          subtitle="Tu grupo familiar y su estado."
+          right={
+            familyCtx || familyGroup ? (
+              <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
+                Familia:{" "}
+                <span className="font-semibold">
+                  {familyCtx?.familyName ?? familyGroup?.name ?? "Mi familia"}
+                </span>{" "}
+                ·{" "}
+                {isFamilyOwner ? (
+                  <span className="font-semibold">Jefe de familia</span>
+                ) : (
+                  <span className="font-semibold">Miembro</span>
+                )}
+              </div>
+            ) : (
+              <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
+                Aún no tienes familia configurada.
+              </div>
+            )
+          }
+        >
+          {familyLoading && (
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              Actualizando información de familia…
+            </div>
+          )}
+          {familyError && <p className="mt-2 text-[11px] text-rose-500">{familyError}</p>}
+        </Section>
+      </Card>
 
-                <div>
-                  <Label>Notas (opcional)</Label>
-                  <Textarea
-                    value={createFamilyForm.notes}
-                    onChange={(e) => setCreateFamilyForm((p) => ({ ...p, notes: e.target.value }))}
-                    placeholder="Ej. Reglas internas, propósito, etc."
-                  />
-                  <Help>
-                    Estas notas son solo informativas (si luego quieres guardarlas en BD, lo conectamos).
-                  </Help>
-                </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        <StatCard
+          label="Miembros activos"
+          value={String(activeMembers)}
+          hint="Personas que cuentan en el dashboard familiar."
+          tone="good"
+        />
+        <StatCard
+          label="Invitaciones pendientes"
+          value={String(pendingInvites)}
+          hint="Invitaciones enviadas que aún no aceptan."
+          tone="neutral"
+        />
+        <StatCard
+          label="Tu rol"
+          value={isFamilyOwner ? "Owner" : "Member"}
+          hint={
+            isFamilyOwner
+              ? "Controlas invitaciones y roles."
+              : "Tu jefe de familia controla invitaciones y roles."
+          }
+          tone={isFamilyOwner ? "good" : "neutral"}
+        />
+      </div>
+    </section>
 
-                <Button type="submit" disabled={savingCreateFamily}>
-                  {savingCreateFamily ? "Creando..." : "Crear familia"}
-                </Button>
-              </form>
-            </Section>
-          </Card>
-        </section>
-      )}
-
-      {/* Invitaciones */}
-      <section className="mt-4 grid gap-4 md:grid-cols-2">
+    {/* Crear familia (si no existe) */}
+    {!familyCtx && !familyGroup && (
+      <section className="mt-4">
         <Card>
           <Section
-            title="Invitar miembro"
-            subtitle={
-              isFamilyOwner
-                ? "Invita por email y define el rol."
-                : "Sólo el jefe de familia puede invitar miembros."
-            }
-            right={
-              !isFamilyOwner ? (
-                <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Acción restringida
-                </span>
-              ) : null
-            }
+            title="Crear familia"
+            subtitle="Crea tu grupo familiar para invitar miembros y habilitar el Dashboard familiar."
           >
-            <form onSubmit={handleInvite} className="mt-2 space-y-3">
+            <form onSubmit={handleCreateFamily} className="mt-2 space-y-3">
               <div>
-                <Label>Email</Label>
+                <Label>Nombre de la familia</Label>
                 <Input
-                  value={inviteForm.email}
-                  onChange={(e) => setInviteForm((p) => ({ ...p, email: e.target.value }))}
-                  placeholder="ej. familiar@email.com"
-                  disabled={!isFamilyOwner}
+                  value={createFamilyForm.name}
+                  onChange={(e) => setCreateFamilyForm((p) => ({ ...p, name: e.target.value }))}
+                  placeholder="Ej. Familia Sloane"
                   required
                 />
               </div>
 
-              <div className="grid gap-3 md:grid-cols-2">
-                <div>
-                  <Label>Rol</Label>
-                  <Select
-                    value={inviteForm.role}
-                    onChange={(e) =>
-                      setInviteForm((p) => ({
-                        ...p,
-                        role: e.target.value === "admin" ? "admin" : "member",
-                      }))
-                    }
-                    disabled={!isFamilyOwner}
-                  >
-                    <option value="member">Miembro</option>
-                    <option value="admin">Admin</option>
-                  </Select>
-                  <Help>
-                    Admin: puede ver/gestionar más pantallas (si lo habilitas). Por ahora Owner controla todo.
-                  </Help>
-                </div>
-
-                <div>
-                  <Label>Mensaje (opcional)</Label>
-                  <Input
-                    value={inviteForm.message}
-                    onChange={(e) => setInviteForm((p) => ({ ...p, message: e.target.value }))}
-                    placeholder="Ej. Te agrego a la familia…"
-                    disabled={!isFamilyOwner}
-                  />
-                </div>
+              <div>
+                <Label>Notas (opcional)</Label>
+                <Textarea
+                  value={createFamilyForm.notes}
+                  onChange={(e) => setCreateFamilyForm((p) => ({ ...p, notes: e.target.value }))}
+                  placeholder="Ej. Reglas internas, propósito, etc."
+                />
+                <Help>
+                  Estas notas son solo informativas (si luego quieres guardarlas en BD, lo conectamos).
+                </Help>
               </div>
 
-              <Button type="submit" disabled={!isFamilyOwner || savingInvite || !effectiveFamilyId}>
-                {savingInvite ? "Enviando..." : "Enviar invitación"}
+              <Button type="submit" disabled={savingCreateFamily}>
+                {savingCreateFamily ? "Creando..." : "Crear familia"}
               </Button>
-
-              {!effectiveFamilyId && <Help>Primero crea tu familia para poder invitar miembros.</Help>}
             </form>
           </Section>
         </Card>
-
-        <Card>
-          <Section
-            title="Invitaciones"
-            right={
-              <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                {invites.length} total
-              </span>
-            }
-          >
-            {loading ? (
-              <EmptyState>Cargando invitaciones...</EmptyState>
-            ) : invites.length === 0 ? (
-              <EmptyState>Aún no tienes invitaciones.</EmptyState>
-            ) : (
-              <ul className="space-y-2">
-                {invites.map((i) => (
-                  <ListItem
-                    key={i.id}
-                    left={
-                      <>
-                        <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-                          {i.email}
-                        </div>
-                        <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                          Rol: {i.role.toUpperCase()} · Estado: {i.status}
-                        </div>
-                        {i.created_at && (
-                          <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
-                            {formatDateDisplay(i.created_at)}
-                          </div>
-                        )}
-                      </>
-                    }
-                    right={
-                      isFamilyOwner ? (
-                        <div className="flex items-center gap-3">
-                          {i.status === "pending" ? (
-                            <LinkButton tone="danger" onClick={() => handleRevokeInvite(i.id)}>
-                              Revocar
-                            </LinkButton>
-                          ) : (
-                            <span className="text-[11px] text-slate-500 dark:text-slate-400">—</span>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-[11px] text-slate-500 dark:text-slate-400">—</span>
-                      )
-                    }
-                  />
-                ))}
-              </ul>
-            )}
-          </Section>
-        </Card>
       </section>
+    )}
+
+    {/* Invitaciones */}
+    <section className="mt-4 grid gap-4 md:grid-cols-2">
+      <Card>
+        <Section
+          title="Invitar miembro"
+          subtitle={
+            isFamilyOwner
+              ? "Invita por email y define el rol."
+              : "Sólo el jefe de familia puede invitar miembros."
+          }
+          right={
+            !isFamilyOwner ? (
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                Acción restringida
+              </span>
+            ) : null
+          }
+        >
+          <form onSubmit={handleInvite} className="mt-2 space-y-3">
+            <div>
+              <Label>Email</Label>
+              <Input
+                value={inviteForm.email}
+                onChange={(e) => setInviteForm((p) => ({ ...p, email: e.target.value }))}
+                placeholder="ej. familiar@email.com"
+                disabled={!isFamilyOwner}
+                required
+              />
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <Label>Rol</Label>
+                <Select
+                  value={inviteForm.role}
+                  onChange={(e) =>
+                    setInviteForm((p) => ({
+                      ...p,
+                      role: e.target.value === "admin" ? "admin" : "member",
+                    }))
+                  }
+                  disabled={!isFamilyOwner}
+                >
+                  <option value="member">Miembro</option>
+                  <option value="admin">Admin</option>
+                </Select>
+                <Help>
+                  Admin: puede ver/gestionar más pantallas (si lo habilitas). Por ahora Owner controla todo.
+                </Help>
+              </div>
+
+              <div>
+                <Label>Mensaje (opcional)</Label>
+                <Input
+                  value={inviteForm.message}
+                  onChange={(e) => setInviteForm((p) => ({ ...p, message: e.target.value }))}
+                  placeholder="Ej. Te agrego a la familia…"
+                  disabled={!isFamilyOwner}
+                />
+              </div>
+            </div>
+
+            <Button type="submit" disabled={!isFamilyOwner || savingInvite || !effectiveFamilyId}>
+              {savingInvite ? "Enviando..." : "Enviar invitación"}
+            </Button>
+
+            {!effectiveFamilyId && <Help>Primero crea tu familia para poder invitar miembros.</Help>}
+          </form>
+        </Section>
+      </Card>
+
+     <Card>
+  <Section
+    title="Invitaciones"
+    right={
+      <span className="text-[11px] text-slate-500 dark:text-slate-400">
+        {invites.length} total
+      </span>
+    }
+  >
+    {loading ? (
+      <EmptyState>Cargando invitaciones...</EmptyState>
+    ) : invites.length === 0 ? (
+      <EmptyState>Aún no tienes invitaciones.</EmptyState>
+    ) : (
+      <ul className="space-y-2">
+        {invites.map((i) => {
+          const canRevoke = isFamilyOwner && i.status === "pending";
+
+          const inviteLink =
+            typeof window !== "undefined"
+              ? `${window.location.origin}/familia/aceptar?token=${i.token}`
+              : `/familia/aceptar?token=${i.token}`;
+
+          return (
+            <ListItem
+              key={i.id}
+              left={
+                <>
+                  <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    {i.email}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    Rol: {i.role.toUpperCase()} · Estado: {i.status}
+                  </div>
+                  {i.created_at && (
+                    <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+                      {formatDateDisplay(i.created_at)}
+                    </div>
+                  )}
+                </>
+              }
+              right={
+                canRevoke ? (
+  <div className="flex items-center gap-2">
+    <LinkButton
+      tone="info"
+      onClick={async () => {
+        try {
+          if (!i.token) {
+            alert("Esta invitación no tiene token.");
+            return;
+          }
+
+          await navigator.clipboard.writeText(inviteLink);
+          alert("Link copiado ✅");
+        } catch (err) {
+          console.error("Error copiando link:", err);
+          alert("No se pudo copiar el link.");
+        }
+      }}
+    >
+      Copiar link
+    </LinkButton>
+
+    <LinkButton tone="danger" onClick={() => handleRevokeInvite(i.id)}>
+      Revocar
+    </LinkButton>
+  </div>
+) : (
+  <span className="text-[11px] text-slate-500 dark:text-slate-400">—</span>
+)
+              }
+            />
+          );
+        })}
+      </ul>
+    )}
+  </Section>
+</Card>
+</section>
+
 
       {/* Miembros */}
       <section className="mt-4">

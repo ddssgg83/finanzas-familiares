@@ -1,0 +1,14 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1024" height="1024" rx="180" fill="#5B5FFF"/>
+  <path
+    d="M360 180
+       H520
+       C640 180 700 260 700 340
+       C700 420 640 500 520 500
+       H440
+       L600 820
+       H500
+       L360 520
+       V180Z"
+    fill="white"/>
+</svg>
