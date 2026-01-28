@@ -2,6 +2,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
+export const viewport = {
+  themeColor: "#5B5FFF", // tu azul RINDAY
+};
+
 export const metadata: Metadata = {
   title: {
     default: "RINDAY",
@@ -18,7 +22,6 @@ export const metadata: Metadata = {
   formatDetection: {
     telephone: false,
   },
-  themeColor: "#5B5FFF",
   icons: {
     icon: [
       { url: "/icons/icon-32.png", sizes: "32x32", type: "image/png" },
