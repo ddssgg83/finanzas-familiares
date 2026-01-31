@@ -4,11 +4,6 @@ import { createClient } from "@supabase/supabase-js";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
 function escapeHtml(str: string) {
   return str.replace(/[&<>"']/g, (m) => {
     const map: Record<string, string> = {
@@ -28,15 +23,11 @@ function renderInviteEmailHTML(opts: {
   inviteeEmail: string;
 }) {
   const inviterName = escapeHtml(opts.inviterName || "Un miembro de tu familia");
-  const inviteUrl = opts.inviteUrl;
   const inviteeEmail = escapeHtml(opts.inviteeEmail);
+  const inviteUrl = opts.inviteUrl;
 
   return `<!DOCTYPE html>
 <html lang="es">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-</head>
 <body style="margin:0;padding:0;background:#F8FAFC;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
     <tr>
@@ -75,13 +66,12 @@ function renderInviteEmailHTML(opts: {
 
           <tr>
             <td style="font-size:13px;color:#64748B;line-height:1.6;">
-              Si no esperabas este correo, puedes ignorarlo. La invitación expirará automáticamente.
+              Si no esperabas este correo, puedes ignorarlo.
               <br /><br />
               —<br /><strong>RINDAY</strong><br />
               Tranquilidad financiera compartida
             </td>
           </tr>
-
         </table>
       </td>
     </tr>
@@ -92,44 +82,66 @@ function renderInviteEmailHTML(opts: {
 
 export async function POST(req: Request) {
   try {
-    // Validar envs mínimos
-    if (!process.env.RESEND_API_KEY) {
-      return NextResponse.json({ error: "Missing RESEND_API_KEY" }, { status: 500 });
+    // ✅ 1) Token desde Authorization: Bearer <access_token>
+    const authHeader = req.headers.get("authorization") || "";
+    const token = authHeader.toLowerCase().startsWith("bearer ")
+      ? authHeader.slice(7).trim()
+      : "";
+
+    if (!token) {
+      return NextResponse.json(
+        { error: "Auth session missing! (no bearer token)" },
+        { status: 401 }
+      );
     }
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      return NextResponse.json({ error: "Missing SUPABASE_SERVICE_ROLE_KEY" }, { status: 500 });
+
+    // ✅ 2) Cliente “como usuario” usando el access_token
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        global: {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      }
+    );
+
+    // ✅ 3) Validar usuario
+    const { data: userData, error: userErr } = await supabase.auth.getUser();
+    if (userErr || !userData?.user) {
+      return NextResponse.json(
+        { error: userErr?.message ?? "Not authenticated" },
+        { status: 401 }
+      );
     }
 
     const body = await req.json();
-
-    const {
-      familyId,
-      email,
-      role,
-      inviterName,
-      message,
-    } = body as {
+    const { familyId, email, role, inviterName, message } = body as {
       familyId: string;
       email: string;
-      role?: string; // default: member
+      role?: string;
       inviterName?: string;
       message?: string | null;
     };
 
     if (!familyId || !email) {
-      return NextResponse.json({ error: "Missing familyId or email" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing familyId or email" },
+        { status: 400 }
+      );
     }
 
     const inviteEmail = String(email).toLowerCase().trim();
-    const token = crypto.randomUUID();
+    const inviteToken = crypto.randomUUID();
 
-    // 1) Guardar invite con tu RPC existente
-    // Confirmado por tu screenshot: create_family_invite(p_family_id uuid, p_email text, p_role text, p_token uuid, p_message ...)
-    const { error: rpcError } = await supabaseAdmin.rpc("create_family_invite", {
+    // ✅ 4) RPC como usuario (para que auth.uid() aplique y valide admin)
+    const { error: rpcError } = await supabase.rpc("create_family_invite", {
       p_family_id: familyId,
       p_email: inviteEmail,
       p_role: role ?? "member",
-      p_token: token,
+      p_token: inviteToken,
       p_message: message ?? null,
     });
 
@@ -137,34 +149,42 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: rpcError.message }, { status: 400 });
     }
 
-    // 2) Construir link (local/prod)
-    const baseUrl =
-      process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-      "https://rinday.app";
+    // ✅ 5) Enviar email
 
-    const inviteUrl = `${baseUrl}/familia/invitacion?token=${encodeURIComponent(token)}`;
+// 1) URL base para links del correo
+// - En Vercel: fuerza dominio real
+// - En local: usa localhost (a menos que definas PUBLIC_APP_URL_FOR_EMAIL)
+const baseUrl =
+  (process.env.PUBLIC_APP_URL_FOR_EMAIL?.trim() ||
+    (process.env.VERCEL ? "https://rinday.app" : "http://localhost:3000"));
 
-    // 3) Enviar email con Resend
-    const from = process.env.RESEND_FROM || "RINDAY <no-reply@rinday.app>";
-    const subject = "Te invitaron a unirte a una familia en RINDAY";
+// 2) Link final del correo
+const inviteUrl = `${baseUrl}/familia/aceptar?token=${encodeURIComponent(inviteToken)}`;
 
-    const { error: emailError } = await resend.emails.send({
-      from,
-      to: inviteEmail,
-      subject,
-      html: renderInviteEmailHTML({
-        inviterName: inviterName || "Un miembro de tu familia",
-        inviteUrl,
-        inviteeEmail: inviteEmail,
-      }),
-    });
+const from = process.env.RESEND_FROM || "RINDAY <no-reply@rinday.app>";
+const subject = "Te invitaron a unirte a una familia en RINDAY";
 
-    if (emailError) {
-      return NextResponse.json({ error: emailError.message }, { status: 502 });
-    }
+const { error: emailError } = await resend.emails.send({
+  from,
+  to: inviteEmail,
+  subject,
+  html: renderInviteEmailHTML({
+    inviterName: inviterName || (userData.user.email ?? "RINDAY"),
+    inviteUrl,
+    inviteeEmail: inviteEmail,
+  }),
+});
 
-    return NextResponse.json({ ok: true, token });
+if (emailError) {
+  return NextResponse.json({ error: emailError.message }, { status: 502 });
+}
+
+return NextResponse.json({ ok: true, token: inviteToken });
+
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message ?? "Unknown error" },
+      { status: 500 }
+    );
   }
 }
