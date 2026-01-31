@@ -1,8 +1,7 @@
-// src/app/familia/aceptar/AceptarClient.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { PageShell } from "@/components/ui/PageShell";
 import { AppHeader } from "@/components/AppHeader";
@@ -32,6 +31,7 @@ function isExpired(expiresAt: string | null) {
 
 export default function AceptarClient() {
   const sp = useSearchParams();
+  const router = useRouter();
   const token = (sp.get("token") ?? "").trim();
 
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -42,6 +42,12 @@ export default function AceptarClient() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  // UX extra
+  const [needsLogin, setNeedsLogin] = useState(false);
+  const [emailMismatch, setEmailMismatch] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
   const canRun = useMemo(() => !!token, [token]);
 
   useEffect(() => {
@@ -51,6 +57,10 @@ export default function AceptarClient() {
       setLoading(true);
       setError(null);
       setSuccess(false);
+      setInvite(null);
+      setNeedsLogin(false);
+      setEmailMismatch(false);
+      setCopied(false);
 
       if (!token) {
         setError("Falta el token de invitación.");
@@ -63,6 +73,8 @@ export default function AceptarClient() {
       const u = sess.session?.user ?? null;
 
       if (!u) {
+        if (!alive) return;
+        setNeedsLogin(true);
         setError("Necesitas iniciar sesión para aceptar la invitación.");
         setLoading(false);
         return;
@@ -72,7 +84,7 @@ export default function AceptarClient() {
       setUserEmail(u.email ?? null);
       setUserId(u.id);
 
-      // Necesita conexión
+      // Aceptar escribe en BD
       if (typeof window !== "undefined" && !navigator.onLine) {
         setError("Para aceptar la invitación necesitas conexión a internet.");
         setLoading(false);
@@ -100,6 +112,7 @@ export default function AceptarClient() {
         const invEmail = (inviteRow.email ?? "").toLowerCase().trim();
 
         if (!myEmail || invEmail !== myEmail) {
+          setEmailMismatch(true);
           throw new Error("Esta invitación no corresponde a tu correo.");
         }
 
@@ -150,7 +163,7 @@ export default function AceptarClient() {
           );
         }
 
-        // 6) Insertar/activar miembro (idempotente)
+        // 6) Insertar/activar miembro
         const { data: existing, error: existErr } = await supabase
           .from("family_members")
           .select("id,status,role")
@@ -205,11 +218,48 @@ export default function AceptarClient() {
     };
 
     run();
-
     return () => {
       alive = false;
     };
   }, [token]);
+
+  const invitedEmail = invite?.email ?? null;
+
+  const goLogin = (mode: "login" | "signup") => {
+    // Guardamos el token para que onboarding lo regrese aquí
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("acceptInviteToken", token);
+      } catch {}
+    }
+
+    // Si tu onboarding soporta params, mandamos contexto
+    const url =
+      `/onboarding?next=${encodeURIComponent(`/familia/aceptar?token=${token}`)}` +
+      (invitedEmail ? `&email=${encodeURIComponent(invitedEmail)}` : "") +
+      `&mode=${mode}`;
+
+    router.replace(url);
+  };
+
+  const onCopyInvitedEmail = async () => {
+    try {
+      if (!invitedEmail) return;
+      await navigator.clipboard.writeText(invitedEmail);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  };
+
+  const onSignOutAndGoLogin = async () => {
+    try {
+      setSigningOut(true);
+      await supabase.auth.signOut();
+      goLogin("login");
+    } finally {
+      setSigningOut(false);
+    }
+  };
 
   return (
     <main className="flex min-h-screen flex-col pb-16 md:pb-4">
@@ -236,13 +286,6 @@ export default function AceptarClient() {
                 Ya eres parte de la familia. Puedes ir al módulo Familia y ver el dashboard familiar.
               </p>
 
-              {invite?.message ? (
-                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
-                  <div className="font-semibold">Mensaje:</div>
-                  <div className="mt-1">{invite.message}</div>
-                </div>
-              ) : null}
-
               <div className="mt-3 flex flex-wrap gap-2">
                 <a
                   href="/familia"
@@ -267,24 +310,56 @@ export default function AceptarClient() {
                 {error ?? "Intenta de nuevo."}
               </p>
 
-              {invite && (
-                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
-                  <div>
-                    Invitación para: <span className="font-semibold">{invite.email}</span>
+              {/* ✅ Si no hay sesión: botones de login/signup */}
+              {needsLogin ? (
+                <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
+                  <div className="text-[12px] text-slate-700 dark:text-slate-200">
+                    Para aceptar la invitación necesitas iniciar sesión con el correo invitado.
                   </div>
-                  <div>
-                    Estado: <span className="font-semibold">{invite.status}</span>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => goLogin("login")}
+                      className="rounded-full bg-slate-900 px-4 py-2 text-[12px] font-semibold text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                    >
+                      Iniciar sesión
+                    </button>
+                    <button
+                      onClick={() => goLogin("signup")}
+                      className="rounded-full border border-slate-200 bg-white px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900"
+                    >
+                      Crear cuenta
+                    </button>
                   </div>
-                  {invite.expires_at && (
-                    <div>
-                      Expira:{" "}
-                      <span className="font-semibold">
-                        {new Date(invite.expires_at).toLocaleString("es-MX")}
-                      </span>
-                    </div>
-                  )}
                 </div>
-              )}
+              ) : null}
+
+              {/* ✅ UX PRO cuando el correo no coincide */}
+              {emailMismatch && invitedEmail ? (
+                <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
+                  <div className="text-[12px] text-slate-700 dark:text-slate-200">
+                    Estás conectado como{" "}
+                    <span className="font-semibold">{userEmail ?? "—"}</span>, pero esta invitación es para{" "}
+                    <span className="font-semibold">{invitedEmail}</span>.
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      onClick={onSignOutAndGoLogin}
+                      disabled={signingOut}
+                      className="rounded-full bg-slate-900 px-4 py-2 text-[12px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                    >
+                      {signingOut ? "Cerrando sesión…" : "Cerrar sesión e ingresar con el correo invitado"}
+                    </button>
+
+                    <button
+                      onClick={onCopyInvitedEmail}
+                      className="rounded-full border border-slate-200 bg-white px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900"
+                    >
+                      {copied ? "Copiado ✅" : "Copiar correo invitado"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
               {!canRun && (
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
