@@ -53,6 +53,22 @@ export default function AceptarClient() {
   useEffect(() => {
     let alive = true;
 
+    const loadInviteByToken = async (): Promise<InviteRow | null> => {
+      if (!token) return null;
+
+      const { data: inv, error: invErr } = await supabase
+        .from("family_invites")
+        .select(
+          "id,family_id,email,role,status,invited_by,token,created_at,expires_at,accepted_at,token_used,message"
+        )
+        .eq("token", token)
+        .maybeSingle();
+
+      if (invErr) throw invErr;
+      if (!inv) return null;
+      return inv as InviteRow;
+    };
+
     const run = async () => {
       setLoading(true);
       setError(null);
@@ -68,44 +84,39 @@ export default function AceptarClient() {
         return;
       }
 
-      // Requiere sesión
-      const { data: sess } = await supabase.auth.getSession();
-      const u = sess.session?.user ?? null;
-
-      if (!u) {
-        if (!alive) return;
-        setNeedsLogin(true);
-        setError("Necesitas iniciar sesión para aceptar la invitación.");
-        setLoading(false);
-        return;
-      }
-
-      if (!alive) return;
-      setUserEmail(u.email ?? null);
-      setUserId(u.id);
-
-      // Aceptar escribe en BD
+      // Necesita conexión para aceptar (escritura). Para solo leer invite, también conviene online.
       if (typeof window !== "undefined" && !navigator.onLine) {
         setError("Para aceptar la invitación necesitas conexión a internet.");
         setLoading(false);
         return;
       }
 
+      // Requiere sesión (para aceptar), pero primero intentamos cargar el invite para UX
+      const { data: sess } = await supabase.auth.getSession();
+      const u = sess.session?.user ?? null;
+
       try {
-        // 1) Cargar invitación por token
-        const { data: inv, error: invErr } = await supabase
-          .from("family_invites")
-          .select(
-            "id,family_id,email,role,status,invited_by,token,created_at,expires_at,accepted_at,token_used,message"
-          )
-          .eq("token", token)
-          .maybeSingle();
+        // ✅ Siempre intentamos cargar la invitación para mostrar el correo invitado (aunque no haya sesión)
+        const inv = await loadInviteByToken();
+        if (!alive) return;
+        if (inv) setInvite(inv);
 
-        if (invErr) throw invErr;
-        if (!inv) throw new Error("Invitación no encontrada o token inválido.");
+        if (!u) {
+          setNeedsLogin(true);
+          setError("Necesitas iniciar sesión para aceptar la invitación.");
+          setLoading(false);
+          return;
+        }
 
-        const inviteRow = inv as InviteRow;
-        setInvite(inviteRow);
+        if (!alive) return;
+        setUserEmail(u.email ?? null);
+        setUserId(u.id);
+
+        if (!inv) {
+          throw new Error("Invitación no encontrada o token inválido.");
+        }
+
+        const inviteRow = inv;
 
         // 2) Validar correo
         const myEmail = (u.email ?? "").toLowerCase().trim();
@@ -153,6 +164,7 @@ export default function AceptarClient() {
 
           if (!alive) return;
           setSuccess(true);
+          setLoading(false);
           return;
         }
 
@@ -226,16 +238,16 @@ export default function AceptarClient() {
   const invitedEmail = invite?.email ?? null;
 
   const goLogin = (mode: "login" | "signup") => {
-    // Guardamos el token para que onboarding lo regrese aquí
+    // Guardamos el token para que onboarding lo regrese aquí (extra backup)
     if (typeof window !== "undefined") {
       try {
         localStorage.setItem("acceptInviteToken", token);
       } catch {}
     }
 
-    // Si tu onboarding soporta params, mandamos contexto
+    const next = `/familia/aceptar?token=${token}`;
     const url =
-      `/onboarding?next=${encodeURIComponent(`/familia/aceptar?token=${token}`)}` +
+      `/onboarding?next=${encodeURIComponent(next)}` +
       (invitedEmail ? `&email=${encodeURIComponent(invitedEmail)}` : "") +
       `&mode=${mode}`;
 
@@ -286,6 +298,13 @@ export default function AceptarClient() {
                 Ya eres parte de la familia. Puedes ir al módulo Familia y ver el dashboard familiar.
               </p>
 
+              {invite?.message ? (
+                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
+                  <div className="font-semibold">Mensaje:</div>
+                  <div className="mt-1">{invite.message}</div>
+                </div>
+              ) : null}
+
               <div className="mt-3 flex flex-wrap gap-2">
                 <a
                   href="/familia"
@@ -306,16 +325,39 @@ export default function AceptarClient() {
               <p className="text-sm font-semibold text-rose-700 dark:text-rose-200">
                 No se pudo aceptar la invitación
               </p>
+
               <p className="text-[12px] text-slate-600 dark:text-slate-300">
                 {error ?? "Intenta de nuevo."}
               </p>
 
-              {/* ✅ Si no hay sesión: botones de login/signup */}
+              {/* Info del invite si alcanzamos a cargarlo */}
+              {invite ? (
+                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
+                  <div>
+                    Invitación para:{" "}
+                    <span className="font-semibold">{invite.email}</span>
+                  </div>
+                  <div>
+                    Estado: <span className="font-semibold">{invite.status}</span>
+                  </div>
+                  {invite.expires_at && (
+                    <div>
+                      Expira:{" "}
+                      <span className="font-semibold">
+                        {new Date(invite.expires_at).toLocaleString("es-MX")}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
+              {/* ✅ Si no hay sesión: botones de login/signup + copiar correo si existe */}
               {needsLogin ? (
                 <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
                   <div className="text-[12px] text-slate-700 dark:text-slate-200">
                     Para aceptar la invitación necesitas iniciar sesión con el correo invitado.
                   </div>
+
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
                       onClick={() => goLogin("login")}
@@ -323,12 +365,22 @@ export default function AceptarClient() {
                     >
                       Iniciar sesión
                     </button>
+
                     <button
                       onClick={() => goLogin("signup")}
                       className="rounded-full border border-slate-200 bg-white px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900"
                     >
                       Crear cuenta
                     </button>
+
+                    {invitedEmail ? (
+                      <button
+                        onClick={onCopyInvitedEmail}
+                        className="rounded-full border border-slate-200 bg-white px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900"
+                      >
+                        {copied ? "Copiado ✅" : "Copiar correo invitado"}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               ) : null}
@@ -348,7 +400,9 @@ export default function AceptarClient() {
                       disabled={signingOut}
                       className="rounded-full bg-slate-900 px-4 py-2 text-[12px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
                     >
-                      {signingOut ? "Cerrando sesión…" : "Cerrar sesión e ingresar con el correo invitado"}
+                      {signingOut
+                        ? "Cerrando sesión…"
+                        : "Cerrar sesión e ingresar con el correo invitado"}
                     </button>
 
                     <button
