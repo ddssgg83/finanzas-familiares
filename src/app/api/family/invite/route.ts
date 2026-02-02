@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { createClient } from "@supabase/supabase-js";
 
-// ✅ Importante: Resend funciona mejor en Node (no Edge)
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = "nodejs"; // ✅ importante en Vercel para evitar rarezas
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 function escapeHtml(str: string) {
   return str.replace(/[&<>"']/g, (m) => {
@@ -82,31 +82,25 @@ function renderInviteEmailHTML(opts: {
 </html>`;
 }
 
-function safeEmail(raw: unknown) {
-  const e = String(raw ?? "").trim().toLowerCase();
-  if (!e || !e.includes("@")) return null;
-  return e;
+function getBaseUrl() {
+  // ✅ Forzamos dominio real en Vercel sí o sí (evita previews / localhost)
+  const explicit = (process.env.PUBLIC_APP_URL_FOR_EMAIL ?? "").trim();
+  if (explicit) return explicit;
+
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`; // por si acaso
+  return "https://rinday.app";
 }
 
 export async function POST(req: Request) {
-  const requestId = crypto.randomUUID();
-
   try {
-    // ✅ 0) Validar envs de Resend
-    const RESEND_API_KEY = (process.env.RESEND_API_KEY ?? "").trim();
-    if (!RESEND_API_KEY) {
-      console.error("[invite] missing RESEND_API_KEY", { requestId });
-      return NextResponse.json(
-        {
-          ok: true,
-          emailSent: false,
-          error: "RESEND_API_KEY no está configurada en Vercel (Production).",
-        },
-        { status: 200 }
-      );
-    }
+    // ====== VALIDACIONES ENV (sin filtrar secretos) ======
+    const hasResendKey = !!process.env.RESEND_API_KEY;
+    const from = (process.env.RESEND_FROM || "RINDAY <no-reply@rinday.app>").trim();
 
-    const resend = new Resend(RESEND_API_KEY);
+    if (!hasResendKey) {
+      // Esto explica el 90% de “en local jala / en prod no”
+      console.error("[invite] RESEND_API_KEY missing in env");
+    }
 
     // ✅ 1) Token desde Authorization: Bearer <access_token>
     const authHeader = req.headers.get("authorization") || "";
@@ -116,7 +110,7 @@ export async function POST(req: Request) {
 
     if (!token) {
       return NextResponse.json(
-        { ok: false, error: "Auth session missing! (no bearer token)" },
+        { error: "Auth session missing! (no bearer token)" },
         { status: 401 }
       );
     }
@@ -126,11 +120,7 @@ export async function POST(req: Request) {
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
-        global: {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
+        global: { headers: { Authorization: `Bearer ${token}` } },
       }
     );
 
@@ -138,7 +128,7 @@ export async function POST(req: Request) {
     const { data: userData, error: userErr } = await supabase.auth.getUser();
     if (userErr || !userData?.user) {
       return NextResponse.json(
-        { ok: false, error: userErr?.message ?? "Not authenticated" },
+        { error: userErr?.message ?? "Not authenticated" },
         { status: 401 }
       );
     }
@@ -152,24 +142,17 @@ export async function POST(req: Request) {
       message?: string | null;
     };
 
-    if (!familyId) {
+    if (!familyId || !email) {
       return NextResponse.json(
-        { ok: false, error: "Missing familyId" },
+        { error: "Missing familyId or email" },
         { status: 400 }
       );
     }
 
-    const inviteEmail = safeEmail(email);
-    if (!inviteEmail) {
-      return NextResponse.json(
-        { ok: false, error: "Ingresa un correo válido." },
-        { status: 400 }
-      );
-    }
-
+    const inviteEmail = String(email).toLowerCase().trim();
     const inviteToken = crypto.randomUUID();
 
-    // ✅ 4) RPC como usuario (para que auth.uid() aplique y valide admin)
+    // ✅ 4) Crear invitación (DB)
     const { error: rpcError } = await supabase.rpc("create_family_invite", {
       p_family_id: familyId,
       p_email: inviteEmail,
@@ -179,80 +162,63 @@ export async function POST(req: Request) {
     });
 
     if (rpcError) {
-      return NextResponse.json(
-        { ok: false, error: rpcError.message },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: rpcError.message }, { status: 400 });
     }
 
-    // ✅ 5) Link final del correo
-    const baseUrl =
-      process.env.PUBLIC_APP_URL_FOR_EMAIL?.trim() ||
-      (process.env.VERCEL ? "https://rinday.app" : "http://localhost:3000");
-
-    const inviteUrl = `${baseUrl}/familia/aceptar?token=${encodeURIComponent(
-      inviteToken
-    )}`;
-
-    // ✅ 6) Enviar email (SIN romper el flujo si falla)
-    const from = process.env.RESEND_FROM?.trim() || "RINDAY <no-reply@rinday.app>";
+    // ✅ 5) Construir link (siempre lo regresamos)
+    const baseUrl = getBaseUrl();
+    const inviteUrl = `${baseUrl}/familia/aceptar?token=${encodeURIComponent(inviteToken)}`;
     const subject = "Te invitaron a unirte a una familia en RINDAY";
 
-    const html = renderInviteEmailHTML({
-      inviterName: inviterName || (userData.user.email ?? "RINDAY"),
-      inviteUrl,
-      inviteeEmail: inviteEmail,
-    });
+    // ✅ 6) Intentar envío (pero NO rompemos el flujo si falla)
+    let email_sent = false;
+    let email_error: string | null = null;
 
-    const { data, error: emailError } = await resend.emails.send({
-      from,
-      to: inviteEmail,
-      subject,
-      html,
-    });
+    try {
+      if (!hasResendKey) {
+        throw new Error("RESEND_API_KEY missing in Vercel env (Production).");
+      }
 
-    if (emailError) {
-      // 🔥 Log completo (esto es lo que necesitamos ver en Vercel logs)
-      console.error("[invite] resend error", {
-        requestId,
-        message: emailError.message,
-        name: (emailError as any).name,
-        statusCode: (emailError as any).statusCode,
-        cause: (emailError as any).cause,
-        // a veces viene "type" o "code"
-        type: (emailError as any).type,
-        code: (emailError as any).code,
+      const { error: emailError } = await resend.emails.send({
         from,
         to: inviteEmail,
+        subject,
+        html: renderInviteEmailHTML({
+          inviterName: inviterName || (userData.user.email ?? "RINDAY"),
+          inviteUrl,
+          inviteeEmail: inviteEmail,
+        }),
       });
 
-      // ✅ No fallar: devolvemos link para "Copiar link"
-      return NextResponse.json(
-        {
-          ok: true,
-          emailSent: false,
-          token: inviteToken,
-          inviteUrl,
-          error: emailError.message,
-        },
-        { status: 200 }
-      );
+      if (emailError) {
+        email_error = emailError.message || "Resend error";
+        console.error("[invite] resend error:", emailError);
+      } else {
+        email_sent = true;
+      }
+    } catch (err: any) {
+      email_error = err?.message ?? "Failed to send email";
+      console.error("[invite] send exception:", err);
     }
 
-    return NextResponse.json(
-      {
-        ok: true,
-        emailSent: true,
-        token: inviteToken,
-        inviteUrl,
-        resendId: data?.id ?? null,
+    // ✅ Respuesta final SIEMPRE 200 (porque la invitación ya se creó)
+    return NextResponse.json({
+      ok: true,
+      token: inviteToken,
+      inviteUrl,
+      email_sent,
+      email_error,
+      // debug seguro (NO expone secretos)
+      debug: {
+        hasResendKey,
+        from,
+        baseUrl,
       },
-      { status: 200 }
-    );
+    });
   } catch (e: any) {
-    console.error("[invite] unexpected error", { requestId, error: e?.message, e });
+    console.error("[invite] fatal:", e);
     return NextResponse.json(
-      { ok: false, error: e?.message ?? "Unknown error" },
+      { error: e?.message ?? "Unknown error" },
       { status: 500 }
     );
   }
