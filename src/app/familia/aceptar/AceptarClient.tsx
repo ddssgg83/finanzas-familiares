@@ -84,19 +84,17 @@ export default function AceptarClient() {
         return;
       }
 
-      // Necesita conexión para aceptar (escritura). Para solo leer invite, también conviene online.
       if (typeof window !== "undefined" && !navigator.onLine) {
         setError("Para aceptar la invitación necesitas conexión a internet.");
         setLoading(false);
         return;
       }
 
-      // Requiere sesión (para aceptar), pero primero intentamos cargar el invite para UX
       const { data: sess } = await supabase.auth.getSession();
       const u = sess.session?.user ?? null;
 
       try {
-        // ✅ Siempre intentamos cargar la invitación para mostrar el correo invitado (aunque no haya sesión)
+        // ✅ Cargar invitación aunque no haya sesión (para mostrar correo invitado)
         const inv = await loadInviteByToken();
         if (!alive) return;
         if (inv) setInvite(inv);
@@ -134,7 +132,9 @@ export default function AceptarClient() {
             .update({ status: "expired" })
             .eq("id", inviteRow.id);
 
-          throw new Error("Esta invitación ya expiró. Pide que te envíen una nueva.");
+          throw new Error(
+            "Esta invitación ya expiró. Pide que te envíen una nueva."
+          );
         }
 
         // 4) Idempotencia
@@ -237,15 +237,10 @@ export default function AceptarClient() {
 
   const invitedEmail = invite?.email ?? null;
 
+  // ✅ OPCIÓN A (la buena): SOLO usamos next=... y que OnboardingClient lo persista.
   const goLogin = (mode: "login" | "signup") => {
-    // Guardamos el token para que onboarding lo regrese aquí (extra backup)
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.setItem("acceptInviteToken", token);
-      } catch {}
-    }
+    const next = `/familia/aceptar?token=${encodeURIComponent(token)}`;
 
-    const next = `/familia/aceptar?token=${token}`;
     const url =
       `/onboarding?next=${encodeURIComponent(next)}` +
       (invitedEmail ? `&email=${encodeURIComponent(invitedEmail)}` : "") +
@@ -295,7 +290,8 @@ export default function AceptarClient() {
                 ✅ Invitación aceptada
               </p>
               <p className="text-[12px] text-slate-600 dark:text-slate-300">
-                Ya eres parte de la familia. Puedes ir al módulo Familia y ver el dashboard familiar.
+                Ya eres parte de la familia. Puedes ir al módulo Familia y ver el
+                dashboard familiar.
               </p>
 
               {invite?.message ? (
@@ -330,7 +326,6 @@ export default function AceptarClient() {
                 {error ?? "Intenta de nuevo."}
               </p>
 
-              {/* Info del invite si alcanzamos a cargarlo */}
               {invite ? (
                 <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
                   <div>
@@ -351,11 +346,11 @@ export default function AceptarClient() {
                 </div>
               ) : null}
 
-              {/* ✅ Si no hay sesión: botones de login/signup + copiar correo si existe */}
               {needsLogin ? (
                 <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
                   <div className="text-[12px] text-slate-700 dark:text-slate-200">
-                    Para aceptar la invitación necesitas iniciar sesión con el correo invitado.
+                    Para aceptar la invitación necesitas iniciar sesión con el correo
+                    invitado.
                   </div>
 
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -385,12 +380,12 @@ export default function AceptarClient() {
                 </div>
               ) : null}
 
-              {/* ✅ UX PRO cuando el correo no coincide */}
               {emailMismatch && invitedEmail ? (
                 <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
                   <div className="text-[12px] text-slate-700 dark:text-slate-200">
                     Estás conectado como{" "}
-                    <span className="font-semibold">{userEmail ?? "—"}</span>, pero esta invitación es para{" "}
+                    <span className="font-semibold">{userEmail ?? "—"}</span>, pero
+                    esta invitación es para{" "}
                     <span className="font-semibold">{invitedEmail}</span>.
                   </div>
 

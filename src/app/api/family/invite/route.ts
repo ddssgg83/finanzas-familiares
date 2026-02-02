@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { createClient } from "@supabase/supabase-js";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// ✅ Importante: Resend funciona mejor en Node (no Edge)
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function escapeHtml(str: string) {
   return str.replace(/[&<>"']/g, (m) => {
@@ -80,8 +82,32 @@ function renderInviteEmailHTML(opts: {
 </html>`;
 }
 
+function safeEmail(raw: unknown) {
+  const e = String(raw ?? "").trim().toLowerCase();
+  if (!e || !e.includes("@")) return null;
+  return e;
+}
+
 export async function POST(req: Request) {
+  const requestId = crypto.randomUUID();
+
   try {
+    // ✅ 0) Validar envs de Resend
+    const RESEND_API_KEY = (process.env.RESEND_API_KEY ?? "").trim();
+    if (!RESEND_API_KEY) {
+      console.error("[invite] missing RESEND_API_KEY", { requestId });
+      return NextResponse.json(
+        {
+          ok: true,
+          emailSent: false,
+          error: "RESEND_API_KEY no está configurada en Vercel (Production).",
+        },
+        { status: 200 }
+      );
+    }
+
+    const resend = new Resend(RESEND_API_KEY);
+
     // ✅ 1) Token desde Authorization: Bearer <access_token>
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.toLowerCase().startsWith("bearer ")
@@ -90,7 +116,7 @@ export async function POST(req: Request) {
 
     if (!token) {
       return NextResponse.json(
-        { error: "Auth session missing! (no bearer token)" },
+        { ok: false, error: "Auth session missing! (no bearer token)" },
         { status: 401 }
       );
     }
@@ -112,7 +138,7 @@ export async function POST(req: Request) {
     const { data: userData, error: userErr } = await supabase.auth.getUser();
     if (userErr || !userData?.user) {
       return NextResponse.json(
-        { error: userErr?.message ?? "Not authenticated" },
+        { ok: false, error: userErr?.message ?? "Not authenticated" },
         { status: 401 }
       );
     }
@@ -126,14 +152,21 @@ export async function POST(req: Request) {
       message?: string | null;
     };
 
-    if (!familyId || !email) {
+    if (!familyId) {
       return NextResponse.json(
-        { error: "Missing familyId or email" },
+        { ok: false, error: "Missing familyId" },
         { status: 400 }
       );
     }
 
-    const inviteEmail = String(email).toLowerCase().trim();
+    const inviteEmail = safeEmail(email);
+    if (!inviteEmail) {
+      return NextResponse.json(
+        { ok: false, error: "Ingresa un correo válido." },
+        { status: 400 }
+      );
+    }
+
     const inviteToken = crypto.randomUUID();
 
     // ✅ 4) RPC como usuario (para que auth.uid() aplique y valide admin)
@@ -146,44 +179,80 @@ export async function POST(req: Request) {
     });
 
     if (rpcError) {
-      return NextResponse.json({ error: rpcError.message }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: rpcError.message },
+        { status: 400 }
+      );
     }
 
-    // ✅ 5) Enviar email
+    // ✅ 5) Link final del correo
+    const baseUrl =
+      process.env.PUBLIC_APP_URL_FOR_EMAIL?.trim() ||
+      (process.env.VERCEL ? "https://rinday.app" : "http://localhost:3000");
 
-// 1) URL base para links del correo
-// - En Vercel: fuerza dominio real
-// - En local: usa localhost (a menos que definas PUBLIC_APP_URL_FOR_EMAIL)
-const baseUrl =
-  (process.env.PUBLIC_APP_URL_FOR_EMAIL?.trim() ||
-    (process.env.VERCEL ? "https://rinday.app" : "http://localhost:3000"));
+    const inviteUrl = `${baseUrl}/familia/aceptar?token=${encodeURIComponent(
+      inviteToken
+    )}`;
 
-// 2) Link final del correo
-const inviteUrl = `${baseUrl}/familia/aceptar?token=${encodeURIComponent(inviteToken)}`;
+    // ✅ 6) Enviar email (SIN romper el flujo si falla)
+    const from = process.env.RESEND_FROM?.trim() || "RINDAY <no-reply@rinday.app>";
+    const subject = "Te invitaron a unirte a una familia en RINDAY";
 
-const from = process.env.RESEND_FROM || "RINDAY <no-reply@rinday.app>";
-const subject = "Te invitaron a unirte a una familia en RINDAY";
+    const html = renderInviteEmailHTML({
+      inviterName: inviterName || (userData.user.email ?? "RINDAY"),
+      inviteUrl,
+      inviteeEmail: inviteEmail,
+    });
 
-const { error: emailError } = await resend.emails.send({
-  from,
-  to: inviteEmail,
-  subject,
-  html: renderInviteEmailHTML({
-    inviterName: inviterName || (userData.user.email ?? "RINDAY"),
-    inviteUrl,
-    inviteeEmail: inviteEmail,
-  }),
-});
+    const { data, error: emailError } = await resend.emails.send({
+      from,
+      to: inviteEmail,
+      subject,
+      html,
+    });
 
-if (emailError) {
-  return NextResponse.json({ error: emailError.message }, { status: 502 });
-}
+    if (emailError) {
+      // 🔥 Log completo (esto es lo que necesitamos ver en Vercel logs)
+      console.error("[invite] resend error", {
+        requestId,
+        message: emailError.message,
+        name: (emailError as any).name,
+        statusCode: (emailError as any).statusCode,
+        cause: (emailError as any).cause,
+        // a veces viene "type" o "code"
+        type: (emailError as any).type,
+        code: (emailError as any).code,
+        from,
+        to: inviteEmail,
+      });
 
-return NextResponse.json({ ok: true, token: inviteToken });
+      // ✅ No fallar: devolvemos link para "Copiar link"
+      return NextResponse.json(
+        {
+          ok: true,
+          emailSent: false,
+          token: inviteToken,
+          inviteUrl,
+          error: emailError.message,
+        },
+        { status: 200 }
+      );
+    }
 
-  } catch (e: any) {
     return NextResponse.json(
-      { error: e?.message ?? "Unknown error" },
+      {
+        ok: true,
+        emailSent: true,
+        token: inviteToken,
+        inviteUrl,
+        resendId: data?.id ?? null,
+      },
+      { status: 200 }
+    );
+  } catch (e: any) {
+    console.error("[invite] unexpected error", { requestId, error: e?.message, e });
+    return NextResponse.json(
+      { ok: false, error: e?.message ?? "Unknown error" },
       { status: 500 }
     );
   }

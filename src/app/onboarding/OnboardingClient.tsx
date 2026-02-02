@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
@@ -61,6 +61,11 @@ const STEPS: Step[] = [
 const ONBOARDING_STORAGE_KEY = "ff_seen_onboarding_v1";
 const ONBOARDING_NEXT_KEY = "rinday_onboarding_next";
 
+// ✅ Pon esto en Vercel: NEXT_PUBLIC_SITE_URL=https://rinday.app
+const SITE_URL =
+  (process.env.NEXT_PUBLIC_SITE_URL ?? "").trim() ||
+  (typeof window !== "undefined" ? window.location.origin : "");
+
 function markSeenOnboarding() {
   try {
     if (typeof window !== "undefined") {
@@ -86,6 +91,18 @@ function safeInternalNext(raw: string | null) {
   return null;
 }
 
+function prettyAuthError(msg?: string) {
+  const m = (msg ?? "").toLowerCase();
+
+  if (m.includes("rate") && m.includes("limit")) {
+    return "Te topaste con el límite de correos (rate limit). Intenta en unos minutos o sube el límite en Supabase Auth → Rate Limits.";
+  }
+  if (m.includes("invalid") && m.includes("email")) {
+    return "Ingresa un correo válido.";
+  }
+  return msg ?? "No se pudo enviar el link. Intenta de nuevo.";
+}
+
 export default function OnboardingClient() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -95,17 +112,23 @@ export default function OnboardingClient() {
   const nextParam = safeInternalNext(sp.get("next"));
 
   // ✅ Si viene modo invitación/auth, no mostramos el tour
-  const isInviteFlow = modeParam === "login" || modeParam === "signup" || !!nextParam || !!emailParam;
+  const isInviteFlow =
+    modeParam === "login" || modeParam === "signup" || !!nextParam || !!emailParam;
 
   // ====== INVITE/AUTH STATE ======
-  const [authMode, setAuthMode] = useState<"login" | "signup">(modeParam === "signup" ? "signup" : "login");
+  const [authMode, setAuthMode] = useState<"login" | "signup">(
+    modeParam === "signup" ? "signup" : "login"
+  );
   const [email, setEmail] = useState(emailParam);
   const [authBusy, setAuthBusy] = useState(false);
   const [authMsg, setAuthMsg] = useState<string | null>(null);
   const [authSent, setAuthSent] = useState(false);
 
+  // cooldown para reenviar (evita spam / rate-limit)
+  const [cooldown, setCooldown] = useState(0);
+  const cooldownRef = useRef<number | null>(null);
+
   const next = useMemo(() => {
-    // Persistimos next para soportar refresh
     if (nextParam) return nextParam;
 
     if (typeof window !== "undefined") {
@@ -147,6 +170,28 @@ export default function OnboardingClient() {
     };
   }, [isInviteFlow, next, router]);
 
+  useEffect(() => {
+    // cleanup cooldown interval
+    return () => {
+      if (cooldownRef.current) window.clearInterval(cooldownRef.current);
+    };
+  }, []);
+
+  const startCooldown = (seconds: number) => {
+    setCooldown(seconds);
+    if (cooldownRef.current) window.clearInterval(cooldownRef.current);
+    cooldownRef.current = window.setInterval(() => {
+      setCooldown((s) => {
+        if (s <= 1) {
+          if (cooldownRef.current) window.clearInterval(cooldownRef.current);
+          cooldownRef.current = null;
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+  };
+
   const sendMagicLink = async () => {
     setAuthBusy(true);
     setAuthMsg(null);
@@ -159,13 +204,13 @@ export default function OnboardingClient() {
         return;
       }
 
-      // Redirect del magic link: si hay next, mandamos allá (ej. /familia/aceptar?token=...)
-      const redirectTo =
-        typeof window !== "undefined"
-          ? `${window.location.origin}${next || "/familia"}`
-          : undefined;
+      // ✅ Redirect FIJO a tu dominio (evita localhost/preview)
+      // ✅ FIX REAL: SIEMPRE pasar por /auth/callback
+// (Supabase necesita exchangeCodeForSession)
+const base = SITE_URL || "https://rinday.app";
+const nextSafe = next || "/familia";
+const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextSafe)}`;
 
-      // login: no crear usuario, signup: sí crear
       const shouldCreateUser = authMode === "signup";
 
       const { error } = await supabase.auth.signInWithOtp({
@@ -179,11 +224,13 @@ export default function OnboardingClient() {
       if (error) throw error;
 
       setAuthSent(true);
+      startCooldown(20);
+
       setAuthMsg(
-        "Listo ✅ Te mandamos un correo con un link para entrar. Ábrelo desde el mismo dispositivo."
+        "Listo ✅ Te mandamos un correo con un link para entrar. Revisa spam/promociones. Ábrelo desde el mismo dispositivo."
       );
     } catch (e: any) {
-      setAuthMsg(e?.message ?? "No se pudo enviar el link. Intenta de nuevo.");
+      setAuthMsg(prettyAuthError(e?.message));
     } finally {
       setAuthBusy(false);
     }
@@ -196,7 +243,7 @@ export default function OnboardingClient() {
     router.replace("/gastos");
   };
 
-  // ====== TOUR STATE (TU CÓDIGO ORIGINAL) ======
+  // ====== TOUR STATE ======
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
 
   const totalSteps = STEPS.length;
@@ -210,8 +257,6 @@ export default function OnboardingClient() {
 
   const finishOnboarding = () => {
     markSeenOnboarding();
-
-    // Si venimos de invitación, priorizamos next
     const target = next || "/gastos";
     router.replace(target);
   };
@@ -225,7 +270,7 @@ export default function OnboardingClient() {
   const handleSkip = () => finishOnboarding();
 
   useEffect(() => {
-    if (isInviteFlow) return; // en modo invitación no activamos teclado del tour
+    if (isInviteFlow) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
@@ -235,19 +280,16 @@ export default function OnboardingClient() {
         finishOnboarding();
         return;
       }
-
       if (key === "enter") {
         e.preventDefault();
         handleNext();
         return;
       }
-
       if (key === "arrowleft") {
         e.preventDefault();
         handlePrev();
         return;
       }
-
       if (key === "arrowright") {
         e.preventDefault();
         handleNext();
@@ -308,10 +350,16 @@ export default function OnboardingClient() {
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 onClick={sendMagicLink}
-                disabled={authBusy}
+                disabled={authBusy || cooldown > 0}
                 className="flex-1 rounded-full bg-sky-400 px-4 py-2 text-[12px] font-semibold text-slate-900 hover:bg-sky-300 disabled:opacity-60"
               >
-                {authBusy ? "Enviando…" : authMode === "signup" ? "Crear cuenta y enviar link" : "Enviar link de acceso"}
+                {authBusy
+                  ? "Enviando…"
+                  : cooldown > 0
+                  ? `Espera ${cooldown}s…`
+                  : authMode === "signup"
+                  ? "Crear cuenta y enviar link"
+                  : "Enviar link de acceso"}
               </button>
 
               <button
@@ -323,21 +371,32 @@ export default function OnboardingClient() {
               </button>
             </div>
 
-            <div className="mt-4 flex items-center justify-between text-[11px] text-slate-400">
-              <button
-                onClick={clearNextAndGoApp}
-                className="rounded-full border border-slate-800 px-3 py-1 hover:bg-slate-900/60"
-              >
-                Ir a la app sin invitación
-              </button>
-
-              {authSent ? (
-                <span className="inline-flex items-center gap-1">
+            {authSent ? (
+              <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400">
+                <span className="inline-flex items-center gap-2">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                   Link enviado
                 </span>
-              ) : null}
-            </div>
+
+                <button
+                  onClick={sendMagicLink}
+                  disabled={authBusy || cooldown > 0}
+                  className="rounded-full border border-slate-800 px-3 py-1 hover:bg-slate-900/60 disabled:opacity-60"
+                >
+                  Reenviar
+                </button>
+              </div>
+            ) : (
+              <div className="mt-4 flex items-center justify-between text-[11px] text-slate-400">
+                <button
+                  onClick={clearNextAndGoApp}
+                  className="rounded-full border border-slate-800 px-3 py-1 hover:bg-slate-900/60"
+                >
+                  Ir a la app sin invitación
+                </button>
+                <span className="text-[10px] opacity-80">{SITE_URL ? "" : ""}</span>
+              </div>
+            )}
           </div>
         </main>
       </div>
@@ -349,14 +408,12 @@ export default function OnboardingClient() {
   // =========================
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-slate-950 px-4 py-6 text-slate-50">
-      {/* Gradientes de fondo */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute -left-40 -top-40 h-72 w-72 rounded-full bg-sky-500/20 blur-3xl" />
         <div className="absolute -right-32 top-10 h-64 w-64 rounded-full bg-emerald-400/15 blur-3xl" />
         <div className="absolute bottom-0 left-1/2 h-64 w-64 -translate-x-1/2 rounded-full bg-violet-500/10 blur-3xl" />
       </div>
 
-      {/* Contenedor principal */}
       <main className="relative z-10 w-full max-w-4xl">
         <div className="mb-4 flex items-center justify-between text-xs text-slate-400">
           <div className="flex items-center gap-2">
@@ -379,7 +436,6 @@ export default function OnboardingClient() {
 
         <section className="overflow-hidden rounded-3xl border border-slate-800/80 bg-slate-950/70 shadow-[0_18px_60px_rgba(0,0,0,0.65)] backdrop-blur-xl">
           <div className="grid gap-0 md:grid-cols-[1.2fr,1fr]">
-            {/* Columna izquierda */}
             <div className="relative border-b border-slate-900/60 p-5 md:border-b-0 md:border-r">
               <div
                 className={cn(
@@ -421,7 +477,6 @@ export default function OnboardingClient() {
                 </ul>
               </div>
 
-              {/* Progreso */}
               <div className="relative mt-6 space-y-2">
                 <div className="flex items-center justify-between text-[11px] text-slate-400">
                   <span>Progreso</span>
@@ -438,12 +493,10 @@ export default function OnboardingClient() {
               </div>
             </div>
 
-            {/* Columna derecha: mock de la app */}
             <div className="relative flex items-stretch justify-center bg-slate-950/90 p-5">
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-slate-900/0 via-slate-900/60 to-slate-950/90" />
 
               <div className="relative flex w-full max-w-xs flex-col items-center justify-center">
-                {/* Marco tipo celular */}
                 <div className="relative w-full max-w-[260px] rounded-[32px] border border-slate-700/70 bg-slate-950/80 p-3 shadow-[0_20px_40px_rgba(0,0,0,0.85)]">
                   <div className="mx-auto mb-3 h-1.5 w-16 rounded-full bg-slate-700/80" />
 
@@ -455,7 +508,6 @@ export default function OnboardingClient() {
                       </span>
                     </div>
 
-                    {/* Tarjeta principal según el paso */}
                     <div
                       className={cn(
                         "relative overflow-hidden rounded-2xl border border-slate-700/80 bg-slate-900/90 p-3 text-[11px]",
@@ -513,37 +565,18 @@ export default function OnboardingClient() {
                                 <p className="font-semibold">$ 550,000</p>
                               </div>
                             </div>
-                            <p className="mt-1 text-[9px] text-emerald-200/90">+ $ 35,000 vs. mes anterior</p>
+                            <p className="mt-1 text-[9px] text-emerald-200/90">
+                              + $ 35,000 vs. mes anterior
+                            </p>
                           </>
                         )}
 
                         {currentStep.id === "familia" && (
                           <>
                             <p className="text-lg font-semibold text-amber-50">$ 18,430</p>
-                            <p className="text-[10px] text-amber-100/90">Gasto familiar este mes</p>
-                            <div className="mt-2 space-y-1.5 text-[9px]">
-                              <div className="flex items-center justify-between rounded-lg bg-slate-900/70 px-2 py-1">
-                                <span className="text-slate-200">Dibri</span>
-                                <span className="text-slate-300">$ 7,850</span>
-                                <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[8px] text-amber-200">
-                                  Esposa
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between rounded-lg bg-slate-900/70 px-2 py-1">
-                                <span className="text-slate-200">David</span>
-                                <span className="text-slate-300">$ 6,120</span>
-                                <span className="rounded-full bg-sky-500/20 px-2 py-0.5 text-[8px] text-sky-200">
-                                  Jefe de familia
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between rounded-lg bg-slate-900/70 px-2 py-1">
-                                <span className="text-slate-200">Sienna</span>
-                                <span className="text-slate-300">$ 4,460</span>
-                                <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[8px] text-emerald-200">
-                                  Hija
-                                </span>
-                              </div>
-                            </div>
+                            <p className="text-[10px] text-amber-100/90">
+                              Gasto familiar este mes
+                            </p>
                           </>
                         )}
                       </div>
@@ -557,7 +590,6 @@ export default function OnboardingClient() {
                       </div>
                     </div>
 
-                    {/* Pildoritas de secciones */}
                     <div className="mt-2 flex items-center justify-between gap-2 text-[9px]">
                       <span className="inline-flex flex-1 items-center justify-center gap-1 rounded-full bg-slate-900/80 px-2 py-1 text-slate-200">
                         <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
@@ -576,7 +608,6 @@ export default function OnboardingClient() {
                 </div>
               </div>
 
-              {/* Controles inferiores */}
               <div className="absolute inset-x-0 bottom-0 flex items-center justify-between border-t border-slate-900/70 bg-slate-950/80 px-5 py-3 text-[11px] text-slate-200">
                 <button
                   onClick={handlePrev}
@@ -598,7 +629,9 @@ export default function OnboardingClient() {
                       onClick={() => setCurrentStepIndex(idx)}
                       className={cn(
                         "h-1.5 rounded-full transition-all",
-                        idx === currentStepIndex ? "w-6 bg-sky-400" : "w-1.5 bg-slate-600 hover:bg-slate-400"
+                        idx === currentStepIndex
+                          ? "w-6 bg-sky-400"
+                          : "w-1.5 bg-slate-600 hover:bg-slate-400"
                       )}
                       aria-label={`Ir al paso ${idx + 1}`}
                     />
