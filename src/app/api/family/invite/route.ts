@@ -1,13 +1,12 @@
+// src/app/api/family/invite/route.ts
 import { NextResponse } from "next/server";
-import { Resend } from "resend";
 import { createClient } from "@supabase/supabase-js";
+import nodemailer from "nodemailer";
 
-export const runtime = "nodejs"; // ✅ importante en Vercel para evitar rarezas
-
-const resend = new Resend(process.env.RESEND_API_KEY);
+export const runtime = "nodejs"; // ✅ necesario para nodemailer en Vercel
 
 function escapeHtml(str: string) {
-  return str.replace(/[&<>"']/g, (m) => {
+  return String(str ?? "").replace(/[&<>"']/g, (m) => {
     const map: Record<string, string> = {
       "&": "&amp;",
       "<": "&lt;",
@@ -23,10 +22,12 @@ function renderInviteEmailHTML(opts: {
   inviterName: string;
   inviteUrl: string;
   inviteeEmail: string;
+  message?: string | null;
 }) {
   const inviterName = escapeHtml(opts.inviterName || "Un miembro de tu familia");
   const inviteeEmail = escapeHtml(opts.inviteeEmail);
   const inviteUrl = opts.inviteUrl;
+  const customMsg = opts.message ? escapeHtml(opts.message) : "";
 
   return `<!DOCTYPE html>
 <html lang="es">
@@ -48,17 +49,27 @@ function renderInviteEmailHTML(opts: {
           </tr>
 
           <tr>
-            <td style="font-size:15px;line-height:1.7;color:#334155;padding-bottom:20px;">
+            <td style="font-size:15px;line-height:1.7;color:#334155;padding-bottom:16px;">
               <strong>${inviterName}</strong> te invitó a unirte a su familia en <strong>RINDAY</strong>.
               <br />
               Este correo fue enviado a: <strong>${inviteeEmail}</strong>
             </td>
           </tr>
 
+          ${
+            customMsg
+              ? `<tr>
+                   <td style="font-size:14px;line-height:1.7;color:#0F172A;background:#F1F5F9;border-radius:12px;padding:12px 14px;margin-bottom:14px;">
+                     <strong>Mensaje:</strong><br/>${customMsg}
+                   </td>
+                 </tr>`
+              : ""
+          }
+
           <tr>
             <td align="center" style="padding:10px 0 24px 0;">
               <a href="${inviteUrl}"
-                 style="display:inline-block;background:#5B5FFF;color:#FFFFFF;
+                 style="display:inline-block;background:#0EA5E9;color:#FFFFFF;
                         padding:14px 22px;border-radius:12px;
                         text-decoration:none;font-weight:700;">
                 Aceptar invitación
@@ -83,25 +94,39 @@ function renderInviteEmailHTML(opts: {
 }
 
 function getBaseUrl() {
-  // ✅ Forzamos dominio real en Vercel sí o sí (evita previews / localhost)
+  // ✅ Link siempre al dominio real
   const explicit = (process.env.PUBLIC_APP_URL_FOR_EMAIL ?? "").trim();
   if (explicit) return explicit;
 
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`; // por si acaso
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return "https://rinday.app";
+}
+
+function getSmtpConfig() {
+  const host = (process.env.SMTP_HOST ?? "").trim();
+  const port = Number((process.env.SMTP_PORT ?? "587").trim());
+  const user = (process.env.SMTP_USER ?? "").trim();
+  const pass = (process.env.SMTP_PASS ?? "").trim();
+
+  // Si no defines SMTP_SECURE, usamos regla típica:
+  // 465 => secure true (SSL)
+  // 587/25 => secure false (STARTTLS)
+  const secureEnv = (process.env.SMTP_SECURE ?? "").trim().toLowerCase();
+  const secure =
+    secureEnv === "true" ? true : secureEnv === "false" ? false : port === 465;
+
+  // A2 a veces requiere TLS y no le gusta “rejectUnauthorized” false.
+  // Lo dejamos true por defecto (seguro).
+  const tlsRejectUnauthorized =
+    (process.env.SMTP_TLS_REJECT_UNAUTHORIZED ?? "true")
+      .trim()
+      .toLowerCase() !== "false";
+
+  return { host, port, user, pass, secure, tlsRejectUnauthorized };
 }
 
 export async function POST(req: Request) {
   try {
-    // ====== VALIDACIONES ENV (sin filtrar secretos) ======
-    const hasResendKey = !!process.env.RESEND_API_KEY;
-    const from = (process.env.RESEND_FROM || "RINDAY <no-reply@rinday.app>").trim();
-
-    if (!hasResendKey) {
-      // Esto explica el 90% de “en local jala / en prod no”
-      console.error("[invite] RESEND_API_KEY missing in env");
-    }
-
     // ✅ 1) Token desde Authorization: Bearer <access_token>
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.toLowerCase().startsWith("bearer ")
@@ -115,7 +140,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ 2) Cliente “como usuario” usando el access_token
+    // ✅ 2) Cliente Supabase “como usuario”
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -162,58 +187,101 @@ export async function POST(req: Request) {
     });
 
     if (rpcError) {
+      // Ej: duplicate key unique_pending
       return NextResponse.json({ error: rpcError.message }, { status: 400 });
     }
 
-    // ✅ 5) Construir link (siempre lo regresamos)
+    // ✅ 5) Link del correo
     const baseUrl = getBaseUrl();
-    const inviteUrl = `${baseUrl}/familia/aceptar?token=${encodeURIComponent(inviteToken)}`;
-    const subject = "Te invitaron a unirte a una familia en RINDAY";
+    const inviteUrl = `${baseUrl}/familia/aceptar?token=${encodeURIComponent(
+      inviteToken
+    )}`;
 
-    // ✅ 6) Intentar envío (pero NO rompemos el flujo si falla)
+    // ✅ 6) SMTP send
+    // A) Forzar from en formato correcto
+    const from = (
+      process.env.SMTP_FROM || `RINDAY <${process.env.SMTP_USER || ""}>`
+    )
+      .trim()
+      .toString();
+
+    const smtp = getSmtpConfig();
+    const hasSmtp =
+      !!smtp.host && !!smtp.port && !!smtp.user && !!smtp.pass && !!from;
+
     let email_sent = false;
     let email_error: string | null = null;
 
+    // B) Debug opcional controlado por ENV
+    const includeDebug = (process.env.DEBUG_EMAIL ?? "").toLowerCase() === "true";
+
     try {
-      if (!hasResendKey) {
-        throw new Error("RESEND_API_KEY missing in Vercel env (Production).");
+      if (!hasSmtp) {
+        throw new Error(
+          "SMTP env missing. Required: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM (or SMTP_USER fallback)"
+        );
       }
 
-      const { error: emailError } = await resend.emails.send({
+      const transporter = nodemailer.createTransport({
+        host: smtp.host,
+        port: smtp.port,
+        secure: smtp.secure,
+        auth: { user: smtp.user, pass: smtp.pass },
+        tls: { rejectUnauthorized: smtp.tlsRejectUnauthorized },
+
+        // ✅ timeouts para Vercel
+        connectionTimeout: 15_000,
+        greetingTimeout: 15_000,
+        socketTimeout: 20_000,
+      });
+
+      // ✅ (opcional) verificar conexión SMTP SOLO si DEBUG_EMAIL=true
+      if (includeDebug) {
+        await transporter.verify();
+      }
+
+      await transporter.sendMail({
         from,
         to: inviteEmail,
-        subject,
+        subject: "Te invitaron a unirte a una familia en RINDAY",
         html: renderInviteEmailHTML({
           inviterName: inviterName || (userData.user.email ?? "RINDAY"),
           inviteUrl,
           inviteeEmail: inviteEmail,
+          message: message ?? null,
         }),
       });
 
-      if (emailError) {
-        email_error = emailError.message || "Resend error";
-        console.error("[invite] resend error:", emailError);
-      } else {
-        email_sent = true;
-      }
+      email_sent = true;
     } catch (err: any) {
-      email_error = err?.message ?? "Failed to send email";
-      console.error("[invite] send exception:", err);
+      email_error = err?.message ?? "Failed to send email via SMTP";
+      console.error("[invite][smtp] error:", err);
     }
 
-    // ✅ Respuesta final SIEMPRE 200 (porque la invitación ya se creó)
+    // ✅ Respuesta SIEMPRE ok true (porque la invitación ya existe)
     return NextResponse.json({
       ok: true,
       token: inviteToken,
       inviteUrl,
       email_sent,
       email_error,
-      // debug seguro (NO expone secretos)
-      debug: {
-        hasResendKey,
-        from,
-        baseUrl,
-      },
+
+      ...(includeDebug
+        ? {
+            debug: {
+              baseUrl,
+              smtp: {
+                host: smtp.host ? "ok" : "missing",
+                port: smtp.port,
+                user: smtp.user ? "ok" : "missing",
+                pass: smtp.pass ? "ok" : "missing",
+                from: from ? "ok" : "missing",
+                secure: smtp.secure,
+                tlsRejectUnauthorized: smtp.tlsRejectUnauthorized,
+              },
+            },
+          }
+        : {}),
     });
   } catch (e: any) {
     console.error("[invite] fatal:", e);
