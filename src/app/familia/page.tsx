@@ -140,7 +140,13 @@ type OfflineOp =
   | {
       kind: "invite";
       id: string;
-      payload: { family_id: string; email: string; role: "admin" | "member"; token: string };
+      payload: {
+        family_id: string;
+        email: string;
+        role: "admin" | "member";
+        token: string;
+        message?: string | null; // ✅ NUEVO
+      };
     }
   | {
       kind: "revoke_invite";
@@ -157,6 +163,7 @@ type OfflineOp =
       id: string;
       payload: { member_id: string; role: "admin" | "member" };
     };
+
 
 function opsKey(userId: string) {
   return `ff-familia-ops-v1:${userId}`;
@@ -329,43 +336,37 @@ export default function FamiliaPage() {
             }
           }
 
-          if (op.kind === "invite") {
+         if (op.kind === "invite") {
   // ✅ Cuando vuelve internet: mandamos la invitación por nuestro API (SMTP)
-  // Nota: aquí NO intentamos “respetar” el token offline, porque el API genera uno nuevo.
-  // Al final hacemos reloadTick para refrescar la lista real desde BD.
+  // Nota: el API genera token real nuevo. Después hacemos reloadTick para refrescar lista real.
 
-  try {
-    const { data: sess } = await supabase.auth.getSession();
-    const accessToken = sess.session?.access_token;
+  const { data: sess } = await supabase.auth.getSession();
+  const accessToken = sess.session?.access_token;
 
-    const res = await fetch("/api/family/invite", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      },
-      body: JSON.stringify({
-        familyId: op.payload.family_id,
-        email: op.payload.email,
-        role: op.payload.role,
-        inviterName: user.email ?? "Jefe de familia",
-        // si luego quieres, también podemos guardar message en ops payload (ver punto opcional abajo)
-      }),
-    });
+  const res = await fetch("/api/family/invite", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+    body: JSON.stringify({
+      familyId: op.payload.family_id,
+      email: op.payload.email,
+      role: op.payload.role,
+      inviterName: user.email ?? "Jefe de familia",
+      message: op.payload.message ?? null, // ✅ NUEVO: mensaje offline->online
+    }),
+  });
 
-    const json = await res.json().catch(() => ({}));
+  const json = await res.json().catch(() => ({}));
 
-    // Si ya existe una invitación pendiente, lo tratamos como “ok” y seguimos
-    if (!res.ok) {
-      const msg = String(json?.error ?? "").toLowerCase();
-      const isDuplicate =
-        msg.includes("duplicate") || msg.includes("unique") || res.status === 409;
+  // Si ya existe una invitación pendiente, lo tratamos como ok y seguimos
+  if (!res.ok) {
+    const msg = String(json?.error ?? "").toLowerCase();
+    const isDuplicate =
+      msg.includes("duplicate") || msg.includes("unique") || res.status === 409;
 
-      if (!isDuplicate) throw new Error(json?.error || "Invite sync failed");
-    }
-  } catch (err) {
-    // Si falla, dejamos la op en remaining para reintentar después
-    throw err;
+    if (!isDuplicate) throw new Error(json?.error || "Invite sync failed");
   }
 }
 
