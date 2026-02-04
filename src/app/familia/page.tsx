@@ -330,43 +330,42 @@ export default function FamiliaPage() {
           }
 
           if (op.kind === "invite") {
-  // 1️⃣ Crear invitación en BD
-  const { data: invite, error } = await supabase
-    .from("family_invites")
-    .insert([
-      {
-        family_id: op.payload.family_id,
+  // ✅ Cuando vuelve internet: mandamos la invitación por nuestro API (SMTP)
+  // Nota: aquí NO intentamos “respetar” el token offline, porque el API genera uno nuevo.
+  // Al final hacemos reloadTick para refrescar la lista real desde BD.
+
+  try {
+    const { data: sess } = await supabase.auth.getSession();
+    const accessToken = sess.session?.access_token;
+
+    const res = await fetch("/api/family/invite", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: JSON.stringify({
+        familyId: op.payload.family_id,
         email: op.payload.email,
         role: op.payload.role,
-        status: "pending",
-        invited_by: user.id,
-        token: op.payload.token,
-      },
-    ])
-    .select()
-    .single();
+        inviterName: user.email ?? "Jefe de familia",
+        // si luego quieres, también podemos guardar message en ops payload (ver punto opcional abajo)
+      }),
+    });
 
-  if (error) throw error;
+    const json = await res.json().catch(() => ({}));
 
-  // 2️⃣ Enviar correo vía Edge Function (Resend)
-  try {
-    const inviteLink =
-  `${window.location.origin}/familia/aceptar?token=${encodeURIComponent(invite.token)}`;
+    // Si ya existe una invitación pendiente, lo tratamos como “ok” y seguimos
+    if (!res.ok) {
+      const msg = String(json?.error ?? "").toLowerCase();
+      const isDuplicate =
+        msg.includes("duplicate") || msg.includes("unique") || res.status === 409;
 
-const { error: mailError } = await supabase.functions.invoke("send-family-invite", {
-  body: {
-    to: invite.email,
-    inviterName: user.email ?? "Jefe de familia",
-    familyName: familyCtx?.familyName || "Tu familia",
-    inviteLink,
-  },
-});
-
-    if (mailError) {
-      console.warn("Invitación creada pero email no enviado", mailError);
+      if (!isDuplicate) throw new Error(json?.error || "Invite sync failed");
     }
   } catch (err) {
-    console.warn("Error enviando email de invitación", err);
+    // Si falla, dejamos la op en remaining para reintentar después
+    throw err;
   }
 }
 
@@ -656,7 +655,7 @@ const { error: mailError } = await supabase.functions.invoke("send-family-invite
   };
 
 // =========================================================
-// Invite
+// Invite (AHORA usa /api/family/invite -> SMTP A2)
 // =========================================================
 const handleInvite = async (e: FormEvent) => {
   e.preventDefault();
@@ -669,65 +668,97 @@ const handleInvite = async (e: FormEvent) => {
   const email = inviteForm.email.trim().toLowerCase();
   if (!email || !email.includes("@")) return alert("Escribe un email válido.");
 
-  const token = safeUUID();
-
   try {
     setSavingInvite(true);
 
-    // 1) Crear invitación en BD
-    const { data: invite, error } = await supabase
-      .from("family_invites")
-      .insert({
+    // ✅ OFFLINE: guardamos op y UI optimista (sin mandar correo)
+    if (isOfflineNow()) {
+      const localToken = safeUUID();
+      const localInvite: FamilyInviteRow = {
+        id: `local_${localToken}`,
         family_id: famId,
         email,
         role: inviteForm.role === "admin" ? "admin" : "member",
         status: "pending",
         invited_by: user.id,
-        token,
-      })
-      .select("id,family_id,email,role,status,invited_by,token,created_at")
-      .single();
+        token: localToken,
+        created_at: new Date().toISOString(),
+      };
 
-    if (error) throw error;
+      setInvites((prev) => [localInvite, ...prev]);
 
-    // 2) UI inmediata
-    setInvites((prev) => [invite as any, ...prev]);
-
-    // 3) Link (usa dominio si existe, si no usa el origin actual)
-    const baseUrl =
-      (process.env.NEXT_PUBLIC_SITE_URL as string | undefined)?.replace(/\/$/, "") ||
-      window.location.origin;
-
-    const inviteLink = `${baseUrl}/familia/aceptar?token=${encodeURIComponent(
-      (invite as any).token
-    )}`;
-
-    // 4) Enviar correo real vía Edge Function (Resend)
-    const { data: mailData, error: mailError } = await supabase.functions.invoke(
-      "send-family-invite",
-      {
-        body: {
-          to: (invite as any).email,
-          inviterName: user.email ?? "Un familiar",
-          familyName: familyCtx?.familyName || "Tu familia",
-          inviteLink,
+      const ops = readOps(user.id);
+      const nextOps: OfflineOp[] = [
+        ...ops,
+        {
+          kind: "invite",
+          id: safeUUID(),
+          payload: {
+            family_id: famId,
+            email,
+            role: inviteForm.role === "admin" ? "admin" : "member",
+            token: localToken,
+          },
         },
-      }
-    );
+      ];
+      writeOps(user.id, nextOps);
+      setPendingOpsCount(nextOps.length);
 
-    if (mailError) {
-      console.error("Error enviando email:", mailError);
-      alert("Invitación creada ✅ (pero el correo falló). Usa 'Copiar link' por ahora.");
-    } else {
-      console.log("Mail OK:", mailData);
+      alert("Invitación guardada ✅ (se enviará cuando vuelva el internet).");
+      setInviteForm({ email: "", role: "member", message: "" });
+      return;
+    }
+
+    // ✅ ONLINE: llamar a nuestro API (SMTP)
+    const { data: sess } = await supabase.auth.getSession();
+    const accessToken = sess.session?.access_token;
+
+    const res = await fetch("/api/family/invite", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: JSON.stringify({
+        familyId: famId,
+        email,
+        role: inviteForm.role === "admin" ? "admin" : "member",
+        inviterName: user.email ?? "Un familiar",
+        message: inviteForm.message || null,
+      }),
+    });
+
+    const json = await res.json().catch(() => ({}));
+
+    if (!res.ok || json?.ok !== true) {
+      throw new Error(json?.error || "No se pudo enviar la invitación.");
+    }
+
+    // ✅ Si quieres UI inmediata: creamos un row “optimista” con token devuelto
+    const optimistic: FamilyInviteRow = {
+      id: json.token || safeUUID(),
+      family_id: famId,
+      email,
+      role: inviteForm.role === "admin" ? "admin" : "member",
+      status: "pending",
+      invited_by: user.id,
+      token: json.token ?? null,
+      created_at: new Date().toISOString(),
+    };
+    setInvites((prev) => [optimistic, ...prev]);
+
+    if (json.email_sent) {
       alert("Invitación enviada ✅");
+    } else {
+      alert("Invitación creada ✅ (pero el correo falló). Usa 'Copiar link' por ahora.");
+      console.warn("SMTP error:", json.email_error);
     }
 
     setInviteForm({ email: "", role: "member", message: "" });
     setReloadTick((n) => n + 1);
-  } catch (err) {
+  } catch (err: any) {
     console.error("Error invitando:", err);
-    alert("No se pudo enviar la invitación.");
+    alert(err?.message ?? "No se pudo enviar la invitación.");
   } finally {
     setSavingInvite(false);
   }
