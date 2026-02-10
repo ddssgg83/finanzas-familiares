@@ -242,6 +242,14 @@ export default function FamiliaPage() {
   const [savingCreateFamily, setSavingCreateFamily] = useState(false);
   const [savingInvite, setSavingInvite] = useState(false);
 
+  // -------- LIMPIEZA INVITES (B + C) --------
+  const [purgeLoading, setPurgeLoading] = useState(false);
+  const [hideCleanupNudge, setHideCleanupNudge] = useState(false);
+  const cleanupNudgeKey = useMemo(() => {
+    if (!user?.id || !effectiveFamilyId) return null;
+    return `ff-family-cleanup-nudge-v1:${user.id}:${effectiveFamilyId}`;
+  }, [user?.id, effectiveFamilyId]);
+
   // =========================================================
   // Helpers UI
   // =========================================================
@@ -312,6 +320,20 @@ export default function FamiliaPage() {
     const cached = readFamilyCtxCache(user.id);
     setCachedFamilyId(cached?.familyId ?? null);
   }, [user?.id]);
+
+  // ✅ leer preferencia de “ocultar aviso limpieza”
+  useEffect(() => {
+    if (!cleanupNudgeKey) {
+      setHideCleanupNudge(false);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(cleanupNudgeKey);
+      setHideCleanupNudge(raw === "1");
+    } catch {
+      setHideCleanupNudge(false);
+    }
+  }, [cleanupNudgeKey]);
 
   const handleSignOut = async () => {
     try {
@@ -587,6 +609,23 @@ export default function FamiliaPage() {
     () => invites.filter((i) => i.status === "pending").length,
     [invites]
   );
+
+  const historicalInvitesCount = useMemo(
+    () => invites.filter((i) => i.status !== "pending").length,
+    [invites]
+  );
+
+  const shouldShowCleanupNudge = useMemo(() => {
+    // B) Aviso automático cuando hay muchas (tú ajustas el umbral si quieres)
+    const THRESHOLD = 8; // “muchas”
+    return (
+      isFamilyOwner &&
+      !offline &&
+      !!effectiveFamilyId &&
+      !hideCleanupNudge &&
+      historicalInvitesCount >= THRESHOLD
+    );
+  }, [isFamilyOwner, offline, effectiveFamilyId, hideCleanupNudge, historicalInvitesCount]);
 
   // =========================================================
   // Create Family
@@ -865,7 +904,7 @@ export default function FamiliaPage() {
     }
   };
 
-  // ✅ borrar invitación del historial (limpieza) — robusto con verificación
+  // ✅ borrar invitación individual (historial) — robusto con verificación
   const handleDeleteInvite = async (inviteId: string) => {
     if (!user) return;
     if (!isFamilyOwner) return;
@@ -885,7 +924,7 @@ export default function FamiliaPage() {
         .from("family_invites")
         .delete()
         .eq("id", inviteId)
-        .select("id"); // 👈 valida que sí borró
+        .select("id"); // valida borrado
 
       if (error) throw error;
 
@@ -900,6 +939,81 @@ export default function FamiliaPage() {
       setInvites(prev); // rollback UI
       alert(err?.message ?? "No se pudo eliminar la invitación.");
     }
+  };
+
+  // ✅ B + C: limpieza masiva (revoked + expired + accepted)
+  const handlePurgeInviteHistory = async () => {
+    if (!user) return;
+    if (!isFamilyOwner) return;
+    if (!effectiveFamilyId) return;
+
+    if (offline) {
+      alert("Necesitas internet para limpiar invitaciones.");
+      return;
+    }
+
+    if (historicalInvitesCount === 0) {
+      alert("No hay invitaciones históricas para limpiar.");
+      return;
+    }
+
+    const ok = window.confirm(
+      `Esto eliminará del historial ${historicalInvitesCount} invitación(es) (ACEPTADAS/REVOCADAS/EXPIRADAS).\n\n¿Continuar?`
+    );
+    if (!ok) return;
+
+    const prev = invites;
+    const statusesToDelete: Array<FamilyInviteRow["status"]> = ["accepted", "revoked", "expired"];
+
+    // UI optimista
+    setInvites((list) => list.filter((i) => !statusesToDelete.includes(i.status)));
+
+    try {
+      setPurgeLoading(true);
+
+      const { data, error } = await supabase
+        .from("family_invites")
+        .delete()
+        .eq("family_id", effectiveFamilyId)
+        .in("status", statusesToDelete)
+        .select("id");
+
+      if (error) throw error;
+
+      const deletedCount = data?.length ?? 0;
+
+      if (deletedCount === 0) {
+        // puede pasar si ya se borraron en otra sesión o RLS bloquea
+        throw new Error("No se eliminó nada (RLS/permiso o ya estaban borradas).");
+      }
+
+      // si el usuario limpió, ya no tiene sentido mostrar el nudge
+      if (cleanupNudgeKey) {
+        try {
+          localStorage.setItem(cleanupNudgeKey, "1");
+        } catch {}
+      }
+      setHideCleanupNudge(true);
+
+      await syncOfflineOps();
+      setReloadTick((n) => n + 1);
+
+      alert(`Listo ✅ Se limpiaron ${deletedCount} invitación(es) del historial.`);
+    } catch (err: any) {
+      console.error("Error limpiando historial:", err);
+      setInvites(prev); // rollback
+      alert(err?.message ?? "No se pudo limpiar el historial.");
+    } finally {
+      setPurgeLoading(false);
+    }
+  };
+
+  const handleHideCleanupNudge = () => {
+    setHideCleanupNudge(true);
+    if (!cleanupNudgeKey) return;
+    try {
+      localStorage.setItem(cleanupNudgeKey, "1");
+    } catch {}
   };
 
   // =========================================================
@@ -960,6 +1074,33 @@ export default function FamiliaPage() {
               <span className="font-semibold">{pendingOpsCount}</span>
             </div>
           ) : null}
+        </section>
+      )}
+
+      {/* B) Aviso automático de limpieza */}
+      {shouldShowCleanupNudge && (
+        <section className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-1">
+              <div className="font-semibold">Tu historial de invitaciones está creciendo</div>
+              <div className="text-[11px] opacity-90">
+                Tienes <span className="font-semibold">{historicalInvitesCount}</span> invitaciones
+                aceptadas/revocadas/expiradas. Puedes limpiarlas para mantener la lista ordenada.
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={handlePurgeInviteHistory}
+                disabled={purgeLoading || offline}
+                title={offline ? "Necesitas internet" : undefined}
+              >
+                {purgeLoading ? "Limpiando..." : "Limpiar historial"}
+              </Button>
+              <LinkButton tone="info" onClick={handleHideCleanupNudge}>
+                Ocultar
+              </LinkButton>
+            </div>
+          </div>
         </section>
       )}
 
@@ -1156,9 +1297,22 @@ export default function FamiliaPage() {
           <Section
             title="Invitaciones"
             right={
-              <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                {invites.length} total
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {invites.length} total
+                </span>
+
+                {/* Botón manual de limpieza */}
+                {isFamilyOwner && historicalInvitesCount > 0 ? (
+                  <Button
+                    onClick={handlePurgeInviteHistory}
+                    disabled={purgeLoading || offline}
+                    title={offline ? "Necesitas internet" : undefined}
+                  >
+                    {purgeLoading ? "Limpiando..." : "Limpiar historial"}
+                  </Button>
+                ) : null}
+              </div>
             }
           >
             {loading ? (
@@ -1169,7 +1323,7 @@ export default function FamiliaPage() {
               <ul className="space-y-2">
                 {invites.map((i) => {
                   const canRevoke = isFamilyOwner && i.status === "pending";
-                  const canDelete = isFamilyOwner && i.status !== "pending";
+                  const canDelete = isFamilyOwner && i.status !== "pending"; // incluye accepted, revoked, expired
                   const canCopy = !!i.token;
 
                   return (
