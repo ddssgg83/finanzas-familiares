@@ -118,10 +118,12 @@ function readFamilyCtxCache(userId: string): FamilyContext | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const p: any = parsed;
     if (
-      typeof (parsed as any).familyId !== "string" ||
-      typeof (parsed as any).familyName !== "string" ||
-      typeof (parsed as any).ownerUserId !== "string"
+      typeof p.familyId !== "string" ||
+      typeof p.familyName !== "string" ||
+      typeof p.ownerUserId !== "string"
     ) {
       return null;
     }
@@ -185,7 +187,7 @@ export default function FamiliaPage() {
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // ✅ NUEVO: online/offline reactivo (para que UI cambie sin recargar)
+  // ✅ Online/offline reactivo
   const [isOnline, setIsOnline] = useState(true);
   useEffect(() => {
     const update = () => setIsOnline(navigator.onLine);
@@ -203,10 +205,10 @@ export default function FamiliaPage() {
   const { familyCtx, familyLoading, familyError, isFamilyOwner, isUsingCachedFamily } =
     useFamilyContext(user);
 
-  // ✅ NUEVO: familyId cacheado para evitar que effectiveFamilyId sea null offline
+  // ✅ familyId cacheado para evitar null offline
   const [cachedFamilyId, setCachedFamilyId] = useState<string | null>(null);
 
-  // ✅ si el usuario crea familia OFFLINE, guardamos un id "optimista"
+  // ✅ optimistic family id (si se crea familia offline)
   const [optimisticFamilyId, setOptimisticFamilyId] = useState<string | null>(null);
 
   // ✅ ORDEN: (online ctx) -> (optimistic) -> (cached from LS)
@@ -239,6 +241,29 @@ export default function FamiliaPage() {
 
   const [savingCreateFamily, setSavingCreateFamily] = useState(false);
   const [savingInvite, setSavingInvite] = useState(false);
+
+  // =========================================================
+  // Helpers UI
+  // =========================================================
+  const buildInviteLink = (token: string) => {
+    if (typeof window === "undefined") return `/familia/aceptar?token=${encodeURIComponent(token)}`;
+    return `${window.location.origin}/familia/aceptar?token=${encodeURIComponent(token)}`;
+  };
+
+  const copyInviteLink = async (token: string | null) => {
+    try {
+      if (!token) {
+        alert("Esta invitación no tiene token.");
+        return;
+      }
+      const link = buildInviteLink(token);
+      await navigator.clipboard.writeText(link);
+      alert("Link copiado ✅");
+    } catch (err) {
+      console.error("Error copiando link:", err);
+      alert("No se pudo copiar el link.");
+    }
+  };
 
   // =========================================================
   // AUTH (offline-safe)
@@ -278,7 +303,7 @@ export default function FamiliaPage() {
     };
   }, []);
 
-  // ✅ cuando ya conozcamos user, leemos familyId del cache inmediato (evita “0 miembros” offline)
+  // ✅ cuando ya conozcamos user, leemos familyId del cache inmediato
   useEffect(() => {
     if (!user) {
       setCachedFamilyId(null);
@@ -350,8 +375,7 @@ export default function FamiliaPage() {
           }
 
           if (op.kind === "invite") {
-            // ⚠️ Ya no generamos invites offline (regla nueva),
-            // pero si quedan ops de versiones anteriores, las intentamos sincronizar.
+            // Compat: por si quedaron ops viejas en LS, intentamos sincronizarlas
             const { data: sess } = await supabase.auth.getSession();
             const accessToken = sess.session?.access_token;
 
@@ -667,7 +691,7 @@ export default function FamiliaPage() {
 
   // =========================================================
   // Invite (usa /api/family/invite -> SMTP)
-  // ✅ REGLA NUEVA: invitaciones requieren internet (no offline queue)
+  // ✅ REGLA: invitaciones requieren internet (no offline queue)
   // =========================================================
   const handleInvite = async (e: FormEvent) => {
     e.preventDefault();
@@ -841,7 +865,7 @@ export default function FamiliaPage() {
     }
   };
 
-  // ✅ NUEVO: borrar invitación del historial (limpieza)
+  // ✅ borrar invitación del historial (limpieza) — robusto con verificación
   const handleDeleteInvite = async (inviteId: string) => {
     if (!user) return;
     if (!isFamilyOwner) return;
@@ -851,21 +875,30 @@ export default function FamiliaPage() {
       return;
     }
 
-    if (!window.confirm("¿Eliminar esta invitación del historial?")) return;
+    if (!window.confirm("¿Eliminar definitivamente esta invitación?")) return;
 
     const prev = invites;
     setInvites((list) => list.filter((i) => i.id !== inviteId));
 
     try {
-      const { error } = await supabase.from("family_invites").delete().eq("id", inviteId);
+      const { data, error } = await supabase
+        .from("family_invites")
+        .delete()
+        .eq("id", inviteId)
+        .select("id"); // 👈 valida que sí borró
+
       if (error) throw error;
+
+      if (!data || data.length === 0) {
+        throw new Error("No se eliminó (RLS/permiso o el registro ya no existe).");
+      }
 
       await syncOfflineOps();
       setReloadTick((n) => n + 1);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error eliminando invitación:", err);
       setInvites(prev); // rollback UI
-      alert("No se pudo eliminar la invitación (posible RLS).");
+      alert(err?.message ?? "No se pudo eliminar la invitación.");
     }
   };
 
@@ -1048,7 +1081,9 @@ export default function FamiliaPage() {
                   Acción restringida
                 </span>
               ) : offline ? (
-                <span className="text-[11px] text-slate-500 dark:text-slate-400">Requiere internet</span>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Requiere internet
+                </span>
               ) : null
             }
           >
@@ -1134,12 +1169,8 @@ export default function FamiliaPage() {
               <ul className="space-y-2">
                 {invites.map((i) => {
                   const canRevoke = isFamilyOwner && i.status === "pending";
-                  const canDelete = isFamilyOwner && i.status !== "pending"; // ✅ borrar historial (revoked/expired/accepted)
-
-                  const inviteLink =
-                    typeof window !== "undefined"
-                      ? `${window.location.origin}/familia/aceptar?token=${i.token}`
-                      : `/familia/aceptar?token=${i.token}`;
+                  const canDelete = isFamilyOwner && i.status !== "pending";
+                  const canCopy = !!i.token;
 
                   return (
                     <ListItem
@@ -1160,59 +1191,29 @@ export default function FamiliaPage() {
                         </>
                       }
                       right={
-                        canRevoke ? (
-                          <div className="flex items-center gap-2">
-                            <LinkButton
-                              tone="info"
-                              onClick={async () => {
-                                try {
-                                  if (!i.token) {
-                                    alert("Esta invitación no tiene token.");
-                                    return;
-                                  }
-                                  await navigator.clipboard.writeText(inviteLink);
-                                  alert("Link copiado ✅");
-                                } catch (err) {
-                                  console.error("Error copiando link:", err);
-                                  alert("No se pudo copiar el link.");
-                                }
-                              }}
-                            >
+                        <div className="flex items-center gap-2">
+                          {canCopy ? (
+                            <LinkButton tone="info" onClick={() => copyInviteLink(i.token)}>
                               Copiar link
                             </LinkButton>
+                          ) : null}
 
+                          {canRevoke ? (
                             <LinkButton tone="danger" onClick={() => handleRevokeInvite(i.id)}>
                               Revocar
                             </LinkButton>
-                          </div>
-                        ) : canDelete ? (
-                          <div className="flex items-center gap-2">
-                            <LinkButton
-                              tone="info"
-                              onClick={async () => {
-                                try {
-                                  if (!i.token) {
-                                    alert("Esta invitación no tiene token.");
-                                    return;
-                                  }
-                                  await navigator.clipboard.writeText(inviteLink);
-                                  alert("Link copiado ✅");
-                                } catch (err) {
-                                  console.error("Error copiando link:", err);
-                                  alert("No se pudo copiar el link.");
-                                }
-                              }}
-                            >
-                              Copiar link
-                            </LinkButton>
+                          ) : null}
 
+                          {canDelete ? (
                             <LinkButton tone="danger" onClick={() => handleDeleteInvite(i.id)}>
                               Eliminar
                             </LinkButton>
-                          </div>
-                        ) : (
-                          <span className="text-[11px] text-slate-500 dark:text-slate-400">—</span>
-                        )
+                          ) : null}
+
+                          {!canCopy && !canRevoke && !canDelete ? (
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400">—</span>
+                          ) : null}
+                        </div>
                       }
                     />
                   );
