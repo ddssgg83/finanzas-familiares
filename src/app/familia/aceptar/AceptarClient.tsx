@@ -1,3 +1,7 @@
+// =======================================
+// FILE: src/app/familia/aceptar/AceptarClient.tsx
+// =======================================
+
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -5,6 +9,14 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { PageShell } from "@/components/ui/PageShell";
 import { AppHeader } from "@/components/AppHeader";
+import {
+  Button,
+  Card,
+  EmptyState,
+  Help,
+  LinkButton,
+  Section,
+} from "@/components/ui/kit";
 
 type InviteRow = {
   id: string;
@@ -12,9 +24,7 @@ type InviteRow = {
   email: string;
   role: "admin" | "member";
   status: "pending" | "accepted" | "revoked" | "expired";
-  invited_by: string | null;
-  token: string | null;
-  created_at: string;
+  created_at: string | null;
 
   expires_at: string | null;
   accepted_at: string | null;
@@ -22,11 +32,12 @@ type InviteRow = {
   message: string | null;
 };
 
-function isExpired(expiresAt: string | null) {
-  if (!expiresAt) return false;
-  const exp = new Date(expiresAt).getTime();
-  if (!Number.isFinite(exp)) return false;
-  return Date.now() > exp;
+function formatDateMX(iso: string) {
+  try {
+    return new Date(iso).toLocaleString("es-MX");
+  } catch {
+    return iso;
+  }
 }
 
 export default function AceptarClient() {
@@ -47,194 +58,9 @@ export default function AceptarClient() {
   const [emailMismatch, setEmailMismatch] = useState(false);
   const [copied, setCopied] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [accepting, setAccepting] = useState(false);
 
   const canRun = useMemo(() => !!token, [token]);
-
-  useEffect(() => {
-    let alive = true;
-
-    const loadInviteByToken = async (): Promise<InviteRow | null> => {
-      if (!token) return null;
-
-      const { data: inv, error: invErr } = await supabase
-        .from("family_invites")
-        .select(
-          "id,family_id,email,role,status,invited_by,token,created_at,expires_at,accepted_at,token_used,message"
-        )
-        .eq("token", token)
-        .maybeSingle();
-
-      if (invErr) throw invErr;
-      if (!inv) return null;
-      return inv as InviteRow;
-    };
-
-    const run = async () => {
-      setLoading(true);
-      setError(null);
-      setSuccess(false);
-      setInvite(null);
-      setNeedsLogin(false);
-      setEmailMismatch(false);
-      setCopied(false);
-
-      if (!token) {
-        setError("Falta el token de invitación.");
-        setLoading(false);
-        return;
-      }
-
-      if (typeof window !== "undefined" && !navigator.onLine) {
-        setError("Para aceptar la invitación necesitas conexión a internet.");
-        setLoading(false);
-        return;
-      }
-
-      const { data: sess } = await supabase.auth.getSession();
-      const u = sess.session?.user ?? null;
-
-      try {
-        // ✅ Cargar invitación aunque no haya sesión (para mostrar correo invitado)
-        const inv = await loadInviteByToken();
-        if (!alive) return;
-        if (inv) setInvite(inv);
-
-        if (!u) {
-          setNeedsLogin(true);
-          setError("Necesitas iniciar sesión para aceptar la invitación.");
-          setLoading(false);
-          return;
-        }
-
-        if (!alive) return;
-        setUserEmail(u.email ?? null);
-        setUserId(u.id);
-
-        if (!inv) {
-          throw new Error("Invitación no encontrada o token inválido.");
-        }
-
-        const inviteRow = inv;
-
-        // 2) Validar correo
-        const myEmail = (u.email ?? "").toLowerCase().trim();
-        const invEmail = (inviteRow.email ?? "").toLowerCase().trim();
-
-        if (!myEmail || invEmail !== myEmail) {
-          setEmailMismatch(true);
-          throw new Error("Esta invitación no corresponde a tu correo.");
-        }
-
-        // 3) Expiración
-        if (inviteRow.status === "pending" && isExpired(inviteRow.expires_at)) {
-          await supabase
-            .from("family_invites")
-            .update({ status: "expired" })
-            .eq("id", inviteRow.id);
-
-          throw new Error(
-            "Esta invitación ya expiró. Pide que te envíen una nueva."
-          );
-        }
-
-        // 4) Idempotencia
-        const alreadyUsed =
-          inviteRow.token_used === true || inviteRow.status === "accepted";
-
-        if (alreadyUsed) {
-          const { data: existing, error: existErr } = await supabase
-            .from("family_members")
-            .select("id,status")
-            .eq("family_id", inviteRow.family_id)
-            .eq("user_id", u.id)
-            .maybeSingle();
-
-          if (existErr) throw existErr;
-
-          if (!existing) {
-            throw new Error(
-              "La invitación ya fue usada. Si no apareces como miembro, pide que te inviten de nuevo."
-            );
-          }
-
-          await supabase
-            .from("family_members")
-            .update({ status: "active" })
-            .eq("id", (existing as any).id);
-
-          if (!alive) return;
-          setSuccess(true);
-          setLoading(false);
-          return;
-        }
-
-        // 5) Estados bloqueados
-        if (inviteRow.status !== "pending") {
-          throw new Error(
-            `Esta invitación ya no está pendiente (estado: ${inviteRow.status}).`
-          );
-        }
-
-        // 6) Insertar/activar miembro
-        const { data: existing, error: existErr } = await supabase
-          .from("family_members")
-          .select("id,status,role")
-          .eq("family_id", inviteRow.family_id)
-          .eq("user_id", u.id)
-          .maybeSingle();
-
-        if (existErr) throw existErr;
-
-        if (!existing) {
-          const { error: insErr } = await supabase.from("family_members").insert([
-            {
-              family_id: inviteRow.family_id,
-              user_id: u.id,
-              full_name: u.email ?? "Miembro",
-              invited_email: u.email ?? null,
-              role: inviteRow.role,
-              status: "active",
-            },
-          ]);
-          if (insErr) throw insErr;
-        } else {
-          const { error: updMemErr } = await supabase
-            .from("family_members")
-            .update({ status: "active", role: inviteRow.role })
-            .eq("id", (existing as any).id);
-          if (updMemErr) throw updMemErr;
-        }
-
-        // 7) Marcar invitación accepted + token_used
-        const nowISO = new Date().toISOString();
-        const { error: updErr } = await supabase
-          .from("family_invites")
-          .update({
-            status: "accepted",
-            accepted_at: nowISO,
-            token_used: true,
-          })
-          .eq("id", inviteRow.id);
-
-        if (updErr) throw updErr;
-
-        if (!alive) return;
-        setSuccess(true);
-      } catch (e: any) {
-        if (!alive) return;
-        setError(e?.message ?? "No se pudo aceptar la invitación.");
-      } finally {
-        if (!alive) return;
-        setLoading(false);
-      }
-    };
-
-    run();
-    return () => {
-      alive = false;
-    };
-  }, [token]);
-
   const invitedEmail = invite?.email ?? null;
 
   // ✅ OPCIÓN A (la buena): SOLO usamos next=... y que OnboardingClient lo persista.
@@ -268,6 +94,159 @@ export default function AceptarClient() {
     }
   };
 
+  const fetchPreview = async (): Promise<InviteRow | null> => {
+    const res = await fetch("/api/family/accept", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, mode: "preview" }),
+    });
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json?.ok !== true) {
+      throw new Error(json?.error || "No se pudo cargar la invitación.");
+    }
+
+    return (json.invite ?? null) as InviteRow | null;
+  };
+
+  const acceptInvite = async (accessToken: string) => {
+    const res = await fetch("/api/family/accept", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ token, mode: "accept" }),
+    });
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json?.ok !== true) {
+      const code = String(json?.code ?? "");
+      if (code === "NEEDS_LOGIN") {
+        setNeedsLogin(true);
+      }
+      if (code === "EMAIL_MISMATCH") {
+        setEmailMismatch(true);
+      }
+      throw new Error(json?.error || "No se pudo aceptar la invitación.");
+    }
+  };
+
+  useEffect(() => {
+    let alive = true;
+
+    const run = async () => {
+      setLoading(true);
+      setError(null);
+      setSuccess(false);
+      setInvite(null);
+      setNeedsLogin(false);
+      setEmailMismatch(false);
+      setCopied(false);
+
+      if (!token) {
+        setError("Falta el token de invitación.");
+        setLoading(false);
+        return;
+      }
+
+      if (typeof window !== "undefined" && !navigator.onLine) {
+        setError("Para aceptar la invitación necesitas conexión a internet.");
+        setLoading(false);
+        return;
+      }
+
+      try {
+        // 1) Preview server-side (sin depender de RLS)
+        const inv = await fetchPreview();
+        if (!alive) return;
+        setInvite(inv);
+
+        // 2) Sesión
+        const { data: sess } = await supabase.auth.getSession();
+        const u = sess.session?.user ?? null;
+
+        if (!u) {
+          setNeedsLogin(true);
+          setError("Necesitas iniciar sesión para aceptar la invitación.");
+          setLoading(false);
+          return;
+        }
+
+        if (!alive) return;
+        setUserEmail(u.email ?? null);
+        setUserId(u.id);
+
+        // 3) Accept server-side (valida email + idempotencia)
+        const accessToken = sess.session?.access_token;
+        if (!accessToken) {
+          setNeedsLogin(true);
+          setError("Sesión inválida. Vuelve a iniciar sesión.");
+          setLoading(false);
+          return;
+        }
+
+        await acceptInvite(accessToken);
+        if (!alive) return;
+
+        setSuccess(true);
+
+        // refrescar preview (para status accepted/message)
+        const inv2 = await fetchPreview().catch(() => null);
+        if (!alive) return;
+        if (inv2) setInvite(inv2);
+      } catch (e: any) {
+        if (!alive) return;
+        setError(e?.message ?? "No se pudo aceptar la invitación.");
+      } finally {
+        if (!alive) return;
+        setLoading(false);
+      }
+    };
+
+    run();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const onTryAgain = async () => {
+    if (!token) return;
+    if (typeof window !== "undefined" && !navigator.onLine) {
+      setError("Necesitas conexión a internet.");
+      return;
+    }
+
+    try {
+      setAccepting(true);
+      setError(null);
+
+      const { data: sess } = await supabase.auth.getSession();
+      const accessToken = sess.session?.access_token;
+      const u = sess.session?.user ?? null;
+
+      if (!u || !accessToken) {
+        setNeedsLogin(true);
+        setError("Necesitas iniciar sesión para aceptar la invitación.");
+        return;
+      }
+
+      setUserEmail(u.email ?? null);
+      setUserId(u.id);
+
+      await acceptInvite(accessToken);
+      setSuccess(true);
+
+      const inv2 = await fetchPreview().catch(() => null);
+      if (inv2) setInvite(inv2);
+    } catch (e: any) {
+      setError(e?.message ?? "No se pudo aceptar la invitación.");
+    } finally {
+      setAccepting(false);
+    }
+  };
+
   return (
     <main className="flex min-h-screen flex-col pb-16 md:pb-4">
       <AppHeader
@@ -279,145 +258,128 @@ export default function AceptarClient() {
       />
 
       <PageShell maxWidth="3xl">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          {loading ? (
-            <p className="text-sm text-slate-600 dark:text-slate-300">
-              Procesando invitación…
-            </p>
-          ) : success ? (
-            <div className="space-y-2">
-              <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-200">
-                ✅ Invitación aceptada
-              </p>
-              <p className="text-[12px] text-slate-600 dark:text-slate-300">
-                Ya eres parte de la familia. Puedes ir al módulo Familia y ver el
-                dashboard familiar.
-              </p>
-
-              {invite?.message ? (
-                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
-                  <div className="font-semibold">Mensaje:</div>
-                  <div className="mt-1">{invite.message}</div>
+        <Card>
+          <Section
+            title={success ? "✅ Invitación aceptada" : "Aceptar invitación"}
+            subtitle={
+              success
+                ? "Ya eres parte de la familia."
+                : "Verificamos tu token y tu sesión para unirte de forma segura."
+            }
+            right={
+              invite?.status ? (
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Estado: <span className="font-semibold">{invite.status}</span>
+                </span>
+              ) : null
+            }
+          >
+            {loading ? (
+              <EmptyState>Procesando invitación…</EmptyState>
+            ) : success ? (
+              <div className="space-y-3">
+                <div className="text-[12px] text-slate-600 dark:text-slate-300">
+                  Puedes ir al módulo Familia y ver el dashboard familiar.
                 </div>
-              ) : null}
 
-              <div className="mt-3 flex flex-wrap gap-2">
-                <a
-                  href="/familia"
-                  className="rounded-full bg-sky-600 px-4 py-2 text-[12px] font-semibold text-white hover:bg-sky-700"
-                >
-                  Ir a Familia
-                </a>
-                <a
-                  href="/familia/dashboard"
-                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900"
-                >
-                  Ir a Dashboard Familiar
-                </a>
+                {invite?.message ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-[12px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                    <div className="font-semibold">Mensaje</div>
+                    <div className="mt-1">{invite.message}</div>
+                  </div>
+                ) : null}
+
+                <div className="flex flex-wrap gap-2">
+                  <a href="/familia">
+                    <Button>Ir a Familia</Button>
+                  </a>
+                  <a href="/familia/dashboard">
+                    <Button>Ir a Dashboard Familiar</Button>
+                  </a>
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-sm font-semibold text-rose-700 dark:text-rose-200">
-                No se pudo aceptar la invitación
-              </p>
-
-              <p className="text-[12px] text-slate-600 dark:text-slate-300">
-                {error ?? "Intenta de nuevo."}
-              </p>
-
-              {invite ? (
-                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
-                  <div>
-                    Invitación para:{" "}
-                    <span className="font-semibold">{invite.email}</span>
-                  </div>
-                  <div>
-                    Estado: <span className="font-semibold">{invite.status}</span>
-                  </div>
-                  {invite.expires_at && (
-                    <div>
-                      Expira:{" "}
-                      <span className="font-semibold">
-                        {new Date(invite.expires_at).toLocaleString("es-MX")}
-                      </span>
-                    </div>
-                  )}
+            ) : (
+              <div className="space-y-3">
+                <div className="text-[12px] text-slate-600 dark:text-slate-300">
+                  {error ?? "Intenta de nuevo."}
                 </div>
-              ) : null}
 
-              {needsLogin ? (
-                <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
-                  <div className="text-[12px] text-slate-700 dark:text-slate-200">
-                    Para aceptar la invitación necesitas iniciar sesión con el correo
-                    invitado.
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      onClick={() => goLogin("login")}
-                      className="rounded-full bg-slate-900 px-4 py-2 text-[12px] font-semibold text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
-                    >
-                      Iniciar sesión
-                    </button>
-
-                    <button
-                      onClick={() => goLogin("signup")}
-                      className="rounded-full border border-slate-200 bg-white px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900"
-                    >
-                      Crear cuenta
-                    </button>
-
-                    {invitedEmail ? (
-                      <button
-                        onClick={onCopyInvitedEmail}
-                        className="rounded-full border border-slate-200 bg-white px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900"
-                      >
-                        {copied ? "Copiado ✅" : "Copiar correo invitado"}
-                      </button>
+                {invite ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                    <div>
+                      Invitación para:{" "}
+                      <span className="font-semibold">{invite.email}</span>
+                    </div>
+                    <div>
+                      Rol: <span className="font-semibold">{invite.role}</span>
+                    </div>
+                    {invite.expires_at ? (
+                      <div>
+                        Expira:{" "}
+                        <span className="font-semibold">{formatDateMX(invite.expires_at)}</span>
+                      </div>
                     ) : null}
                   </div>
-                </div>
-              ) : null}
+                ) : null}
 
-              {emailMismatch && invitedEmail ? (
-                <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
-                  <div className="text-[12px] text-slate-700 dark:text-slate-200">
-                    Estás conectado como{" "}
-                    <span className="font-semibold">{userEmail ?? "—"}</span>, pero
-                    esta invitación es para{" "}
-                    <span className="font-semibold">{invitedEmail}</span>.
+                {!canRun ? (
+                  <Help>
+                    Asegúrate de abrir el link con <code>?token=...</code>
+                  </Help>
+                ) : null}
+
+                {needsLogin ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
+                    <div className="text-[12px] text-slate-700 dark:text-slate-200">
+                      Para aceptar la invitación necesitas iniciar sesión con el correo invitado.
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button onClick={() => goLogin("login")}>Iniciar sesión</Button>
+                      <Button onClick={() => goLogin("signup")}>Crear cuenta</Button>
+
+                      {invitedEmail ? (
+                        <LinkButton tone="info" onClick={onCopyInvitedEmail}>
+                          {copied ? "Copiado ✅" : "Copiar correo invitado"}
+                        </LinkButton>
+                      ) : null}
+                    </div>
                   </div>
+                ) : null}
 
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      onClick={onSignOutAndGoLogin}
-                      disabled={signingOut}
-                      className="rounded-full bg-slate-900 px-4 py-2 text-[12px] font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
-                    >
-                      {signingOut
-                        ? "Cerrando sesión…"
-                        : "Cerrar sesión e ingresar con el correo invitado"}
-                    </button>
+                {emailMismatch && invitedEmail ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
+                    <div className="text-[12px] text-slate-700 dark:text-slate-200">
+                      Estás conectado como{" "}
+                      <span className="font-semibold">{userEmail ?? "—"}</span>, pero esta invitación
+                      es para{" "}
+                      <span className="font-semibold">{invitedEmail}</span>.
+                    </div>
 
-                    <button
-                      onClick={onCopyInvitedEmail}
-                      className="rounded-full border border-slate-200 bg-white px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900"
-                    >
-                      {copied ? "Copiado ✅" : "Copiar correo invitado"}
-                    </button>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button onClick={onSignOutAndGoLogin} disabled={signingOut}>
+                        {signingOut ? "Cerrando sesión…" : "Cerrar sesión e ingresar con el correo invitado"}
+                      </Button>
+
+                      <LinkButton tone="info" onClick={onCopyInvitedEmail}>
+                        {copied ? "Copiado ✅" : "Copiar correo invitado"}
+                      </LinkButton>
+                    </div>
                   </div>
-                </div>
-              ) : null}
+                ) : null}
 
-              {!canRun && (
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Asegúrate de abrir el link con <code>?token=...</code>
-                </p>
-              )}
-            </div>
-          )}
-        </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={onTryAgain} disabled={accepting || !canRun}>
+                    {accepting ? "Intentando…" : "Intentar de nuevo"}
+                  </Button>
+                  <a href="/familia">
+                    <LinkButton tone="info">Ir a Familia</LinkButton>
+                  </a>
+                </div>
+              </div>
+            )}
+          </Section>
+        </Card>
       </PageShell>
     </main>
   );

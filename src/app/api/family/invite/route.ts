@@ -1,10 +1,16 @@
-// src/app/api/family/invite/route.ts
+// =======================================
+// FILE: src/app/api/family/invite/route.ts
+// =======================================
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
 
 export const runtime = "nodejs"; // ✅ necesario para nodemailer en Vercel
 
+// ===============================
+// Helpers
+// ===============================
 function escapeHtml(str: string) {
   return String(str ?? "").replace(/[&<>"']/g, (m) => {
     const map: Record<string, string> = {
@@ -94,7 +100,6 @@ function renderInviteEmailHTML(opts: {
 }
 
 function getBaseUrl() {
-  // ✅ Link siempre al dominio real
   const explicit = (process.env.PUBLIC_APP_URL_FOR_EMAIL ?? "").trim();
   if (explicit) return explicit;
 
@@ -108,15 +113,10 @@ function getSmtpConfig() {
   const user = (process.env.SMTP_USER ?? "").trim();
   const pass = (process.env.SMTP_PASS ?? "").trim();
 
-  // Si no defines SMTP_SECURE, usamos regla típica:
-  // 465 => secure true (SSL)
-  // 587/25 => secure false (STARTTLS)
   const secureEnv = (process.env.SMTP_SECURE ?? "").trim().toLowerCase();
   const secure =
     secureEnv === "true" ? true : secureEnv === "false" ? false : port === 465;
 
-  // A2 a veces requiere TLS y no le gusta “rejectUnauthorized” false.
-  // Lo dejamos true por defecto (seguro).
   const tlsRejectUnauthorized =
     (process.env.SMTP_TLS_REJECT_UNAUTHORIZED ?? "true")
       .trim()
@@ -125,94 +125,182 @@ function getSmtpConfig() {
   return { host, port, user, pass, secure, tlsRejectUnauthorized };
 }
 
+function getBearerToken(req: Request) {
+  const h = req.headers.get("authorization") || req.headers.get("Authorization");
+  if (!h) return null;
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m?.[1] ?? null;
+}
+
+function isUuidLike(v: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(v || "")
+  );
+}
+
+function isEmailLike(v: string) {
+  const s = String(v || "").trim();
+  if (!s || s.length > 254) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+}
+
+function isDuplicateRpc(err: any) {
+  // Postgres unique violation = 23505
+  const code = (err?.code ?? "").toString();
+  const msg = (err?.message ?? "").toString().toLowerCase();
+  return code === "23505" || msg.includes("duplicate") || msg.includes("unique");
+}
+
+// ===============================
+// Route
+// ===============================
 export async function POST(req: Request) {
   try {
-    // ✅ 1) Token desde Authorization: Bearer <access_token>
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.toLowerCase().startsWith("bearer ")
-      ? authHeader.slice(7).trim()
-      : "";
-
-    if (!token) {
+    // ✅ 1) Validar sesión usando access token
+    const accessToken = getBearerToken(req);
+    if (!accessToken) {
       return NextResponse.json(
-        { error: "Auth session missing! (no bearer token)" },
+        { ok: false, error: "Auth session missing! (no bearer token)" },
         { status: 401 }
       );
     }
 
-    // ✅ 2) Cliente Supabase “como usuario”
-    const supabase = createClient(
+    // ✅ Admin client (service role) para DB + validar user con token
+    const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
       {
-        global: { headers: { Authorization: `Bearer ${token}` } },
+        auth: { persistSession: false, autoRefreshToken: false },
       }
     );
 
-    // ✅ 3) Validar usuario
-    const { data: userData, error: userErr } = await supabase.auth.getUser();
-    if (userErr || !userData?.user) {
-      return NextResponse.json(
-        { error: userErr?.message ?? "Not authenticated" },
-        { status: 401 }
-      );
+    const { data: userRes, error: userErr } =
+      await supabaseAdmin.auth.getUser(accessToken);
+
+    if (userErr || !userRes?.user) {
+      return NextResponse.json({ ok: false, error: "Not authenticated" }, { status: 401 });
     }
 
-    const body = await req.json();
+    const user = userRes.user;
+
+    // ✅ 2) Body
+    const body = await req.json().catch(() => ({}));
     const { familyId, email, role, inviterName, message } = body as {
       familyId: string;
       email: string;
-      role?: string;
+      role?: "admin" | "member" | string;
       inviterName?: string;
       message?: string | null;
     };
 
     if (!familyId || !email) {
       return NextResponse.json(
-        { error: "Missing familyId or email" },
+        { ok: false, error: "Missing familyId or email" },
         { status: 400 }
       );
     }
 
-    const inviteEmail = String(email).toLowerCase().trim();
-    const inviteToken = crypto.randomUUID();
+    if (!isUuidLike(familyId)) {
+      return NextResponse.json({ ok: false, error: "Invalid familyId (uuid)" }, { status: 400 });
+    }
 
-    // ✅ 4) Crear invitación (DB)
-    const { error: rpcError } = await supabase.rpc("create_family_invite", {
+    const inviteEmail = String(email).toLowerCase().trim();
+    if (!isEmailLike(inviteEmail)) {
+      return NextResponse.json({ ok: false, error: "Invalid email" }, { status: 400 });
+    }
+
+    // Tu CHECK constraint parece ser 'admin'/'member'
+    const inviteRole = role === "admin" ? "admin" : "member";
+
+    // ✅ 3) Validar OWNER (tú decidiste esta regla; tus policies dejan admin también)
+    const { data: ownerCheck, error: ownerErr } = await supabaseAdmin
+      .from("family_groups")
+      .select("id,owner_user_id")
+      .eq("id", familyId)
+      .maybeSingle();
+
+    if (ownerErr) {
+      return NextResponse.json({ ok: false, error: ownerErr.message }, { status: 400 });
+    }
+    if (!ownerCheck) {
+      return NextResponse.json({ ok: false, error: "Family not found" }, { status: 404 });
+    }
+    if ((ownerCheck as any).owner_user_id !== user.id) {
+      return NextResponse.json(
+        { ok: false, error: "Sólo el jefe de familia puede invitar miembros." },
+        { status: 403 }
+      );
+    }
+
+    // ✅ 4) Crear token + insertar invitación vía RPC
+    const inviteToken =
+      (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : undefined) ||
+      `tok_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+    let created = true;
+
+    const { error: rpcError } = await supabaseAdmin.rpc("create_family_invite", {
       p_family_id: familyId,
       p_email: inviteEmail,
-      p_role: role ?? "member",
+      p_role: inviteRole,
       p_token: inviteToken,
       p_message: message ?? null,
     });
 
+    // Si el RPC marca duplicado: reusar token vigente pendiente (mejor UX)
     if (rpcError) {
-      // Ej: duplicate key unique_pending
-      return NextResponse.json({ error: rpcError.message }, { status: 400 });
+      if (isDuplicateRpc(rpcError)) {
+        created = false;
+
+        const { data: existing, error: existingErr } = await supabaseAdmin
+          .from("family_invites")
+          .select("token, created_at, status, revoked_at, expires_at, token_used")
+          .eq("family_id", familyId)
+          .eq("email", inviteEmail)
+          .eq("status", "pending")
+          .is("revoked_at", null)
+          .eq("token_used", false)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (existingErr) {
+          // Si no podemos leer el existente, devolvemos el error original del RPC
+          return NextResponse.json({ ok: false, error: rpcError.message }, { status: 400 });
+        }
+
+        const existingToken = (existing as any)?.token as string | null;
+
+        const baseUrl = getBaseUrl();
+        const finalToken = existingToken ?? inviteToken;
+        const inviteUrl = `${baseUrl}/familia/aceptar?token=${encodeURIComponent(finalToken)}`;
+
+        return NextResponse.json({
+          ok: true,
+          token: finalToken,
+          inviteUrl,
+          email_sent: false,
+          email_error: "Invite already exists (pending). Reusing link.",
+          created,
+        });
+      }
+
+      return NextResponse.json({ ok: false, error: rpcError.message }, { status: 400 });
     }
 
     // ✅ 5) Link del correo
     const baseUrl = getBaseUrl();
-    const inviteUrl = `${baseUrl}/familia/aceptar?token=${encodeURIComponent(
-      inviteToken
-    )}`;
+    const inviteUrl = `${baseUrl}/familia/aceptar?token=${encodeURIComponent(inviteToken)}`;
 
-    // ✅ 6) SMTP send
-    // A) Forzar from en formato correcto
-    const from = (
-      process.env.SMTP_FROM || `RINDAY <${process.env.SMTP_USER || ""}>`
-    )
-      .trim()
-      .toString();
+    // ✅ 6) SMTP send (si falla, NO tronamos la invitación)
+    const from = (process.env.SMTP_FROM || `RINDAY <${process.env.SMTP_USER || ""}>`).trim();
 
     const smtp = getSmtpConfig();
-    const hasSmtp =
-      !!smtp.host && !!smtp.port && !!smtp.user && !!smtp.pass && !!from;
+    const hasSmtp = !!smtp.host && !!smtp.port && !!smtp.user && !!smtp.pass && !!from;
 
     let email_sent = false;
     let email_error: string | null = null;
 
-    // B) Debug opcional controlado por ENV
     const includeDebug = (process.env.DEBUG_EMAIL ?? "").toLowerCase() === "true";
 
     try {
@@ -228,24 +316,26 @@ export async function POST(req: Request) {
         secure: smtp.secure,
         auth: { user: smtp.user, pass: smtp.pass },
         tls: { rejectUnauthorized: smtp.tlsRejectUnauthorized },
-
-        // ✅ timeouts para Vercel
         connectionTimeout: 15_000,
         greetingTimeout: 15_000,
         socketTimeout: 20_000,
       });
 
-      // ✅ (opcional) verificar conexión SMTP SOLO si DEBUG_EMAIL=true
       if (includeDebug) {
         await transporter.verify();
       }
+
+      const niceInviter =
+        inviterName?.trim() ||
+        (user.user_metadata as any)?.full_name ||
+        (user.email ?? "RINDAY");
 
       await transporter.sendMail({
         from,
         to: inviteEmail,
         subject: "Te invitaron a unirte a una familia en RINDAY",
         html: renderInviteEmailHTML({
-          inviterName: inviterName || (userData.user.email ?? "RINDAY"),
+          inviterName: niceInviter,
           inviteUrl,
           inviteeEmail: inviteEmail,
           message: message ?? null,
@@ -258,14 +348,14 @@ export async function POST(req: Request) {
       console.error("[invite][smtp] error:", err);
     }
 
-    // ✅ Respuesta SIEMPRE ok true (porque la invitación ya existe)
+    // ✅ Respuesta SIEMPRE ok true (porque la invitación ya existe en DB)
     return NextResponse.json({
       ok: true,
       token: inviteToken,
       inviteUrl,
       email_sent,
       email_error,
-
+      created,
       ...(includeDebug
         ? {
             debug: {
@@ -286,7 +376,7 @@ export async function POST(req: Request) {
   } catch (e: any) {
     console.error("[invite] fatal:", e);
     return NextResponse.json(
-      { error: e?.message ?? "Unknown error" },
+      { ok: false, error: e?.message ?? "Unknown error" },
       { status: 500 }
     );
   }

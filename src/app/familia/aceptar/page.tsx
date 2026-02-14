@@ -1,3 +1,7 @@
+// =======================================
+// FILE: src/app/familia/aceptar/page.tsx
+// =======================================
+
 import { Suspense } from "react";
 import AceptarClient from "./AceptarClient";
 
