@@ -6,7 +6,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
 
-export const runtime = "nodejs"; // ✅ necesario para nodemailer en Vercel
+export const runtime = "nodejs"; // necesario para nodemailer en Vercel
+export const dynamic = "force-dynamic";
 
 // ===============================
 // Helpers
@@ -145,10 +146,16 @@ function isEmailLike(v: string) {
 }
 
 function isDuplicateRpc(err: any) {
-  // Postgres unique violation = 23505
   const code = (err?.code ?? "").toString();
   const msg = (err?.message ?? "").toString().toLowerCase();
   return code === "23505" || msg.includes("duplicate") || msg.includes("unique");
+}
+
+function toHttpStatusFromSupabaseError(errMsg: string) {
+  const msg = (errMsg || "").toLowerCase();
+  if (msg.includes("not authenticated") || msg.includes("not_authenticated")) return 401;
+  if (msg.includes("not allowed") || msg.includes("permission")) return 403;
+  return 400;
 }
 
 // ===============================
@@ -156,7 +163,7 @@ function isDuplicateRpc(err: any) {
 // ===============================
 export async function POST(req: Request) {
   try {
-    // ✅ 1) Validar sesión usando access token
+    // 1) Token
     const accessToken = getBearerToken(req);
     if (!accessToken) {
       return NextResponse.json(
@@ -165,25 +172,23 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ Admin client (service role) para DB + validar user con token
-    const supabaseAdmin = createClient(
+    // 2) Supabase USER client (anon + Authorization header)
+    const supabaseUser = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
         auth: { persistSession: false, autoRefreshToken: false },
+        global: { headers: { Authorization: `Bearer ${accessToken}` } },
       }
     );
 
-    const { data: userRes, error: userErr } =
-      await supabaseAdmin.auth.getUser(accessToken);
-
+    const { data: userRes, error: userErr } = await supabaseUser.auth.getUser();
     if (userErr || !userRes?.user) {
       return NextResponse.json({ ok: false, error: "Not authenticated" }, { status: 401 });
     }
-
     const user = userRes.user;
 
-    // ✅ 2) Body
+    // 3) Body
     const body = await req.json().catch(() => ({}));
     const { familyId, email, role, inviterName, message } = body as {
       familyId: string;
@@ -199,7 +204,6 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-
     if (!isUuidLike(familyId)) {
       return NextResponse.json({ ok: false, error: "Invalid familyId (uuid)" }, { status: 400 });
     }
@@ -209,37 +213,54 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Invalid email" }, { status: 400 });
     }
 
-    // Tu CHECK constraint parece ser 'admin'/'member'
+    // Tu CHECK constraint: 'admin'/'member'
     const inviteRole = role === "admin" ? "admin" : "member";
 
-    // ✅ 3) Validar OWNER (tú decidiste esta regla; tus policies dejan admin también)
-    const { data: ownerCheck, error: ownerErr } = await supabaseAdmin
+    // 4) Permiso: permitir OWNER o ADMIN (recomendado)
+    //    - Owner can read family_groups por policy (owner_user_id)
+    //    - Admin debería pasar is_family_admin(family_id)
+    const { data: fg, error: fgErr } = await supabaseUser
       .from("family_groups")
-      .select("id,owner_user_id")
+      .select("id, owner_user_id")
       .eq("id", familyId)
       .maybeSingle();
 
-    if (ownerErr) {
-      return NextResponse.json({ ok: false, error: ownerErr.message }, { status: 400 });
+    if (fgErr) {
+      return NextResponse.json({ ok: false, error: fgErr.message }, { status: 400 });
     }
-    if (!ownerCheck) {
+    if (!fg) {
       return NextResponse.json({ ok: false, error: "Family not found" }, { status: 404 });
     }
-    if ((ownerCheck as any).owner_user_id !== user.id) {
+
+    const isOwner = (fg as any).owner_user_id === user.id;
+
+    let isAdmin = false;
+    if (!isOwner) {
+      const { data: adminRes, error: adminErr } = await supabaseUser.rpc("is_family_admin", {
+        _family_id: familyId,
+      });
+
+      if (adminErr) {
+        return NextResponse.json({ ok: false, error: adminErr.message }, { status: 400 });
+      }
+      isAdmin = !!adminRes;
+    }
+
+    if (!isOwner && !isAdmin) {
       return NextResponse.json(
-        { ok: false, error: "Sólo el jefe de familia puede invitar miembros." },
+        { ok: false, error: "not allowed" },
         { status: 403 }
       );
     }
 
-    // ✅ 4) Crear token + insertar invitación vía RPC
+    // 5) Crear token + insertar invitación vía RPC (IMPORTANTE: como USUARIO)
     const inviteToken =
       (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : undefined) ||
       `tok_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
     let created = true;
 
-    const { error: rpcError } = await supabaseAdmin.rpc("create_family_invite", {
+    const { error: rpcError } = await supabaseUser.rpc("create_family_invite", {
       p_family_id: familyId,
       p_email: inviteEmail,
       p_role: inviteRole,
@@ -247,12 +268,12 @@ export async function POST(req: Request) {
       p_message: message ?? null,
     });
 
-    // Si el RPC marca duplicado: reusar token vigente pendiente (mejor UX)
     if (rpcError) {
+      // Duplicado: reusar token vigente pendiente
       if (isDuplicateRpc(rpcError)) {
         created = false;
 
-        const { data: existing, error: existingErr } = await supabaseAdmin
+        const { data: existing, error: existingErr } = await supabaseUser
           .from("family_invites")
           .select("token, created_at, status, revoked_at, expires_at, token_used")
           .eq("family_id", familyId)
@@ -265,12 +286,13 @@ export async function POST(req: Request) {
           .maybeSingle();
 
         if (existingErr) {
-          // Si no podemos leer el existente, devolvemos el error original del RPC
-          return NextResponse.json({ ok: false, error: rpcError.message }, { status: 400 });
+          return NextResponse.json(
+            { ok: false, error: rpcError.message },
+            { status: toHttpStatusFromSupabaseError(rpcError.message) }
+          );
         }
 
         const existingToken = (existing as any)?.token as string | null;
-
         const baseUrl = getBaseUrl();
         const finalToken = existingToken ?? inviteToken;
         const inviteUrl = `${baseUrl}/familia/aceptar?token=${encodeURIComponent(finalToken)}`;
@@ -285,14 +307,17 @@ export async function POST(req: Request) {
         });
       }
 
-      return NextResponse.json({ ok: false, error: rpcError.message }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: rpcError.message },
+        { status: toHttpStatusFromSupabaseError(rpcError.message) }
+      );
     }
 
-    // ✅ 5) Link del correo
+    // 6) Link del correo
     const baseUrl = getBaseUrl();
     const inviteUrl = `${baseUrl}/familia/aceptar?token=${encodeURIComponent(inviteToken)}`;
 
-    // ✅ 6) SMTP send (si falla, NO tronamos la invitación)
+    // 7) SMTP send (si falla, NO tronamos la invitación)
     const from = (process.env.SMTP_FROM || `RINDAY <${process.env.SMTP_USER || ""}>`).trim();
 
     const smtp = getSmtpConfig();
@@ -321,9 +346,7 @@ export async function POST(req: Request) {
         socketTimeout: 20_000,
       });
 
-      if (includeDebug) {
-        await transporter.verify();
-      }
+      if (includeDebug) await transporter.verify();
 
       const niceInviter =
         inviterName?.trim() ||
@@ -348,7 +371,7 @@ export async function POST(req: Request) {
       console.error("[invite][smtp] error:", err);
     }
 
-    // ✅ Respuesta SIEMPRE ok true (porque la invitación ya existe en DB)
+    // ✅ Respuesta ok true (la invitación ya existe en DB)
     return NextResponse.json({
       ok: true,
       token: inviteToken,
