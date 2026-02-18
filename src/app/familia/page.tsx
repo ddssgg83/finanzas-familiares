@@ -1,3 +1,6 @@
+// =======================================
+// FILE: src/app/familia/page.tsx
+// =======================================
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
@@ -134,11 +137,9 @@ function readFamilyCtxCache(userId: string): FamilyContext | null {
 }
 
 // =========================================================
-// ✅ PUNTO 1: Query directo para obtener MI rol desde BD
-// (Si esto falla -> la UI cae a "member" y todo se restringe)
+// PUNTO 1: Query directo para obtener MI rol desde BD
 // =========================================================
 async function fetchMyMembership(userId: string) {
-  // Nota: usamos userId ya conocido (evita dudas con sesión/cookies)
   const { data, error } = await supabase
     .from("family_members")
     .select("family_id, role, status")
@@ -218,8 +219,7 @@ export default function FamiliaPage() {
   const offline = !isOnline;
 
   // -------- FAMILY CTX --------
-  const { familyCtx, familyLoading, familyError, isFamilyOwner, isUsingCachedFamily } =
-    useFamilyContext(user);
+  const { familyCtx, familyLoading, familyError, isUsingCachedFamily } = useFamilyContext(user);
 
   // ✅ familyId cacheado para evitar null offline
   const [cachedFamilyId, setCachedFamilyId] = useState<string | null>(null);
@@ -227,7 +227,7 @@ export default function FamiliaPage() {
   // ✅ optimistic family id (si se crea familia offline)
   const [optimisticFamilyId, setOptimisticFamilyId] = useState<string | null>(null);
 
-  // ✅ NUEVO: rol y familyId leídos DIRECTO de family_members (online)
+  // ✅ rol y familyId leídos DIRECTO de family_members (online)
   const [myRole, setMyRole] = useState<"owner" | "admin" | "member">("member");
   const [dbFamilyId, setDbFamilyId] = useState<string | null>(null);
   const [roleLoading, setRoleLoading] = useState(false);
@@ -349,7 +349,7 @@ export default function FamiliaPage() {
   }, [user?.id]);
 
   // =========================================================
-  // ✅ PUNTO 1 aplicado: leer MI rol desde BD (family_members)
+  // Leer MI rol desde BD (family_members)
   // =========================================================
   useEffect(() => {
     let alive = true;
@@ -362,7 +362,6 @@ export default function FamiliaPage() {
         return;
       }
 
-      // Offline: no intentamos leer BD, nos quedamos con lo que haya
       if (isOfflineNow()) {
         setRoleError(null);
         return;
@@ -374,23 +373,24 @@ export default function FamiliaPage() {
 
         const res = await fetchMyMembership(user.id);
 
+        // debug útil
         console.log("[FAMILY] uid", user.id);
         console.log("[FAMILY] my membership", res);
 
         if (!alive) return;
 
         if (res.error) {
-          // Esto normalmente significa RLS SELECT bloqueando
           setMyRole("member");
           setDbFamilyId(null);
           setRoleError(res.error.message ?? "No pude leer tu rol (RLS).");
           return;
         }
 
-        const row = res.data as null | { family_id: string; role: "owner" | "admin" | "member"; status: string };
+        const row = res.data as
+          | null
+          | { family_id: string; role: "owner" | "admin" | "member"; status: string };
 
         if (!row) {
-          // No hay fila activa -> member por fallback
           setMyRole("member");
           setDbFamilyId(null);
           setRoleError("No encontré tu membresía activa en family_members.");
@@ -411,7 +411,6 @@ export default function FamiliaPage() {
     }
 
     loadRole();
-
     return () => {
       alive = false;
     };
@@ -419,8 +418,6 @@ export default function FamiliaPage() {
 
   // ✅ UI gating basado en BD (no en cache)
   const isFamilyOwnerUI = myRole === "owner";
-  // si algún día permites admin para invitar:
-  // const isFamilyAdminOrOwnerUI = myRole === "owner" || myRole === "admin";
 
   // ✅ leer preferencia de “ocultar aviso limpieza”
   useEffect(() => {
@@ -501,7 +498,6 @@ export default function FamiliaPage() {
           }
 
           if (op.kind === "invite") {
-            // Compat: por si quedaron ops viejas en LS, intentamos sincronizarlas
             const { data: sess } = await supabase.auth.getSession();
             const accessToken = sess.session?.access_token;
 
@@ -658,13 +654,29 @@ export default function FamiliaPage() {
         const mems = (membersRes.data ?? []) as FamilyMemberRow[];
         const invs = (invitesRes.data ?? []) as FamilyInviteRow[];
 
+        // debug
+        console.log("[FAMILY] data fetch", {
+          famId,
+          members: mems.length,
+          invites: invs.length,
+          invitesError: invitesRes.error?.message ?? null,
+        });
+
         setFamilyGroup(group);
         setMembers(mems);
-        setInvites(invs);
+
+        // ✅ FIX: no borres invites si el query regresa vacío y tú ya tenías (optimista/cache)
+        setInvites((prev) => {
+          if (invitesRes.error) return prev;
+          if (invs.length === 0 && prev.length > 0) return prev;
+          return invs;
+        });
 
         writeCache(groupK, group);
         writeCache(membersK, mems);
-        writeCache(invitesK, invs);
+
+        // cachea invites SOLO si no hubo error
+        if (!invitesRes.error) writeCache(invitesK, invs);
 
         await syncOfflineOps();
       } catch (err: any) {
@@ -720,8 +732,7 @@ export default function FamiliaPage() {
   );
 
   const shouldShowCleanupNudge = useMemo(() => {
-    // B) Aviso automático cuando hay muchas (tú ajustas el umbral si quieres)
-    const THRESHOLD = 8; // “muchas”
+    const THRESHOLD = 8;
     return (
       isFamilyOwnerUI &&
       !offline &&
@@ -834,7 +845,6 @@ export default function FamiliaPage() {
 
   // =========================================================
   // Invite (usa /api/family/invite -> SMTP)
-  // ✅ REGLA: invitaciones requieren internet (no offline queue)
   // =========================================================
   const handleInvite = async (e: FormEvent) => {
     e.preventDefault();
@@ -889,7 +899,16 @@ export default function FamiliaPage() {
         token: json.token ?? null,
         created_at: new Date().toISOString(),
       };
+
       setInvites((prev) => [optimistic, ...prev]);
+
+      // ✅ cachear el optimistic para que no “desaparezca” si el load() trae []
+      try {
+        const scope = { userId: user.id, familyId: famId };
+        const invitesK = cacheKey("family_invites", scope);
+        const current = readCache<FamilyInviteRow[]>(invitesK, []);
+        writeCache(invitesK, [optimistic, ...current]);
+      } catch {}
 
       if (json.email_sent) {
         alert("Invitación enviada ✅");
@@ -1008,7 +1027,6 @@ export default function FamiliaPage() {
     }
   };
 
-  // ✅ borrar invitación individual (historial) — robusto con verificación
   const handleDeleteInvite = async (inviteId: string) => {
     if (!user) return;
     if (!isFamilyOwnerUI) return;
@@ -1028,7 +1046,7 @@ export default function FamiliaPage() {
         .from("family_invites")
         .delete()
         .eq("id", inviteId)
-        .select("id"); // valida borrado
+        .select("id");
 
       if (error) throw error;
 
@@ -1040,12 +1058,11 @@ export default function FamiliaPage() {
       setReloadTick((n) => n + 1);
     } catch (err: any) {
       console.error("Error eliminando invitación:", err);
-      setInvites(prev); // rollback UI
+      setInvites(prev);
       alert(err?.message ?? "No se pudo eliminar la invitación.");
     }
   };
 
-  // ✅ B + C: limpieza masiva (revoked + expired + accepted)
   const handlePurgeInviteHistory = async () => {
     if (!user) return;
     if (!isFamilyOwnerUI) return;
@@ -1069,7 +1086,6 @@ export default function FamiliaPage() {
     const prev = invites;
     const statusesToDelete: Array<FamilyInviteRow["status"]> = ["accepted", "revoked", "expired"];
 
-    // UI optimista
     setInvites((list) => list.filter((i) => !statusesToDelete.includes(i.status)));
 
     try {
@@ -1085,13 +1101,8 @@ export default function FamiliaPage() {
       if (error) throw error;
 
       const deletedCount = data?.length ?? 0;
+      if (deletedCount === 0) throw new Error("No se eliminó nada.");
 
-      if (deletedCount === 0) {
-        // puede pasar si ya se borraron en otra sesión o RLS bloquea
-        throw new Error("No se eliminó nada (RLS/permiso o ya estaban borradas).");
-      }
-
-      // si el usuario limpió, ya no tiene sentido mostrar el nudge
       if (cleanupNudgeKey) {
         try {
           localStorage.setItem(cleanupNudgeKey, "1");
@@ -1105,7 +1116,7 @@ export default function FamiliaPage() {
       alert(`Listo ✅ Se limpiaron ${deletedCount} invitación(es) del historial.`);
     } catch (err: any) {
       console.error("Error limpiando historial:", err);
-      setInvites(prev); // rollback
+      setInvites(prev);
       alert(err?.message ?? "No se pudo limpiar el historial.");
     } finally {
       setPurgeLoading(false);
@@ -1181,7 +1192,6 @@ export default function FamiliaPage() {
         </section>
       )}
 
-      {/* Debug visible (solo si algo está mal con rol online) */}
       {!offline && roleError ? (
         <section className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
           <div className="font-semibold">No pude confirmar tu rol desde la base de datos</div>
@@ -1191,7 +1201,6 @@ export default function FamiliaPage() {
         </section>
       ) : null}
 
-      {/* B) Aviso automático de limpieza */}
       {shouldShowCleanupNudge && (
         <section className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -1407,15 +1416,199 @@ export default function FamiliaPage() {
           </Section>
         </Card>
 
-        {/* ... el resto del archivo sigue igual (Invitaciones / Miembros / etc.) */}
-        {/* IMPORTANTE: No cambié tu lógica de render de Invitaciones/Miembros excepto el gating de owner */}
-        {/* Para ahorrar espacio, no duplico aquí lo que no cambió. */}
+        <Card>
+          <Section
+            title="Invitaciones"
+            right={
+              <div className="flex items-center gap-3">
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {invites.length} total
+                </span>
+
+                {isFamilyOwnerUI && historicalInvitesCount > 0 ? (
+                  <Button
+                    onClick={handlePurgeInviteHistory}
+                    disabled={purgeLoading || offline}
+                    title={offline ? "Necesitas internet" : undefined}
+                  >
+                    {purgeLoading ? "Limpiando..." : "Limpiar historial"}
+                  </Button>
+                ) : null}
+              </div>
+            }
+          >
+            {loading ? (
+              <EmptyState>Cargando invitaciones...</EmptyState>
+            ) : invites.length === 0 ? (
+              <EmptyState>Aún no tienes invitaciones.</EmptyState>
+            ) : (
+              <ul className="space-y-2">
+                {invites.map((i) => {
+                  const canRevoke = isFamilyOwnerUI && i.status === "pending";
+                  const canDelete = isFamilyOwnerUI && i.status !== "pending";
+                  const canCopy = !!i.token;
+
+                  return (
+                    <ListItem
+                      key={i.id}
+                      left={
+                        <>
+                          <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                            {i.email}
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                            Rol: {i.role.toUpperCase()} · Estado: {i.status}
+                          </div>
+                          {i.created_at && (
+                            <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+                              {formatDateDisplay(i.created_at)}
+                            </div>
+                          )}
+                        </>
+                      }
+                      right={
+                        <div className="flex items-center gap-2">
+                          {canCopy ? (
+                            <LinkButton tone="info" onClick={() => copyInviteLink(i.token)}>
+                              Copiar link
+                            </LinkButton>
+                          ) : null}
+
+                          {canRevoke ? (
+                            <LinkButton tone="danger" onClick={() => handleRevokeInvite(i.id)}>
+                              Revocar
+                            </LinkButton>
+                          ) : null}
+
+                          {canDelete ? (
+                            <LinkButton tone="danger" onClick={() => handleDeleteInvite(i.id)}>
+                              Eliminar
+                            </LinkButton>
+                          ) : null}
+
+                          {!canCopy && !canRevoke && !canDelete ? (
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400">—</span>
+                          ) : null}
+                        </div>
+                      }
+                    />
+                  );
+                })}
+              </ul>
+            )}
+          </Section>
+        </Card>
       </section>
 
-      {/* 👇👇👇 A PARTIR DE AQUÍ, PEGA TU MISMO RESTO SIN CAMBIOS */}
-      {/* (Invitaciones list, Miembros list, dataError, Siguiente paso...) */}
+      {/* Miembros */}
+      <section className="mt-4">
+        <Card>
+          <Section
+            title="Miembros"
+            right={
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                {members.length} total
+              </span>
+            }
+          >
+            {loading ? (
+              <EmptyState>Cargando miembros...</EmptyState>
+            ) : members.length === 0 ? (
+              <EmptyState>
+                {isOfflineNow() && (familyCtx?.activeMembers ?? 0) > 0
+                  ? "No pude leer la lista completa sin internet, pero tu familia existe (snapshot guardado)."
+                  : "No hay miembros cargados todavía (o aún no existe la familia)."}
+              </EmptyState>
+            ) : (
+              <ul className="space-y-2">
+                {members.map((m) => {
+                  const isMe = m.user_id === user.id;
 
-      {/* NOTA: en tu versión final debes conservar el resto del JSX tal cual lo tenías */}
+                  const label =
+                    m.full_name ||
+                    m.invited_email ||
+                    (m.user_id ? `Usuario ${m.user_id.slice(0, 8)}` : "Miembro");
+
+                  const canEditThis = isFamilyOwnerUI && !isMe && m.role !== "owner";
+
+                  return (
+                    <ListItem
+                      key={m.id}
+                      left={
+                        <>
+                          <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                            {label}{" "}
+                            {isMe ? (
+                              <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                                (Tú)
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                            Rol: {m.role.toUpperCase()} · Estado: {m.status}
+                          </div>
+                          {m.created_at && (
+                            <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+                              {formatDateDisplay(m.created_at)}
+                            </div>
+                          )}
+                        </>
+                      }
+                      right={
+                        canEditThis ? (
+                          <div className="flex flex-col items-end gap-2 md:flex-row md:items-center">
+                            <Select
+                              value={m.role === "admin" ? "admin" : "member"}
+                              onChange={(e) =>
+                                handleChangeRole(
+                                  m.id,
+                                  e.target.value === "admin" ? "admin" : "member"
+                                )
+                              }
+                            >
+                              <option value="member">Miembro</option>
+                              <option value="admin">Admin</option>
+                            </Select>
+                            <LinkButton tone="danger" onClick={() => handleRemoveMember(m.id)}>
+                              Remover
+                            </LinkButton>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400">—</span>
+                        )
+                      }
+                    />
+                  );
+                })}
+              </ul>
+            )}
+          </Section>
+        </Card>
+      </section>
+
+      {dataError && (
+        <section className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
+          {dataError}
+        </section>
+      )}
+
+      <section className="mt-4">
+        <Card>
+          <Section title="Siguiente paso" subtitle="Para completar el módulo Familia al 100%">
+            <div className="space-y-2 text-[12px] text-slate-600 dark:text-slate-300">
+              <p>
+                1) <span className="font-semibold">Aceptar invitación</span>: ya está listo el flujo con token.
+              </p>
+              <p>
+                2) <span className="font-semibold">Tarjetas compartidas</span>: tabla puente para asignar tarjetas a miembros.
+              </p>
+              <p>
+                3) <span className="font-semibold">Permisos/RLS</span>: afinar qué ve owner/admin vs miembro.
+              </p>
+            </div>
+          </Section>
+        </Card>
+      </section>
     </PageShell>
   );
 }
