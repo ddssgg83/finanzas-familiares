@@ -81,9 +81,9 @@ function isOfflineNow() {
 }
 
 function safeUUID() {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const w: any = typeof window !== "undefined" ? window : null;
-  if (w?.crypto?.randomUUID) return w.crypto.randomUUID();
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
   return `local_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
@@ -121,8 +121,7 @@ function readFamilyCtxCache(userId: string): FamilyContext | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const p: any = parsed;
+    const p = parsed as Record<string, unknown>;
     if (
       typeof p.familyId !== "string" ||
       typeof p.familyName !== "string" ||
@@ -140,11 +139,26 @@ function readFamilyCtxCache(userId: string): FamilyContext | null {
 // PUNTO 1: Query directo para obtener MI rol desde BD
 // =========================================================
 async function fetchMyMembership(userId: string) {
+  const ownerRes = await supabase
+    .from("family_groups")
+    .select("id")
+    .eq("owner_user_id", userId)
+    .limit(1)
+    .maybeSingle();
+
+  if (ownerRes.data?.id) {
+    return {
+      data: { family_id: ownerRes.data.id, role: "owner" as const, status: "active" },
+      error: null,
+    };
+  }
+
   const { data, error } = await supabase
     .from("family_members")
     .select("family_id, role, status")
     .eq("user_id", userId)
     .eq("status", "active")
+    .limit(1)
     .maybeSingle();
 
   return { data, error };
@@ -363,6 +377,9 @@ export default function FamiliaPage() {
       }
 
       if (isOfflineNow()) {
+        if (familyCtx?.ownerUserId === user.id || familyGroup?.owner_user_id === user.id) {
+          setMyRole("owner");
+        }
         setRoleError(null);
         return;
       }
@@ -417,7 +434,11 @@ export default function FamiliaPage() {
   }, [user?.id, isOnline]);
 
   // ✅ UI gating basado en BD (no en cache)
-  const isFamilyOwnerUI = myRole === "owner";
+  const isFamilyOwnerUI =
+    myRole === "owner" ||
+    familyCtx?.ownerUserId === user?.id ||
+    familyGroup?.owner_user_id === user?.id;
+  const canManageInvitesUI = isFamilyOwnerUI || myRole === "admin";
 
   // ✅ leer preferencia de “ocultar aviso limpieza”
   useEffect(() => {
@@ -650,6 +671,10 @@ export default function FamiliaPage() {
         if (membersRes.error) console.warn("Error cargando family_members", membersRes.error);
         if (invitesRes.error) console.warn("Error cargando family_invites", invitesRes.error);
 
+        const cachedGroup = readCache<FamilyGroupRow | null>(groupK, null);
+        const cachedMembers = readCache<FamilyMemberRow[]>(membersK, []);
+        const cachedInvites = readCache<FamilyInviteRow[]>(invitesK, []);
+
         const group = (groupRes.data ?? null) as FamilyGroupRow | null;
         const mems = (membersRes.data ?? []) as FamilyMemberRow[];
         const invs = (invitesRes.data ?? []) as FamilyInviteRow[];
@@ -662,18 +687,26 @@ export default function FamiliaPage() {
           invitesError: invitesRes.error?.message ?? null,
         });
 
-        setFamilyGroup(group);
-        setMembers(mems);
+        setFamilyGroup(groupRes.error ? cachedGroup : group);
+        setMembers((prev) => {
+          if (membersRes.error) return cachedMembers.length ? cachedMembers : prev;
+          if (mems.length === 0 && (cachedMembers.length > 0 || prev.length > 0)) {
+            return cachedMembers.length ? cachedMembers : prev;
+          }
+          return mems;
+        });
 
         // ✅ FIX: no borres invites si el query regresa vacío y tú ya tenías (optimista/cache)
         setInvites((prev) => {
-          if (invitesRes.error) return prev;
-          if (invs.length === 0 && prev.length > 0) return prev;
+          if (invitesRes.error) return cachedInvites.length ? cachedInvites : prev;
+          if (invs.length === 0 && (cachedInvites.length > 0 || prev.length > 0)) {
+            return cachedInvites.length ? cachedInvites : prev;
+          }
           return invs;
         });
 
-        writeCache(groupK, group);
-        writeCache(membersK, mems);
+        if (!groupRes.error) writeCache(groupK, group);
+        if (!membersRes.error) writeCache(membersK, mems);
 
         // cachea invites SOLO si no hubo error
         if (!invitesRes.error) writeCache(invitesK, invs);
@@ -716,6 +749,7 @@ export default function FamiliaPage() {
   );
 
   const activeMembers = useMemo(() => {
+    if (activeMembersFromList > 0) return activeMembersFromList;
     if (!isOfflineNow()) return activeMembersFromList;
     if (activeMembersFromList > 0) return activeMembersFromList;
     return familyCtx?.activeMembers ?? 0;
@@ -734,13 +768,13 @@ export default function FamiliaPage() {
   const shouldShowCleanupNudge = useMemo(() => {
     const THRESHOLD = 8;
     return (
-      isFamilyOwnerUI &&
+      canManageInvitesUI &&
       !offline &&
       !!effectiveFamilyId &&
       !hideCleanupNudge &&
       historicalInvitesCount >= THRESHOLD
     );
-  }, [isFamilyOwnerUI, offline, effectiveFamilyId, hideCleanupNudge, historicalInvitesCount]);
+  }, [canManageInvitesUI, offline, effectiveFamilyId, hideCleanupNudge, historicalInvitesCount]);
 
   // =========================================================
   // Create Family
@@ -852,7 +886,7 @@ export default function FamiliaPage() {
 
     const famId = effectiveFamilyId;
     if (!famId) return alert("Primero crea tu familia.");
-    if (!isFamilyOwnerUI) return alert("Sólo el jefe de familia puede invitar miembros.");
+    if (!canManageInvitesUI) return alert("Sólo owner o admin pueden invitar miembros.");
 
     const email = inviteForm.email.trim().toLowerCase();
     if (!email || !email.includes("@")) return alert("Escribe un email válido.");
@@ -964,7 +998,7 @@ export default function FamiliaPage() {
 
   const handleChangeRole = async (memberId: string, role: "admin" | "member") => {
     if (!user) return;
-    if (!isFamilyOwnerUI) return;
+    if (!canManageInvitesUI) return;
 
     setMembers((prev) => prev.map((m) => (m.id === memberId ? { ...m, role } : m)));
 
@@ -995,7 +1029,7 @@ export default function FamiliaPage() {
   // =========================================================
   const handleRevokeInvite = async (inviteId: string) => {
     if (!user) return;
-    if (!isFamilyOwnerUI) return;
+    if (!canManageInvitesUI) return;
     if (!window.confirm("¿Revocar invitación?")) return;
 
     setInvites((prev) => prev.map((i) => (i.id === inviteId ? { ...i, status: "revoked" } : i)));
@@ -1029,7 +1063,7 @@ export default function FamiliaPage() {
 
   const handleDeleteInvite = async (inviteId: string) => {
     if (!user) return;
-    if (!isFamilyOwnerUI) return;
+    if (!canManageInvitesUI) return;
 
     if (offline) {
       alert("Necesitas internet para eliminar invitaciones.");
@@ -1243,6 +1277,8 @@ export default function FamiliaPage() {
                   ·{" "}
                   {isFamilyOwnerUI ? (
                     <span className="font-semibold">Jefe de familia</span>
+                  ) : myRole === "admin" ? (
+                    <span className="font-semibold">Admin</span>
                   ) : (
                     <span className="font-semibold">Miembro</span>
                   )}
@@ -1278,10 +1314,14 @@ export default function FamiliaPage() {
           />
           <StatCard
             label="Tu rol"
-            value={roleLoading ? "..." : isFamilyOwnerUI ? "Owner" : "Member"}
+            value={
+              roleLoading ? "..." : isFamilyOwnerUI ? "Owner" : myRole === "admin" ? "Admin" : "Member"
+            }
             hint={
               isFamilyOwnerUI
                 ? "Controlas invitaciones y roles."
+                : myRole === "admin"
+                ? "Tienes permisos elevados dentro de la familia."
                 : "Tu jefe de familia controla invitaciones y roles."
             }
             tone={isFamilyOwnerUI ? "good" : "neutral"}
@@ -1337,10 +1377,12 @@ export default function FamiliaPage() {
             subtitle={
               isFamilyOwnerUI
                 ? "Invita por email y define el rol."
-                : "Sólo el jefe de familia puede invitar miembros."
+                : myRole === "admin"
+                ? "Puedes invitar miembros y gestionar invitaciones."
+                : "Sólo owner o admin pueden invitar miembros."
             }
             right={
-              !isFamilyOwnerUI ? (
+              !canManageInvitesUI ? (
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
                   Acción restringida
                 </span>
@@ -1351,7 +1393,7 @@ export default function FamiliaPage() {
               ) : null
             }
           >
-            {offline && isFamilyOwnerUI ? (
+            {offline && canManageInvitesUI ? (
               <div className="mt-2 rounded-2xl border p-3 text-[12px]">
                 <div className="font-medium">Estás sin internet</div>
                 <div className="opacity-80">Para enviar invitaciones necesitas conexión.</div>
@@ -1365,7 +1407,7 @@ export default function FamiliaPage() {
                   value={inviteForm.email}
                   onChange={(e) => setInviteForm((p) => ({ ...p, email: e.target.value }))}
                   placeholder="ej. familiar@email.com"
-                  disabled={!isFamilyOwnerUI || offline}
+                  disabled={!canManageInvitesUI || offline}
                   required
                 />
               </div>
@@ -1381,7 +1423,7 @@ export default function FamiliaPage() {
                         role: e.target.value === "admin" ? "admin" : "member",
                       }))
                     }
-                    disabled={!isFamilyOwnerUI || offline}
+                    disabled={!canManageInvitesUI || offline}
                   >
                     <option value="member">Miembro</option>
                     <option value="admin">Admin</option>
@@ -1397,21 +1439,21 @@ export default function FamiliaPage() {
                     value={inviteForm.message}
                     onChange={(e) => setInviteForm((p) => ({ ...p, message: e.target.value }))}
                     placeholder="Ej. Te agrego a la familia…"
-                    disabled={!isFamilyOwnerUI || offline}
+                    disabled={!canManageInvitesUI || offline}
                   />
                 </div>
               </div>
 
               <Button
                 type="submit"
-                disabled={!isFamilyOwnerUI || savingInvite || !effectiveFamilyId || offline}
+                disabled={!canManageInvitesUI || savingInvite || !effectiveFamilyId || offline}
                 title={offline ? "Necesitas conexión para enviar invitaciones" : undefined}
               >
                 {savingInvite ? "Enviando..." : "Enviar invitación"}
               </Button>
 
               {!effectiveFamilyId && <Help>Primero crea tu familia para poder invitar miembros.</Help>}
-              {offline && isFamilyOwnerUI && <Help>Invitar requiere internet.</Help>}
+              {offline && canManageInvitesUI && <Help>Invitar requiere internet.</Help>}
             </form>
           </Section>
         </Card>
@@ -1425,7 +1467,7 @@ export default function FamiliaPage() {
                   {invites.length} total
                 </span>
 
-                {isFamilyOwnerUI && historicalInvitesCount > 0 ? (
+                {canManageInvitesUI && historicalInvitesCount > 0 ? (
                   <Button
                     onClick={handlePurgeInviteHistory}
                     disabled={purgeLoading || offline}
@@ -1444,8 +1486,8 @@ export default function FamiliaPage() {
             ) : (
               <ul className="space-y-2">
                 {invites.map((i) => {
-                  const canRevoke = isFamilyOwnerUI && i.status === "pending";
-                  const canDelete = isFamilyOwnerUI && i.status !== "pending";
+                  const canRevoke = canManageInvitesUI && i.status === "pending";
+                  const canDelete = canManageInvitesUI && i.status !== "pending";
                   const canCopy = !!i.token;
 
                   return (

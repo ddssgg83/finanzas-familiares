@@ -153,9 +153,9 @@ function writeCache<T>(key: string, value: T) {
 }
 
 function safeUUID() {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const w: any = typeof window !== "undefined" ? window : null;
-  if (w?.crypto?.randomUUID) return w.crypto.randomUUID();
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
   return `local_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 

@@ -8,7 +8,7 @@ export async function askAI(prompt: string) {
     });
 
     return completion.output_text;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error preguntando a la IA:", error);
     return "Lo siento, no pude generar una respuesta.";
   }

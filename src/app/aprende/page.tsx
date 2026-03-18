@@ -144,11 +144,22 @@ export default function AprendePage() {
     setAiLoading(true);
     setAiResponse(null);
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+
+      if (!accessToken) {
+        setAiResponse("Necesitas iniciar sesión para usar la IA.");
+        return;
+      }
+
       const modeForApi = aiMode === "qa" ? "qa" : aiMode === "kid" ? "explain" : "plan";
 
       const res = await fetch("/api/aprende-ai", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({
           mode: modeForApi,
           question: aiInput.trim(),

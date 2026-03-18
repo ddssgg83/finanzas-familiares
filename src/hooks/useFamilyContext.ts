@@ -43,6 +43,25 @@ function readFamilyCache(userId: string): FamilyContext | null {
   }
 }
 
+type FamilyMembershipRow = {
+  family_id: string;
+  status: string;
+  user_id: string | null;
+  invited_email: string | null;
+  role: "owner" | "admin" | "member" | null;
+};
+
+type FamilyActiveMemberRow = {
+  user_id: string | null;
+  role: "owner" | "admin" | "member" | null;
+};
+
+type FamilyGroupRow = {
+  id: string;
+  name: string | null;
+  owner_user_id: string | null;
+};
+
 function writeFamilyCache(userId: string, ctx: FamilyContext | null) {
   if (typeof window === "undefined") return;
   try {
@@ -100,7 +119,7 @@ export function useFamilyContext(user: User | null) {
       try {
         const { data: memberRows, error: memberError } = await supabase
           .from("family_members")
-          .select("id,family_id,status,user_id,invited_email")
+          .select("family_id,status,user_id,invited_email,role")
           .or(`user_id.eq.${userId},invited_email.eq.${email}`)
           .eq("status", "active")
           .limit(1);
@@ -115,33 +134,47 @@ export function useFamilyContext(user: User | null) {
           return;
         }
 
-        const member = memberRows[0];
-
-        const { data: fam, error: famError } = await supabase
-          .from("families")
-          .select("id,name,user_id")
-          .eq("id", member.family_id)
-          .single();
-
-        if (famError) throw famError;
+        const member = memberRows[0] as FamilyMembershipRow;
 
         const { data: activeMembersRows, error: membersError } = await supabase
           .from("family_members")
-          .select("id,status,user_id")
-          .eq("family_id", fam.id)
+          .select("user_id,role")
+          .eq("family_id", member.family_id)
           .eq("status", "active");
 
         if (membersError) throw membersError;
 
-        const activeMemberUserIds = (activeMembersRows ?? [])
+        const activeMembers = (activeMembersRows ?? []) as FamilyActiveMemberRow[];
+        const ownerMember = activeMembers.find((row) => row.role === "owner" && row.user_id);
+
+        const { data: fam, error: famError } = await supabase
+          .from("family_groups")
+          .select("id,name,owner_user_id")
+          .eq("id", member.family_id)
+          .maybeSingle();
+
+        if (famError) {
+          console.warn("useFamilyContext family_groups warning:", famError);
+        }
+
+        const activeMemberUserIds = activeMembers
           .map((m) => m.user_id)
           .filter((id): id is string => !!id);
 
+        const familyGroup = (fam ?? null) as FamilyGroupRow | null;
+        const familyName = familyGroup?.name ?? cached?.familyName ?? "Mi familia";
+        const ownerUserId =
+          familyGroup?.owner_user_id ??
+          ownerMember?.user_id ??
+          cached?.ownerUserId ??
+          member.user_id ??
+          userId;
+
         const nextCtx: FamilyContext = {
-          familyId: fam.id,
-          familyName: fam.name,
-          ownerUserId: fam.user_id,
-          activeMembers: activeMembersRows?.length ?? 0,
+          familyId: member.family_id,
+          familyName,
+          ownerUserId,
+          activeMembers: activeMembers.length,
           activeMemberUserIds,
         };
 
@@ -166,7 +199,7 @@ export function useFamilyContext(user: User | null) {
           setFamilyError(
             "No se pudo cargar la información de tu familia. Revisa la sección Familia."
           );
-          setFamilyCtx(null);
+          setFamilyCtx(cached);
         }
       } finally {
         if (!cancelled) setFamilyLoading(false);
