@@ -6,6 +6,7 @@ import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
 import { PageShell } from "@/components/ui/PageShell";
+import { useFamilyContext } from "@/hooks/useFamilyContext";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,12 @@ type Goal = {
   status: "en-proceso" | "completado" | "pausado";
 };
 
+type DashboardScope = {
+  userId: string;
+  familyId?: string | null;
+  view: "personal" | "family";
+};
+
 // -------------------------
 // Cache helpers
 // -------------------------
@@ -42,10 +49,20 @@ function safeJSONParse<T>(raw: string | null): T | null {
   }
 }
 
-function cacheKeyForMonth(prefix: string, monthStart: Date) {
+function getMonthKey(monthStart: Date) {
   const y = monthStart.getFullYear();
   const m = String(monthStart.getMonth() + 1).padStart(2, "0");
-  return `${prefix}-${y}-${m}`;
+  return `${y}-${m}`;
+}
+
+function cacheKeyForScope(prefix: string, scope: DashboardScope, month: string) {
+  const family = scope.familyId ?? "personal";
+  return `${prefix}-v2:${scope.userId}:${family}:${scope.view}:${month}`;
+}
+
+function isNetworkLikeError(err: unknown) {
+  const msg = String((err as any)?.message ?? "").toLowerCase();
+  return msg.includes("offline") || msg.includes("failed to fetch") || msg.includes("network");
 }
 
 export default function DashboardPage() {
@@ -61,193 +78,223 @@ export default function DashboardPage() {
   const [goalTarget, setGoalTarget] = useState("");
   const [goalDeadline, setGoalDeadline] = useState("");
 
+  const { familyCtx, familyLoading } = useFamilyContext(user);
+
   useEffect(() => {
-    let cancelled = false;
+    let ignore = false;
 
-    async function load() {
-      setLoading(true);
-      setDataError(null);
-
+    async function loadUser() {
       try {
-        // ✅ OFFLINE-SAFE: lee sesión local (no red)
         const { data: sessionData } = await supabase.auth.getSession();
-        if (!cancelled) setUser(sessionData.session?.user ?? null);
-
-        const now = new Date();
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-
-        const monthLabel = monthStart.toLocaleDateString("es-MX", {
-          month: "long",
-          year: "numeric",
-        });
-
-        const summaryCacheKey = cacheKeyForMonth("ff-dashboard-summary", monthStart);
-        const netWorthCacheKey = cacheKeyForMonth("ff-dashboard-networth", monthStart);
-
-        // =========================================================
-        // ✅ OFFLINE: NO tocar Supabase. Carga de cache si existe.
-        // =========================================================
-        if (typeof window !== "undefined" && !navigator.onLine) {
-          const cachedSummary = safeJSONParse<
-            Pick<MonthlySummary, "incomes" | "expenses" | "balance">
-          >(localStorage.getItem(summaryCacheKey));
-
-          const cachedNetWorth = safeJSONParse<NetWorthSummary>(
-            localStorage.getItem(netWorthCacheKey)
-          );
-
-          if (!cancelled) {
-            setSummary({
-              incomes: Number(cachedSummary?.incomes ?? 0),
-              expenses: Number(cachedSummary?.expenses ?? 0),
-              balance: Number(cachedSummary?.balance ?? 0),
-              monthLabel,
-            });
-
-            setNetWorth({
-              assets: Number(cachedNetWorth?.assets ?? 0),
-              debts: Number(cachedNetWorth?.debts ?? 0),
-              netWorth: Number(cachedNetWorth?.netWorth ?? 0),
-            });
-          }
-
-          return;
-        }
-
-        // =========================================================
-        // 🌐 ONLINE: cargar Supabase y guardar cache
-        // =========================================================
-
-        // ---------- RESUMEN MENSUAL ----------
-        try {
-          const { data: txs, error } = await supabase
-            .from("transactions")
-            .select("type, amount, date")
-            .gte("date", monthStart.toISOString())
-            .lt("date", nextMonthStart.toISOString());
-
-          if (error) throw error;
-
-          let incomes = 0;
-          let expenses = 0;
-
-          (txs ?? []).forEach((tx: any) => {
-            const amt = Number(tx.amount) || 0;
-            if (tx.type === "ingreso") incomes += amt;
-            if (tx.type === "gasto") expenses += amt;
-          });
-
-          const nextSummary: MonthlySummary = {
-            incomes,
-            expenses,
-            balance: incomes - expenses,
-            monthLabel,
-          };
-
-          if (!cancelled) setSummary(nextSummary);
-
-          // ✅ Cache resumen mensual
-          if (typeof window !== "undefined") {
-            try {
-              localStorage.setItem(
-                summaryCacheKey,
-                JSON.stringify({
-                  incomes: nextSummary.incomes,
-                  expenses: nextSummary.expenses,
-                  balance: nextSummary.balance,
-                })
-              );
-            } catch {}
-          }
-        } catch (err) {
-          console.warn("No se pudo cargar resumen mensual:", err);
-
-          // fallback a cache si falló
-          if (typeof window !== "undefined") {
-            const cached = safeJSONParse<any>(localStorage.getItem(summaryCacheKey));
-            if (!cancelled) {
-              setSummary({
-                incomes: Number(cached?.incomes ?? 0),
-                expenses: Number(cached?.expenses ?? 0),
-                balance: Number(cached?.balance ?? 0),
-                monthLabel,
-              });
-            }
-          } else if (!cancelled) {
-            setSummary({ incomes: 0, expenses: 0, balance: 0, monthLabel });
-          }
-
-          if (!cancelled) setDataError("No se pudieron cargar algunos datos de este mes.");
-        }
-
-        // ---------- VALOR PATRIMONIAL ----------
-        try {
-          const [assetsRes, debtsRes] = await Promise.all([
-            supabase.from("assets").select("current_value"),
-            supabase.from("debts").select("current_balance, total_amount"),
-          ]);
-
-          if (assetsRes.error) throw assetsRes.error;
-          if (debtsRes.error) throw debtsRes.error;
-
-          const assetsTotal = (assetsRes.data ?? []).reduce(
-            (acc: number, row: any) => acc + (Number(row.current_value) || 0),
-            0
-          );
-
-          const debtsTotal = (debtsRes.data ?? []).reduce(
-            (acc: number, row: any) =>
-              acc + (Number(row.current_balance ?? row.total_amount ?? 0) || 0),
-            0
-          );
-
-          const nextNetWorth: NetWorthSummary = {
-            assets: assetsTotal,
-            debts: debtsTotal,
-            netWorth: assetsTotal - debtsTotal,
-          };
-
-          if (!cancelled) setNetWorth(nextNetWorth);
-
-          // ✅ Cache net worth
-          if (typeof window !== "undefined") {
-            try {
-              localStorage.setItem(netWorthCacheKey, JSON.stringify(nextNetWorth));
-            } catch {}
-          }
-        } catch (err) {
-          console.warn("No se pudo cargar patrimonio:", err);
-
-          // fallback a cache si falló
-          if (typeof window !== "undefined") {
-            const cached = safeJSONParse<NetWorthSummary>(
-              localStorage.getItem(netWorthCacheKey)
-            );
-            if (!cancelled) {
-              setNetWorth({
-                assets: Number(cached?.assets ?? 0),
-                debts: Number(cached?.debts ?? 0),
-                netWorth: Number(cached?.netWorth ?? 0),
-              });
-            }
-          } else if (!cancelled) {
-            setNetWorth({ assets: 0, debts: 0, netWorth: 0 });
-          }
-
-          if (!cancelled) setDataError("No se pudieron cargar algunos datos de patrimonio.");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (!ignore) setUser(sessionData.session?.user ?? null);
+      } catch {
+        if (!ignore) setUser(null);
       }
     }
 
-    load();
+    loadUser();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      ignore = true;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const monthKey = getMonthKey(monthStart);
+    const monthLabel = monthStart.toLocaleDateString("es-MX", {
+      month: "long",
+      year: "numeric",
+    });
+
+    if (!user) {
+      setSummary(null);
+      setNetWorth(null);
+      setDataError(null);
+      setLoading(false);
+      return;
+    }
+
+    if (familyLoading) {
+      setSummary(null);
+      setNetWorth(null);
+      setDataError(null);
+      setLoading(true);
+      return;
+    }
+
+    const currentUser = user;
+
+    const scope: DashboardScope = {
+      userId: currentUser.id,
+      familyId: familyCtx?.familyId ?? null,
+      view: "personal",
+    };
+
+    const summaryCacheKey = cacheKeyForScope("ff-dashboard-summary", scope, monthKey);
+    const netWorthCacheKey = cacheKeyForScope("ff-dashboard-networth", scope, monthKey);
+
+    const applySummaryFromCache = () => {
+      const cached = safeJSONParse<Pick<MonthlySummary, "incomes" | "expenses" | "balance">>(
+        typeof window !== "undefined" ? localStorage.getItem(summaryCacheKey) : null
+      );
+      setSummary({
+        incomes: Number(cached?.incomes ?? 0),
+        expenses: Number(cached?.expenses ?? 0),
+        balance: Number(cached?.balance ?? 0),
+        monthLabel,
+      });
+    };
+
+    const applyNetWorthFromCache = () => {
+      const cached = safeJSONParse<NetWorthSummary>(
+        typeof window !== "undefined" ? localStorage.getItem(netWorthCacheKey) : null
+      );
+      setNetWorth({
+        assets: Number(cached?.assets ?? 0),
+        debts: Number(cached?.debts ?? 0),
+        netWorth: Number(cached?.netWorth ?? 0),
+      });
+    };
+
+    async function loadDashboard() {
+      setLoading(true);
+      setDataError(null);
+      setSummary(null);
+      setNetWorth(null);
+
+      if (typeof window !== "undefined" && !navigator.onLine) {
+        if (!cancelled) {
+          applySummaryFromCache();
+          applyNetWorthFromCache();
+          setLoading(false);
+        }
+        return;
+      }
+
+      try {
+        let txQuery = supabase
+          .from("transactions")
+          .select("type, amount, date, family_group_id, user_id, owner_user_id, spender_user_id")
+          .gte("date", monthStart.toISOString())
+          .lt("date", nextMonthStart.toISOString());
+
+        if (familyCtx?.familyId) {
+          txQuery = txQuery
+            .eq("family_group_id", familyCtx.familyId)
+            .or(
+              `spender_user_id.eq.${currentUser.id},user_id.eq.${currentUser.id},owner_user_id.eq.${currentUser.id}`
+            );
+        } else {
+          txQuery = txQuery.or(
+            `spender_user_id.eq.${currentUser.id},user_id.eq.${currentUser.id},owner_user_id.eq.${currentUser.id}`
+          );
+        }
+
+        const { data: txs, error } = await txQuery;
+        if (error) throw error;
+
+        let incomes = 0;
+        let expenses = 0;
+
+        (txs ?? []).forEach((tx: any) => {
+          const amt = Number(tx.amount) || 0;
+          if (tx.type === "ingreso") incomes += amt;
+          if (tx.type === "gasto") expenses += amt;
+        });
+
+        const nextSummary: MonthlySummary = {
+          incomes,
+          expenses,
+          balance: incomes - expenses,
+          monthLabel,
+        };
+
+        if (!cancelled) setSummary(nextSummary);
+
+        if (typeof window !== "undefined") {
+          try {
+            localStorage.setItem(
+              summaryCacheKey,
+              JSON.stringify({
+                incomes: nextSummary.incomes,
+                expenses: nextSummary.expenses,
+                balance: nextSummary.balance,
+              })
+            );
+          } catch {}
+        }
+      } catch (err) {
+        console.warn("No se pudo cargar resumen mensual:", err);
+        if (!cancelled) applySummaryFromCache();
+        if (!isNetworkLikeError(err) && !cancelled) {
+          setDataError("No se pudieron cargar algunos datos de este mes.");
+        }
+      }
+
+      try {
+        const [assetsRes, debtsRes] = await Promise.all([
+          supabase.from("assets").select("current_value").eq("user_id", currentUser.id),
+          supabase.from("debts").select("current_balance, total_amount").eq("user_id", currentUser.id),
+        ]);
+
+        if (assetsRes.error) throw assetsRes.error;
+        if (debtsRes.error) throw debtsRes.error;
+
+        const assetsTotal = (assetsRes.data ?? []).reduce(
+          (acc: number, row: any) => acc + (Number(row.current_value) || 0),
+          0
+        );
+
+        const debtsTotal = (debtsRes.data ?? []).reduce(
+          (acc: number, row: any) =>
+            acc + (Number(row.current_balance ?? row.total_amount ?? 0) || 0),
+          0
+        );
+
+        const nextNetWorth: NetWorthSummary = {
+          assets: assetsTotal,
+          debts: debtsTotal,
+          netWorth: assetsTotal - debtsTotal,
+        };
+
+        if (!cancelled) setNetWorth(nextNetWorth);
+
+        if (typeof window !== "undefined") {
+          try {
+            localStorage.setItem(netWorthCacheKey, JSON.stringify(nextNetWorth));
+          } catch {}
+        }
+      } catch (err) {
+        console.warn("No se pudo cargar patrimonio:", err);
+        if (!cancelled) applyNetWorthFromCache();
+        if (!isNetworkLikeError(err) && !cancelled) {
+          setDataError((prev) => prev ?? "No se pudieron cargar algunos datos de patrimonio.");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadDashboard();
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [user, familyCtx?.familyId, familyLoading]);
 
   const balanceTag = useMemo(() => {
     if (!summary) return null;
