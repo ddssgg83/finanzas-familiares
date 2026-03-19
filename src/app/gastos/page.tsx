@@ -161,6 +161,16 @@ function todayYMD() {
   return `${y}-${m}-${day}`;
 }
 
+function getMonthlyCacheKey(params: {
+  month: string;
+  userId: string;
+  familyId?: string | null;
+  scope: "mine" | "family";
+}) {
+  const family = params.familyId ?? "personal";
+  return `ff-gastos-cache-v1:${params.userId}:${family}:${params.scope}:${params.month}`;
+}
+
 function csvEscape(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return "";
   const str = String(value);
@@ -187,6 +197,15 @@ const QUICK_TEMPLATES: QuickTemplate[] = [
   { id: "renta", label: "Renta", type: "gasto", category: "RENTA", amount: 20000, method: "TRANSFERENCIA" },
   { id: "sueldo", label: "Sueldo", type: "ingreso", category: "SUELDO", amount: 50000, method: "TRANSFERENCIA" },
 ];
+
+function getDefaultCategoryByType(type: TxType, options: Option[]) {
+  const preferred = type === "ingreso" ? ["SUELDO", "COMISION"] : ["OTROS", "SUPER", "SERVICIOS", "GASOLINA"];
+  for (const value of preferred) {
+    const found = options.find((option) => option.value === value);
+    if (found) return found.value;
+  }
+  return options[0]?.value ?? "";
+}
 
 function inferFromNotes(raw: string): { category?: string; method?: string } {
   const t = (raw || "").toLowerCase();
@@ -326,7 +345,7 @@ export default function GastosPage() {
   const [form, setForm] = useState<FormState>({
     date: "",
     type: "gasto",
-    category: DEFAULT_CATEGORIES[0]?.value ?? "",
+    category: getDefaultCategoryByType("gasto", DEFAULT_CATEGORIES),
     amount: "",
     method: DEFAULT_METHODS[0]?.value ?? "",
     notes: "",
@@ -520,6 +539,12 @@ export default function GastosPage() {
       setError(null);
 
       const { from, to } = getMonthRange(month);
+      const cacheKey = getMonthlyCacheKey({
+        month,
+        userId,
+        familyId: familyCtx?.familyId ?? null,
+        scope: familyCtx?.familyId && canUseFamilyScope ? viewScope : "mine",
+      });
 
       const mapRows = (rows: any[]): Tx[] =>
         (rows ?? []).map((t: any) => ({
@@ -546,7 +571,7 @@ export default function GastosPage() {
         // 🚫 OFFLINE: NO SUPABASE
         // =========================
         if (typeof window !== "undefined" && !navigator.onLine) {
-          const cacheRaw = localStorage.getItem(`ff-cache-${month}`);
+          const cacheRaw = localStorage.getItem(cacheKey);
           const cached = cacheRaw ? JSON.parse(cacheRaw) : [];
           const cachedMapped = mapRows(cached);
 
@@ -618,12 +643,12 @@ const offlineMapped: Tx[] = offline.map((t) => ({
           setTransactions((prev) => mergeKeepLocalOnly(prev, mapped));
         }
 
-        localStorage.setItem(`ff-cache-${month}`, JSON.stringify(data ?? []));
+        localStorage.setItem(cacheKey, JSON.stringify(data ?? []));
       } catch (err) {
         if (!cancelled) setError("No se pudieron cargar los movimientos.");
 
         try {
-          const cache = localStorage.getItem(`ff-cache-${month}`);
+          const cache = localStorage.getItem(cacheKey);
           const parsed = cache ? JSON.parse(cache) : [];
           setTransactions((prev) => mergeKeepLocalOnly(prev, mapRows(parsed)));
         } catch {}
@@ -805,6 +830,10 @@ const offlineMapped: Tx[] = offline.map((t) => ({
     setForm((prev) => {
       const next = { ...prev, [field]: value };
 
+      if (!editingId && field === "type") {
+        next.category = getDefaultCategoryByType(value as TxType, categories);
+      }
+
       if (!editingId && field === "notes") {
         const inferred = inferFromNotes(value);
         if (inferred.category) next.category = inferred.category;
@@ -826,7 +855,7 @@ const offlineMapped: Tx[] = offline.map((t) => ({
     setForm({
       date: "",
       type: "gasto",
-      category: categories[0]?.value ?? "",
+      category: getDefaultCategoryByType("gasto", categories),
       amount: "",
       method: methods[0]?.value ?? "",
       notes: "",
@@ -1277,7 +1306,7 @@ if (!key) return;
     try {
       // Offline
       if (typeof navigator !== "undefined" && !navigator.onLine) {
-        const id = (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`) as string;
+        const id = editingId ?? ((globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`) as string);
 
         const localTx: Tx = {
           id,

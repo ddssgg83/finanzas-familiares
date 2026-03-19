@@ -193,6 +193,19 @@ function writeOps(userId: string, ops: OfflineOp[]) {
   writeCache(opsKey(userId), ops);
 }
 
+function isOpInScope(
+  op: OfflineOp,
+  scope: { userId: string; familyId?: string | null; view: "personal" | "family" }
+) {
+  if (scope.view === "family") {
+    const familyId = "payload" in op ? op.payload.family_id ?? null : null;
+    return !!scope.familyId && familyId === scope.familyId;
+  }
+
+  const userId = "payload" in op ? op.payload.user_id ?? null : null;
+  return userId === scope.userId;
+}
+
 function applyOpsToState(baseAssets: Asset[], baseDebts: Debt[], ops: OfflineOp[]) {
   let assets = [...baseAssets];
   let debts = [...baseDebts];
@@ -242,6 +255,8 @@ export default function PatrimonioPage() {
   const [debts, setDebts] = useState<Debt[]>([]);
   const [loading, setLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
+  const assetsRef = useRef<Asset[]>([]);
+  const debtsRef = useRef<Debt[]>([]);
 
   // ✅ Conexión Gastos → Patrimonio: flujo del mes
   const [month, setMonth] = useState<string>(() => getCurrentMonthKey());
@@ -277,6 +292,14 @@ export default function PatrimonioPage() {
   // Cola offline
   const [pendingOpsCount, setPendingOpsCount] = useState(0);
   const syncInFlight = useRef(false);
+
+  useEffect(() => {
+    assetsRef.current = assets;
+  }, [assets]);
+
+  useEffect(() => {
+    debtsRef.current = debts;
+  }, [debts]);
 
   // =========================================================
   // AUTH (offline-safe)
@@ -461,7 +484,7 @@ export default function PatrimonioPage() {
       const assetsK = cacheKey("assets", scope);
       const debtsK = cacheKey("debts", scope);
 
-      const ops = readOps(user.id);
+      const ops = readOps(user.id).filter((op) => isOpInScope(op, scope));
       setPendingOpsCount(ops.length);
 
       // ✅ OFFLINE: cache + ops
@@ -499,18 +522,29 @@ export default function PatrimonioPage() {
 
         if (!alive) return;
 
+        const cachedAssets = readCache<Asset[] | null>(assetsK, null);
+        const cachedDebts = readCache<Debt[] | null>(debtsK, null);
+
         if (assetsRes.error) console.warn("Error cargando activos", assetsRes.error);
         if (debtsRes.error) console.warn("Error cargando deudas", debtsRes.error);
 
-        const nextAssets = (assetsRes.data ?? []) as Asset[];
-        const nextDebts = (debtsRes.data ?? []) as Debt[];
+        const nextAssets = assetsRes.error
+          ? cachedAssets ?? assetsRef.current
+          : ((assetsRes.data ?? []) as Asset[]);
+        const nextDebts = debtsRes.error
+          ? cachedDebts ?? debtsRef.current
+          : ((debtsRes.data ?? []) as Debt[]);
 
-        writeCache(assetsK, nextAssets);
-        writeCache(debtsK, nextDebts);
+        if (!assetsRes.error) writeCache(assetsK, nextAssets);
+        if (!debtsRes.error) writeCache(debtsK, nextDebts);
 
         const patched = applyOpsToState(nextAssets, nextDebts, ops);
         setAssets(patched.assets);
         setDebts(patched.debts);
+
+        if (assetsRes.error || debtsRes.error) {
+          setDataError("No se pudo cargar por completo el patrimonio. Se conservó la información disponible.");
+        }
 
         syncOfflineOps();
       } catch (err: any) {
@@ -977,6 +1011,9 @@ export default function PatrimonioPage() {
     if (!window.confirm("¿Seguro que quieres eliminar este activo?")) return;
     if (!user) return;
 
+    const previousAssets = assets;
+    const assetToRestore = previousAssets.find((a) => a.id === id);
+
     setAssets((prev) => {
       const next = prev.filter((a) => a.id !== id);
       writeCurrentScopeCache(next, debts);
@@ -1011,6 +1048,10 @@ export default function PatrimonioPage() {
         writeOps(user.id, nextOps);
         setPendingOpsCount(nextOps.length);
       } else {
+        if (assetToRestore) {
+          setAssets(previousAssets);
+          writeCurrentScopeCache(previousAssets, debtsRef.current);
+        }
         console.error("Error eliminando activo:", err);
         alert("No se pudo eliminar el activo.");
       }
@@ -1020,6 +1061,9 @@ export default function PatrimonioPage() {
   const handleDeleteDebt = async (id: string) => {
     if (!window.confirm("¿Seguro que quieres eliminar esta deuda?")) return;
     if (!user) return;
+
+    const previousDebts = debts;
+    const debtToRestore = previousDebts.find((d) => d.id === id);
 
     setDebts((prev) => {
       const next = prev.filter((d) => d.id !== id);
@@ -1055,6 +1099,10 @@ export default function PatrimonioPage() {
         writeOps(user.id, nextOps);
         setPendingOpsCount(nextOps.length);
       } else {
+        if (debtToRestore) {
+          setDebts(previousDebts);
+          writeCurrentScopeCache(assetsRef.current, previousDebts);
+        }
         console.error("Error eliminando deuda:", err);
         alert("No se pudo eliminar la deuda.");
       }
