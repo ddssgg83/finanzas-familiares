@@ -4,15 +4,18 @@ function cn(...classes: Array<string | undefined | false | null>) {
   return classes.filter(Boolean).join(" ");
 }
 
-export function Card({
-  children,
-  className,
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
+export const Card = React.forwardRef<
+  HTMLElement,
+  {
+    children: React.ReactNode;
+    className?: string;
+    tabIndex?: number;
+  }
+>(({ children, className, tabIndex }, ref) => {
   return (
     <section
+      ref={ref}
+      tabIndex={tabIndex}
       className={cn(
         "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900",
         className
@@ -21,7 +24,9 @@ export function Card({
       {children}
     </section>
   );
-}
+});
+
+Card.displayName = "Card";
 
 export function Section({
   title,

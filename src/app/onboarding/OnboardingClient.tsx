@@ -107,22 +107,22 @@ export default function OnboardingClient() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  const modeParam = (sp.get("mode") ?? "").toLowerCase(); // login | signup
+  const modeParam = (sp.get("mode") ?? "").toLowerCase(); // invite | login | signup
   const emailParam = (sp.get("email") ?? "").trim();
   const nextParam = safeInternalNext(sp.get("next"));
+  const invitedEmail = emailParam.toLowerCase();
 
   // ✅ Si viene modo invitación/auth, no mostramos el tour
   const isInviteFlow =
-    modeParam === "login" || modeParam === "signup" || !!nextParam || !!emailParam;
+    modeParam === "invite" || modeParam === "login" || modeParam === "signup" || !!nextParam || !!emailParam;
 
   // ====== INVITE/AUTH STATE ======
-  const [authMode, setAuthMode] = useState<"login" | "signup">(
-    modeParam === "signup" ? "signup" : "login"
-  );
   const [email, setEmail] = useState(emailParam);
   const [authBusy, setAuthBusy] = useState(false);
   const [authMsg, setAuthMsg] = useState<string | null>(null);
   const [authSent, setAuthSent] = useState(false);
+  const [activeSessionEmail, setActiveSessionEmail] = useState<string | null>(null);
+  const [hasSessionMismatch, setHasSessionMismatch] = useState(false);
 
   // cooldown para reenviar (evita spam / rate-limit)
   const [cooldown, setCooldown] = useState(0);
@@ -149,7 +149,25 @@ export default function OnboardingClient() {
     }
   }, [nextParam]);
 
-  // Si ya hay sesión y venimos con next → redirigir directo
+  const clearSessionMismatch = () => {
+    setHasSessionMismatch(false);
+    setActiveSessionEmail(null);
+    setAuthMsg(null);
+  };
+
+  const signOutWrongSession = async () => {
+    setAuthBusy(true);
+    try {
+      await supabase.auth.signOut();
+      clearSessionMismatch();
+    } catch (e: any) {
+      setAuthMsg(e?.message ?? "No se pudo cerrar la sesión actual.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  // Si ya hay sesión y venimos con next → redirigir solo si coincide con el correo invitado
   useEffect(() => {
     if (!isInviteFlow) return;
 
@@ -160,6 +178,15 @@ export default function OnboardingClient() {
 
       if (!alive) return;
       if (u) {
+        const sessionEmail = (u.email ?? "").toLowerCase().trim();
+        if (invitedEmail && sessionEmail && sessionEmail !== invitedEmail) {
+          setActiveSessionEmail(u.email ?? null);
+          setHasSessionMismatch(true);
+          setAuthMsg(
+            `Ya hay una sesión abierta con ${u.email ?? "otro correo"}. Para aceptar esta invitación necesitas continuar con ${emailParam}.`
+          );
+          return;
+        }
         const target = next || "/familia";
         router.replace(target);
       }
@@ -168,7 +195,7 @@ export default function OnboardingClient() {
     return () => {
       alive = false;
     };
-  }, [isInviteFlow, next, router]);
+  }, [emailParam, invitedEmail, isInviteFlow, next, router]);
 
   useEffect(() => {
     // cleanup cooldown interval
@@ -206,18 +233,16 @@ export default function OnboardingClient() {
 
       // ✅ Redirect FIJO a tu dominio (evita localhost/preview)
       // ✅ FIX REAL: SIEMPRE pasar por /auth/callback
-// (Supabase necesita exchangeCodeForSession)
-const base = SITE_URL || "https://rinday.app";
-const nextSafe = next || "/familia";
-const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextSafe)}`;
-
-      const shouldCreateUser = authMode === "signup";
+      // (Supabase necesita exchangeCodeForSession)
+      const base = SITE_URL || "https://rinday.app";
+      const nextSafe = next || "/familia";
+      const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextSafe)}`;
 
       const { error } = await supabase.auth.signInWithOtp({
         email: cleanEmail,
         options: {
           emailRedirectTo: redirectTo,
-          shouldCreateUser,
+          shouldCreateUser: true,
         },
       });
 
@@ -227,7 +252,7 @@ const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextSafe)}`;
       startCooldown(20);
 
       setAuthMsg(
-        "Listo ✅ Te mandamos un correo con un link para entrar. Revisa spam/promociones. Ábrelo desde el mismo dispositivo."
+        "Listo. Te mandamos un link para entrar y aceptar la invitación. Si aún no existe tu cuenta, se creará automáticamente al abrir ese enlace."
       );
     } catch (e: any) {
       setAuthMsg(prettyAuthError(e?.message));
@@ -321,11 +346,11 @@ const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextSafe)}`;
             </div>
 
             <h1 className="mt-2 text-xl font-semibold tracking-tight">
-              {authMode === "signup" ? "Crear cuenta" : "Iniciar sesión"}
+              Continúa con tu invitación
             </h1>
 
             <p className="mt-1 text-[12px] leading-relaxed text-slate-300">
-              Para aceptar la invitación, entra con el correo invitado. Te mandaremos un link seguro por email.
+              Usa el correo invitado para recibir un enlace seguro. No necesitas contraseña en este paso.
             </p>
 
             <div className="mt-4 space-y-2">
@@ -338,6 +363,7 @@ const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextSafe)}`;
                 className="w-full rounded-2xl border border-slate-700/70 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-sky-300/30"
                 placeholder="tu@correo.com"
                 autoComplete="email"
+                disabled={authBusy}
               />
             </div>
 
@@ -347,28 +373,35 @@ const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextSafe)}`;
               </div>
             ) : null}
 
+            {hasSessionMismatch ? (
+              <div className="mt-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-3 py-3 text-[12px] text-amber-100">
+                Hay una sesión activa con <span className="font-semibold">{activeSessionEmail ?? "otro correo"}</span>.
+                Cierra esa sesión y luego pide el enlace con el correo invitado.
+              </div>
+            ) : null}
+
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 onClick={sendMagicLink}
-                disabled={authBusy || cooldown > 0}
+                disabled={authBusy || cooldown > 0 || hasSessionMismatch}
                 className="flex-1 rounded-full bg-sky-400 px-4 py-2 text-[12px] font-semibold text-slate-900 hover:bg-sky-300 disabled:opacity-60"
               >
                 {authBusy
                   ? "Enviando…"
                   : cooldown > 0
                   ? `Espera ${cooldown}s…`
-                  : authMode === "signup"
-                  ? "Crear cuenta y enviar link"
-                  : "Enviar link de acceso"}
+                  : "Enviar link para continuar"}
               </button>
 
-              <button
-                onClick={() => setAuthMode((m) => (m === "login" ? "signup" : "login"))}
-                disabled={authBusy}
-                className="rounded-full border border-slate-700/70 px-4 py-2 text-[12px] font-semibold text-slate-200 hover:bg-slate-900/60 disabled:opacity-60"
-              >
-                {authMode === "login" ? "Crear cuenta" : "Ya tengo cuenta"}
-              </button>
+              {hasSessionMismatch ? (
+                <button
+                  onClick={signOutWrongSession}
+                  disabled={authBusy}
+                  className="rounded-full border border-slate-700/70 px-4 py-2 text-[12px] font-semibold text-slate-200 hover:bg-slate-900/60 disabled:opacity-60"
+                >
+                  Cerrar sesión actual
+                </button>
+              ) : null}
             </div>
 
             {authSent ? (
@@ -380,7 +413,7 @@ const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextSafe)}`;
 
                 <button
                   onClick={sendMagicLink}
-                  disabled={authBusy || cooldown > 0}
+                  disabled={authBusy || cooldown > 0 || hasSessionMismatch}
                   className="rounded-full border border-slate-800 px-3 py-1 hover:bg-slate-900/60 disabled:opacity-60"
                 >
                   Reenviar
@@ -397,6 +430,11 @@ const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextSafe)}`;
                 <span className="text-[10px] opacity-80">{SITE_URL ? "" : ""}</span>
               </div>
             )}
+
+            <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+              Si no tenías cuenta, RINDAY la crea al abrir el enlace del correo invitado. Para aceptar
+              esta invitación no necesitas contraseña.
+            </p>
           </div>
         </main>
       </div>

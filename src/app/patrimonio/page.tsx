@@ -257,6 +257,8 @@ export default function PatrimonioPage() {
   const [dataError, setDataError] = useState<string | null>(null);
   const assetsRef = useRef<Asset[]>([]);
   const debtsRef = useRef<Debt[]>([]);
+  const assetFormCardRef = useRef<HTMLElement | null>(null);
+  const debtFormCardRef = useRef<HTMLElement | null>(null);
 
   // ✅ Conexión Gastos → Patrimonio: flujo del mes
   const [month, setMonth] = useState<string>(() => getCurrentMonthKey());
@@ -710,6 +712,22 @@ export default function PatrimonioPage() {
     setEditingDebtId(null);
   };
 
+  useEffect(() => {
+    const activeCard = editingAssetId ? assetFormCardRef.current : editingDebtId ? debtFormCardRef.current : null;
+    if (!activeCard) return;
+
+    const rafId = window.requestAnimationFrame(() => {
+      activeCard.scrollIntoView({ behavior: "smooth", block: "start" });
+      try {
+        activeCard.focus({ preventScroll: true });
+      } catch {
+        activeCard.focus();
+      }
+    });
+
+    return () => window.cancelAnimationFrame(rafId);
+  }, [editingAssetId, editingDebtId]);
+
   // =========================================================
   // Submit Asset — ONLINE + OFFLINE (optimistic + cola)
   // =========================================================
@@ -1114,6 +1132,7 @@ export default function PatrimonioPage() {
   // =========================================================
   const startEditAsset = (asset: Asset) => {
     setEditingAssetId(asset.id);
+    setEditingDebtId(null);
     setAssetForm({
       name: asset.name ?? "",
       category: asset.category || ASSET_CATEGORIES[0],
@@ -1121,10 +1140,10 @@ export default function PatrimonioPage() {
       owner: asset.owner ?? "",
       notes: asset.notes ?? "",
     });
-    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const startEditDebt = (debt: Debt) => {
+    setEditingAssetId(null);
     setEditingDebtId(debt.id);
     setDebtForm({
       name: debt.name ?? "",
@@ -1133,7 +1152,6 @@ export default function PatrimonioPage() {
       current_balance: debt.current_balance != null ? debt.current_balance.toString() : "",
       notes: debt.notes ?? "",
     });
-    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   // =========================================================
@@ -1276,12 +1294,21 @@ export default function PatrimonioPage() {
 
       {/* Formularios */}
       <section className="grid gap-4 md:grid-cols-2">
-        <Card>
+        <Card
+          ref={assetFormCardRef}
+          tabIndex={-1}
+          className={editingAssetId ? "scroll-mt-24 border-sky-300 bg-sky-50/60 ring-2 ring-sky-500/20 dark:border-sky-700 dark:bg-sky-950/30 dark:ring-sky-400/20" : "scroll-mt-24"}
+        >
           <Section
             title={editingAssetId ? "Editar activo" : "Agregar activo"}
             subtitle="Cuentas bancarias, inversiones, propiedades, autos, negocios, etc."
-            right={editingAssetId ? <LinkButton onClick={resetAssetForm}>Cancelar</LinkButton> : null}
+            right={editingAssetId ? <span className="flex items-center gap-3"><span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-700 dark:bg-sky-900/60 dark:text-sky-200">Editando activo</span><LinkButton onClick={resetAssetForm}>Cancelar</LinkButton></span> : null}
           >
+            {editingAssetId && (
+              <div className="rounded-2xl border border-sky-200 bg-white/80 px-3 py-2 text-[11px] font-medium text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
+                Este bloque está activo para edición. Los cambios se guardarán sobre el activo seleccionado.
+              </div>
+            )}
             <form onSubmit={handleSubmitAsset} className="mt-2 space-y-3">
               <div>
                 <Label>Nombre</Label>
@@ -1344,12 +1371,21 @@ export default function PatrimonioPage() {
           </Section>
         </Card>
 
-        <Card>
+        <Card
+          ref={debtFormCardRef}
+          tabIndex={-1}
+          className={editingDebtId ? "scroll-mt-24 border-sky-300 bg-sky-50/60 ring-2 ring-sky-500/20 dark:border-sky-700 dark:bg-sky-950/30 dark:ring-sky-400/20" : "scroll-mt-24"}
+        >
           <Section
             title={editingDebtId ? "Editar deuda" : "Agregar deuda"}
             subtitle="Tarjetas, préstamos, créditos de auto/casa. Lo importante es el saldo actual."
-            right={editingDebtId ? <LinkButton onClick={resetDebtForm}>Cancelar</LinkButton> : null}
+            right={editingDebtId ? <span className="flex items-center gap-3"><span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-700 dark:bg-sky-900/60 dark:text-sky-200">Editando deuda</span><LinkButton onClick={resetDebtForm}>Cancelar</LinkButton></span> : null}
           >
+            {editingDebtId && (
+              <div className="rounded-2xl border border-sky-200 bg-white/80 px-3 py-2 text-[11px] font-medium text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
+                Este bloque está activo para edición. Los cambios se guardarán sobre la deuda seleccionada.
+              </div>
+            )}
             <form onSubmit={handleSubmitDebt} className="mt-2 space-y-3">
               <div>
                 <Label>Nombre</Label>

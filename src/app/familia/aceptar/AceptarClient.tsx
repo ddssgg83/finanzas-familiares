@@ -63,14 +63,13 @@ export default function AceptarClient() {
   const canRun = useMemo(() => !!token, [token]);
   const invitedEmail = invite?.email ?? null;
 
-  // ✅ OPCIÓN A (la buena): SOLO usamos next=... y que OnboardingClient lo persista.
-  const goLogin = (mode: "login" | "signup") => {
+  const goInviteAuth = () => {
     const next = `/familia/aceptar?token=${encodeURIComponent(token)}`;
 
     const url =
       `/onboarding?next=${encodeURIComponent(next)}` +
       (invitedEmail ? `&email=${encodeURIComponent(invitedEmail)}` : "") +
-      `&mode=${mode}`;
+      `&mode=invite`;
 
     router.replace(url);
   };
@@ -88,7 +87,7 @@ export default function AceptarClient() {
     try {
       setSigningOut(true);
       await supabase.auth.signOut();
-      goLogin("login");
+      goInviteAuth();
     } finally {
       setSigningOut(false);
     }
@@ -335,8 +334,7 @@ export default function AceptarClient() {
                     </div>
 
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <Button onClick={() => goLogin("login")}>Iniciar sesión</Button>
-                      <Button onClick={() => goLogin("signup")}>Crear cuenta</Button>
+                      <Button onClick={goInviteAuth}>Continuar con el correo invitado</Button>
 
                       {invitedEmail ? (
                         <LinkButton tone="info" onClick={onCopyInvitedEmail}>
@@ -358,7 +356,7 @@ export default function AceptarClient() {
 
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Button onClick={onSignOutAndGoLogin} disabled={signingOut}>
-                        {signingOut ? "Cerrando sesión…" : "Cerrar sesión e ingresar con el correo invitado"}
+                        {signingOut ? "Cerrando sesión…" : "Cerrar sesión y continuar con el correo invitado"}
                       </Button>
 
                       <LinkButton tone="info" onClick={onCopyInvitedEmail}>

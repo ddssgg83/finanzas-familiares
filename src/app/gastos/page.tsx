@@ -391,6 +391,7 @@ export default function GastosPage() {
   // search ref
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const draftTimer = useRef<number | null>(null);
+  const editFormCardRef = useRef<HTMLElement | null>(null);
 
   const formatMoney = (n: number) => fmtMoney(n, "MXN");
 
@@ -996,6 +997,24 @@ if (!key) return;
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editingId]);
 
+  useEffect(() => {
+    if (!editingId) return;
+
+    const card = editFormCardRef.current;
+    if (!card) return;
+
+    const rafId = window.requestAnimationFrame(() => {
+      card.scrollIntoView({ behavior: "smooth", block: "start" });
+      try {
+        card.focus({ preventScroll: true });
+      } catch {
+        card.focus();
+      }
+    });
+
+    return () => window.cancelAnimationFrame(rafId);
+  }, [editingId]);
+
   // =========================================================
   // Templates
   // =========================================================
@@ -1453,7 +1472,7 @@ if (!key) return;
 
     setSelectedCardId(tx.card_id ?? null);
     setEditingId(tx.id);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setShowAdvanced(Boolean(tx.notes?.trim() || tx.goal_id));
   };
 
   const handleDuplicate = (tx: Tx) => {
@@ -1940,12 +1959,21 @@ if (!key) return;
 </Card>
 
       {/* Formulario */}
-      <Card>
+      <Card
+        ref={editFormCardRef}
+        tabIndex={-1}
+        className={editingId ? "scroll-mt-24 border-sky-300 bg-sky-50/60 ring-2 ring-sky-500/20 dark:border-sky-700 dark:bg-sky-950/30 dark:ring-sky-400/20" : "scroll-mt-24"}
+      >
         <Section
           title={editingId ? "Editar movimiento" : "Agregar movimiento"}
           subtitle="Atajos: ⌘/Ctrl+Enter guardar · Esc cancelar · ⌘/Ctrl+K buscar"
-          right={editingId ? <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Editando</span> : null}
+          right={editingId ? <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-700 dark:bg-sky-900/60 dark:text-sky-200">Editando ahora</span> : null}
         >
+          {editingId && (
+            <div className="rounded-2xl border border-sky-200 bg-white/80 px-3 py-2 text-[11px] font-medium text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
+              Estás editando un movimiento existente. Guarda cambios o cancela para salir de este modo.
+            </div>
+          )}
           {!editingId && (
             <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px]">
               <span className="text-slate-400 dark:text-slate-500">Plantillas:</span>
