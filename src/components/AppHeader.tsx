@@ -189,7 +189,7 @@ export function AppHeader({
           <div className="flex flex-wrap items-center gap-2 lg:justify-end">
             {!isOfflineRoute && <SyncBadge pendingCount={pending} isOnline={isOnline} syncing={syncing} />}
 
-            <details className="group relative">
+            <details className="group sm:relative">
               <summary
                 className={cn(
                   "flex list-none items-center gap-3 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--card)/0.82)] px-3 py-2 text-left shadow-[var(--shadow-soft)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[hsl(var(--card))]",
@@ -202,7 +202,13 @@ export function AppHeader({
                 <ChevronDown className="h-4 w-4 text-slate-500 transition-transform duration-200 group-open:rotate-180 dark:text-slate-400" />
               </summary>
 
-              <div className="absolute right-0 top-[calc(100%+0.75rem)] w-[min(20rem,calc(100vw-2rem))] rounded-[24px] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-[0_24px_60px_-30px_rgba(15,23,42,0.38)]">
+              <div
+                className={cn(
+                  "fixed inset-x-4 z-50 rounded-[24px] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-[0_24px_60px_-30px_rgba(15,23,42,0.38)]",
+                  "top-[calc(env(safe-area-inset-top)+5.25rem)] max-h-[calc(100dvh-env(safe-area-inset-top)-6.5rem)] overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+1rem)]",
+                  "sm:absolute sm:inset-x-auto sm:right-0 sm:top-[calc(100%+0.75rem)] sm:w-[20rem] sm:max-h-none sm:overflow-visible sm:pb-4"
+                )}
+              >
                 <div className="space-y-1">
                   <p className="text-sm font-semibold text-slate-950 dark:text-slate-50">{displayName}</p>
                   {userEmail && (
