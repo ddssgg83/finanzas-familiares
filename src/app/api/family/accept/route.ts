@@ -31,6 +31,20 @@ type InviteRow = {
   message: string | null;
 };
 
+function resolveDisplayName(user: any) {
+  const metadataName =
+    user?.user_metadata?.full_name ??
+    user?.user_metadata?.name ??
+    user?.user_metadata?.display_name ??
+    null;
+
+  const clean = String(metadataName ?? "").trim();
+  if (clean) return clean;
+
+  const email = String(user?.email ?? "").trim();
+  return email || "Miembro";
+}
+
 function isExpired(expiresAt: string | null) {
   if (!expiresAt) return false;
   const exp = new Date(expiresAt).getTime();
@@ -116,6 +130,7 @@ export async function POST(req: Request) {
     const user = userRes.user;
     const myEmail = String(user.email ?? "").toLowerCase().trim();
     const invEmail = String(invite.email ?? "").toLowerCase().trim();
+    const displayName = resolveDisplayName(user);
 
     if (!myEmail || myEmail !== invEmail) {
       return NextResponse.json(
@@ -181,7 +196,7 @@ export async function POST(req: Request) {
 
       await supabaseAdmin
         .from("family_members")
-        .update({ status: "active" })
+        .update({ status: "active", full_name: displayName, invited_email: user.email ?? null })
         .eq("id", (existing as any).id);
 
       return NextResponse.json({ ok: true, status: "already_accepted" });
@@ -212,7 +227,7 @@ export async function POST(req: Request) {
         {
           family_id: invite.family_id,
           user_id: user.id,
-          full_name: user.email ?? "Miembro",
+          full_name: displayName,
           invited_email: user.email ?? null,
           role: invite.role,
           status: "active",
@@ -224,7 +239,12 @@ export async function POST(req: Request) {
     } else {
       const { error: updMemErr } = await supabaseAdmin
         .from("family_members")
-        .update({ status: "active", role: invite.role })
+        .update({
+          status: "active",
+          role: invite.role,
+          full_name: displayName,
+          invited_email: user.email ?? null,
+        })
         .eq("id", (existing as any).id);
 
       if (updMemErr) {
