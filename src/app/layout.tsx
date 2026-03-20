@@ -1,9 +1,10 @@
 // src/app/layout.tsx
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { ThemeProvider } from "@/components/theme-provider";
 
-export const viewport = {
-  themeColor: "#5B5FFF", // tu azul RINDAY
+export const viewport: Viewport = {
+  themeColor: "#0f3f8f",
 };
 
 export const metadata: Metadata = {
@@ -12,7 +13,7 @@ export const metadata: Metadata = {
     template: "%s · RINDAY",
   },
   description:
-    "App de finanzas familiares para gestionar ingresos y gastos de forma clara y colaborativa.",
+    "App de finanzas familiares para gestionar ingresos y gastos de forma clara, colaborativa y elegante.",
   applicationName: "RINDAY",
   appleWebApp: {
     capable: true,
@@ -34,12 +35,16 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
-    <html lang="es">
-      <body>{children}</body>
+    <html lang="es" suppressHydrationWarning>
+      <body className="app-shell">
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          {children}
+        </ThemeProvider>
+      </body>
     </html>
   );
 }

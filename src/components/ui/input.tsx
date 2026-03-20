@@ -9,10 +9,9 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
       <input
         ref={ref}
         type={type}
+        data-slot="input"
         className={cn(
-          "h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-[15px] text-slate-900 outline-none transition " +
-            "focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500/20 " +
-            "dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100",
+          "h-12 w-full rounded-2xl border border-[hsl(var(--input))] bg-[hsl(var(--card)/0.84)] px-4 text-sm text-[hsl(var(--foreground))] shadow-[inset_0_1px_0_rgba(255,255,255,0.22)] outline-none transition-all duration-200 placeholder:text-[hsl(var(--muted-foreground))] hover:border-[hsl(var(--border))] focus:border-[hsl(var(--ring))] focus:bg-[hsl(var(--card))] focus:ring-4 focus:ring-[hsl(var(--ring)/0.12)]",
           className
         )}
         {...props}

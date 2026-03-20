@@ -2,6 +2,7 @@
 "use client";
 
 import * as React from "react";
+import { cn } from "@/lib/utils";
 
 type Props = {
   children: React.ReactNode;
@@ -20,8 +21,8 @@ export function PageShell({ children, className = "", maxWidth = "6xl" }: Props)
       : "max-w-6xl";
 
   return (
-    <div className={`mx-auto w-full ${mw} px-4 pb-16 pt-4 md:px-6 ${className}`}>
-      <div className="space-y-4">{children}</div>
+    <div className={cn("shell-section mx-auto w-full px-4 pb-20 pt-6 md:px-6 md:pt-8", mw, className)}>
+      <div className="space-y-6 md:space-y-8">{children}</div>
     </div>
   );
 }

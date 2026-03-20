@@ -4,18 +4,22 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full border border-transparent px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 dark:focus:ring-slate-800",
+  "inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold tracking-[0.04em] transition-colors focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] focus:ring-offset-2 focus:ring-offset-[hsl(var(--background))]",
   {
     variants: {
       variant: {
         default:
-          "bg-slate-900 text-slate-50 hover:bg-slate-900/80 dark:bg-slate-50 dark:text-slate-900 dark:hover:bg-slate-50/80",
+          "border-[hsl(var(--primary)/0.18)] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]",
         secondary:
-          "bg-slate-100 text-slate-800 hover:bg-slate-100/80 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-800/80",
+          "border-[hsl(var(--border))] bg-[hsl(var(--muted)/0.78)] text-[hsl(var(--foreground))]",
         destructive:
-          "bg-red-500 text-slate-50 hover:bg-red-500/80 dark:bg-red-900 dark:text-slate-50 dark:hover:bg-red-900/80",
+          "border-[hsl(var(--danger)/0.24)] bg-[hsl(var(--danger)/0.12)] text-[hsl(var(--danger))]",
         outline:
-          "border-slate-200 text-slate-950 dark:border-slate-800 dark:text-slate-50",
+          "border-[hsl(var(--border))] bg-transparent text-[hsl(var(--foreground))]",
+        success:
+          "border-[hsl(var(--success)/0.2)] bg-[hsl(var(--success)/0.12)] text-[hsl(var(--success))]",
+        warning:
+          "border-[hsl(var(--warning)/0.22)] bg-[hsl(var(--warning)/0.14)] text-[hsl(var(--warning))]",
       },
     },
     defaultVariants: {
