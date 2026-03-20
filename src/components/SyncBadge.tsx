@@ -16,11 +16,10 @@ export function SyncBadge({ pendingCount, isOnline, syncing, className }: Props)
   useEffect(() => setMounted(true), []);
 
   const view = useMemo(() => {
-    // 🟦 Estado neutro antes de montar (igual en SSR y CSR)
     if (!mounted) {
       return {
-        label: "Sincronizado",
-        title: "Sincronizado",
+        label: "Todo al dia",
+        title: "Todo al dia",
         dot: "bg-emerald-500",
         tone:
           "border-slate-200 bg-white text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200",
@@ -29,8 +28,8 @@ export function SyncBadge({ pendingCount, isOnline, syncing, className }: Props)
 
     if (!isOnline) {
       return {
-        label: "Sin conexión",
-        title: "Sin conexión",
+        label: "Sin conexion",
+        title: "Sin conexion",
         dot: "bg-amber-500",
         tone:
           "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200",
@@ -39,8 +38,8 @@ export function SyncBadge({ pendingCount, isOnline, syncing, className }: Props)
 
     if (syncing) {
       return {
-        label: "Sincronizando…",
-        title: "Sincronizando…",
+        label: "Sincronizando",
+        title: "Sincronizando",
         dot: "bg-sky-500",
         tone:
           "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900/50 dark:bg-sky-950/40 dark:text-sky-200",
@@ -49,8 +48,8 @@ export function SyncBadge({ pendingCount, isOnline, syncing, className }: Props)
 
     if (pendingCount > 0) {
       return {
-        label: `${pendingCount} pendiente(s)`,
-        title: `${pendingCount} pendiente(s)`,
+        label: `${pendingCount} cambio${pendingCount === 1 ? "" : "s"} pendiente${pendingCount === 1 ? "" : "s"}`,
+        title: `${pendingCount} cambio${pendingCount === 1 ? "" : "s"} pendiente${pendingCount === 1 ? "" : "s"}`,
         dot: "bg-amber-500",
         tone:
           "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200",
@@ -58,8 +57,8 @@ export function SyncBadge({ pendingCount, isOnline, syncing, className }: Props)
     }
 
     return {
-      label: "Sincronizado",
-      title: "Sincronizado",
+      label: "Todo al dia",
+      title: "Todo al dia",
       dot: "bg-emerald-500",
       tone:
         "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200",

@@ -262,6 +262,7 @@ export default function EditFamilyGoalPage() {
         title="Editar objetivo familiar"
         subtitle="Ajusta nombre, monto y seguimiento automático."
         activeTab="familia"
+        userName={(user.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user.email ?? ""}
         userId={user.id}
         onSignOut={handleSignOut}

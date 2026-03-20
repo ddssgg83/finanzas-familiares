@@ -1197,6 +1197,7 @@ export default function FamiliaPage() {
         title="Familia"
         subtitle="Invita miembros, define roles y mantén control del dashboard familiar."
         activeTab="familia"
+        userName={(user.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user.email ?? ""}
         userId={user.id}
         onSignOut={handleSignOut}

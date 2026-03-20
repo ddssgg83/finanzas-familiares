@@ -19,12 +19,6 @@ const inactiveDefault =
 const activeDefault =
   "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900";
 
-const inactiveAprende =
-  "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-600 dark:bg-amber-900/30 dark:text-amber-200";
-
-const activeAprende =
-  "border-amber-500 bg-amber-500 text-white dark:border-amber-400 dark:bg-amber-400 dark:text-slate-900";
-
 export function MainNavTabs({ active, className = "", ...rest }: Props) {
   return (
     <nav
@@ -68,20 +62,6 @@ export function MainNavTabs({ active, className = "", ...rest }: Props) {
           className={`${basePill} ${inactiveDefault}`}
         >
           Patrimonio
-        </Link>
-      )}
-
-      {/* Aprende */}
-      {active === "aprende" ? (
-        <span className={`${basePill} ${activeAprende}`}>
-          Aprende finanzas
-        </span>
-      ) : (
-        <Link
-          href="/aprende"
-          className={`${basePill} ${inactiveAprende}`}
-        >
-          Aprende finanzas
         </Link>
       )}
 

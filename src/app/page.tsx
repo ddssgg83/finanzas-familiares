@@ -355,8 +355,9 @@ export default function DashboardPage() {
     <main className="flex min-h-screen flex-col pb-16 md:pb-8">
       <AppHeader
         title="Dashboard"
-        subtitle="Una cabina sobria y clara para leer tu salud financiera personal antes de entrar al detalle."
+        subtitle="Empieza aqui para ver lo que entra, lo que sale y como va tu patrimonio."
         activeTab="dashboard"
+        userName={(user?.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user?.email ?? undefined}
         userId={user?.id}
       />
@@ -366,14 +367,14 @@ export default function DashboardPage() {
           <div className="grid gap-6 lg:grid-cols-[1.35fr,0.9fr] lg:items-end">
             <div className="space-y-5">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary">Sistema visual base</Badge>
+                <Badge variant="secondary">{summary?.monthLabel ?? "Resumen mensual"}</Badge>
                 <Badge variant={balanceTag.variant}>{balanceTag.label}</Badge>
               </div>
 
               <div className="space-y-3">
-                <p className="eyebrow">Vista principal</p>
+                <p className="eyebrow">Resumen mensual</p>
                 <h2 className="max-w-3xl text-balance text-3xl font-semibold tracking-[-0.05em] text-slate-950 dark:text-slate-50 md:text-5xl">
-                  Finanzas familiares con presencia mas sobria, moderna y premium.
+                  Todo lo importante de tu dinero, en un solo vistazo.
                 </h2>
                 <p className="max-w-2xl text-sm leading-7 text-slate-600 dark:text-slate-300 md:text-base">
                   {dashboardNarrative}
@@ -419,8 +420,8 @@ export default function DashboardPage() {
         <Tabs defaultValue="overview" className="w-full">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <p className="eyebrow">Componentes base aplicados</p>
-              <h3 className="section-title">Dashboard principal</h3>
+              <p className="eyebrow">Panorama financiero</p>
+              <h3 className="section-title">Tu resumen</h3>
             </div>
             <TabsList>
               <TabsTrigger value="overview">Vista general</TabsTrigger>

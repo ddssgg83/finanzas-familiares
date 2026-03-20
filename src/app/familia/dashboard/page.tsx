@@ -508,6 +508,7 @@ export default function FamilyDashboardPage() {
         title="Familia"
         subtitle="Objetivos familiares y actividad del grupo"
         activeTab="familia"
+        userName={(user?.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user?.email ?? ""}
         userId={user?.id ?? ""}
         onSignOut={handleSignOut}

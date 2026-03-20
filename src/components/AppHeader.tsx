@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Landmark, LogOut, RotateCw } from "lucide-react";
+import { ChevronDown, Landmark, LogOut, RotateCw } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { getOfflineTxs, syncOfflineTxs } from "@/lib/offline";
 import { SyncBadge } from "./SyncBadge";
@@ -16,6 +16,7 @@ type AppHeaderProps = {
   title: string;
   subtitle?: string;
   activeTab?: "dashboard" | "gastos" | "patrimonio" | "aprende" | "familia";
+  userName?: string | null;
   userEmail?: string | null;
   userId?: string | null;
   onSignOut?: () => void;
@@ -29,9 +30,23 @@ const NAV_ITEMS: {
   { key: "dashboard", label: "Dashboard", href: "/" },
   { key: "gastos", label: "Movimientos", href: "/gastos" },
   { key: "patrimonio", label: "Patrimonio", href: "/patrimonio" },
-  { key: "aprende", label: "Aprende", href: "/aprende" },
   { key: "familia", label: "Familia", href: "/familia" },
 ];
+
+function toDisplayName(userName?: string | null, userEmail?: string | null) {
+  const cleanName = userName?.trim();
+  if (cleanName) return cleanName;
+
+  const emailLocalPart = userEmail?.split("@")[0]?.trim();
+  if (!emailLocalPart) return "Tu cuenta";
+
+  return emailLocalPart
+    .replace(/[._-]+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
 function pathToTab(pathname: string): AppHeaderProps["activeTab"] {
   if (pathname.startsWith("/gastos")) return "gastos";
@@ -64,6 +79,7 @@ export function AppHeader({
   title,
   subtitle,
   activeTab,
+  userName,
   userEmail,
   userId,
   onSignOut,
@@ -139,12 +155,7 @@ export function AppHeader({
     }
   }, [isOnline, userId, refreshPending]);
 
-  const statusLabel = useMemo(() => {
-    if (!isOnline) return "Modo offline";
-    if (syncing) return "Sincronizando";
-    if (pending > 0) return "Acción pendiente";
-    return "Todo al día";
-  }, [isOnline, syncing, pending]);
+  const displayName = useMemo(() => toDisplayName(userName, userEmail), [userEmail, userName]);
 
   return (
     <header className="sticky top-0 z-40 border-b border-[hsl(var(--border)/0.66)] bg-[hsl(var(--background)/0.72)] backdrop-blur-2xl">
@@ -177,38 +188,56 @@ export function AppHeader({
 
           <div className="flex flex-wrap items-center gap-2 lg:justify-end">
             {!isOfflineRoute && <SyncBadge pendingCount={pending} isOnline={isOnline} syncing={syncing} />}
-            <Badge variant={pending > 0 ? "warning" : "success"}>{statusLabel}</Badge>
 
-            {userEmail && (
-              <div className="hidden min-w-[180px] rounded-[22px] border border-[hsl(var(--border))] bg-[hsl(var(--card)/0.78)] px-4 py-2 text-right shadow-[var(--shadow-soft)] sm:block">
-                <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-50">
-                  {userEmail}
+            <details className="group relative">
+              <summary
+                className={cn(
+                  "flex list-none items-center gap-3 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--card)/0.82)] px-3 py-2 text-left shadow-[var(--shadow-soft)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[hsl(var(--card))]",
+                  "cursor-pointer select-none"
+                )}
+              >
+                <div className="hidden min-w-0 sm:block">
+                  <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-50">{displayName}</div>
                 </div>
-                <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-                  Sesion activa
+                <ChevronDown className="h-4 w-4 text-slate-500 transition-transform duration-200 group-open:rotate-180 dark:text-slate-400" />
+              </summary>
+
+              <div className="absolute right-0 top-[calc(100%+0.75rem)] w-[min(20rem,calc(100vw-2rem))] rounded-[24px] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-[0_24px_60px_-30px_rgba(15,23,42,0.38)]">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-slate-950 dark:text-slate-50">{displayName}</p>
+                  {userEmail && (
+                    <p className="truncate text-xs text-slate-500 dark:text-slate-400">{userEmail}</p>
+                  )}
+                </div>
+
+                <div className="mt-4 flex flex-col gap-2">
+                  {!isOfflineRoute && pending > 0 && (
+                    <button
+                      onClick={onRetry}
+                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "justify-start")}
+                      title="Reintentar sincronizacion"
+                    >
+                      <RotateCw className="mr-2 h-3.5 w-3.5" />
+                      Sincronizar ahora
+                    </button>
+                  )}
+
+                  <div className="w-full [&>button]:w-full [&>button]:justify-center">
+                    <ThemeToggle />
+                  </div>
+
+                  {onSignOut && (
+                    <button
+                      onClick={onSignOut}
+                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "justify-start")}
+                    >
+                      <LogOut className="mr-2 h-3.5 w-3.5" />
+                      Cerrar sesion
+                    </button>
+                  )}
                 </div>
               </div>
-            )}
-
-            {!isOfflineRoute && (
-              <button
-                onClick={onRetry}
-                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "sm:hidden")}
-                title="Reintentar sincronización"
-              >
-                <RotateCw className="mr-2 h-3.5 w-3.5" />
-                Reintentar
-              </button>
-            )}
-
-            <ThemeToggle />
-
-            {onSignOut && (
-              <button onClick={onSignOut} className={buttonVariants({ variant: "outline", size: "sm" })}>
-                <LogOut className="mr-2 h-3.5 w-3.5" />
-                Cerrar sesion
-              </button>
-            )}
+            </details>
           </div>
         </div>
 

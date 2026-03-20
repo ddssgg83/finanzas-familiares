@@ -1165,6 +1165,7 @@ export default function PatrimonioPage() {
         title="Patrimonio (activos y deudas)"
         subtitle="Foto completa de lo que tienes y lo que debes. Conectado a tu flujo mensual."
         activeTab="patrimonio"
+        userName={(user.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user.email}
         userId={user.id}
         onSignOut={handleSignOut}

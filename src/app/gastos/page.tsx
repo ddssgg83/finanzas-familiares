@@ -1681,6 +1681,7 @@ if (!key) return;
         title="Gastos e ingresos"
         subtitle="Aquí capturas todos los movimientos del día a día."
         activeTab="gastos"
+        userName={(user.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user.email}
         userId={user.id}
         onSignOut={handleSignOut}

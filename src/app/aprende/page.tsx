@@ -338,6 +338,7 @@ export default function AprendePage() {
         title="Aprende finanzas"
         subtitle="Mini guías y tips aplicados a tu vida real, no teoría complicada."
         activeTab="aprende"
+        userName={(user.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user.email ?? ""}
         userId={user.id}
         onSignOut={handleSignOut}

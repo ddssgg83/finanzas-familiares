@@ -218,6 +218,7 @@ export default function NewFamilyGoalPage() {
         title="Familia"
         subtitle="Nueva meta familiar"
         activeTab="familia"
+        userName={(user.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user.email ?? ""}
         userId={user.id}
         onSignOut={handleSignOut}

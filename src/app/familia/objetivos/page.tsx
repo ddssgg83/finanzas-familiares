@@ -372,6 +372,7 @@ export default function FamilyGoalsPage() {
         title="Familia"
         subtitle="Metas familiares y planes en conjunto"
         activeTab="familia"
+        userName={(user.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user.email ?? ""}
         userId={user.id}
         onSignOut={handleSignOut}
