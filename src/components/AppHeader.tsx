@@ -1,7 +1,7 @@
 // src/components/AppHeader.tsx
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronDown, Landmark, LogOut, RotateCw } from "lucide-react";
@@ -93,6 +93,9 @@ export function AppHeader({
 
   const [pending, setPending] = useState(0);
   const [syncing, setSyncing] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
+  const accountTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const refreshPending = useCallback(async () => {
     try {
@@ -157,6 +160,59 @@ export function AppHeader({
 
   const displayName = useMemo(() => toDisplayName(userName, userEmail), [userEmail, userName]);
 
+  useEffect(() => {
+    setAccountMenuOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+
+    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+
+      if (accountMenuRef.current?.contains(target)) return;
+      if (accountTriggerRef.current?.contains(target)) return;
+
+      setAccountMenuOpen(false);
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setAccountMenuOpen(false);
+        accountTriggerRef.current?.focus();
+      }
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [accountMenuOpen]);
+
+  const toggleAccountMenu = useCallback(() => {
+    setAccountMenuOpen((prev) => !prev);
+  }, []);
+
+  const closeAccountMenu = useCallback(() => {
+    setAccountMenuOpen(false);
+  }, []);
+
+  const handleRetryFromMenu = useCallback(async () => {
+    await onRetry();
+    setAccountMenuOpen(false);
+  }, [onRetry]);
+
+  const handleSignOutFromMenu = useCallback(() => {
+    setAccountMenuOpen(false);
+    onSignOut?.();
+  }, [onSignOut]);
+
   return (
     <header className="sticky top-0 z-40 border-b border-[hsl(var(--border)/0.66)] bg-[hsl(var(--background)/0.72)] backdrop-blur-2xl">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-4 md:px-6 md:py-5">
@@ -189,8 +245,13 @@ export function AppHeader({
           <div className="flex flex-wrap items-center gap-2 lg:justify-end">
             {!isOfflineRoute && <SyncBadge pendingCount={pending} isOnline={isOnline} syncing={syncing} />}
 
-            <details className="group sm:relative">
-              <summary
+            <div className="sm:relative">
+              <button
+                ref={accountTriggerRef}
+                type="button"
+                onClick={toggleAccountMenu}
+                aria-expanded={accountMenuOpen}
+                aria-haspopup="menu"
                 className={cn(
                   "flex list-none items-center gap-3 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--card)/0.82)] px-3 py-2 text-left shadow-[var(--shadow-soft)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[hsl(var(--card))]",
                   "cursor-pointer select-none"
@@ -199,51 +260,71 @@ export function AppHeader({
                 <div className="hidden min-w-0 sm:block">
                   <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-50">{displayName}</div>
                 </div>
-                <ChevronDown className="h-4 w-4 text-slate-500 transition-transform duration-200 group-open:rotate-180 dark:text-slate-400" />
-              </summary>
-
-              <div
-                className={cn(
-                  "fixed inset-x-4 z-50 rounded-[24px] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-[0_24px_60px_-30px_rgba(15,23,42,0.38)]",
-                  "top-[calc(env(safe-area-inset-top)+5.25rem)] max-h-[calc(100dvh-env(safe-area-inset-top)-6.5rem)] overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+1rem)]",
-                  "sm:absolute sm:inset-x-auto sm:right-0 sm:top-[calc(100%+0.75rem)] sm:w-[20rem] sm:max-h-none sm:overflow-visible sm:pb-4"
-                )}
-              >
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-slate-950 dark:text-slate-50">{displayName}</p>
-                  {userEmail && (
-                    <p className="truncate text-xs text-slate-500 dark:text-slate-400">{userEmail}</p>
+                <ChevronDown
+                  className={cn(
+                    "h-4 w-4 text-slate-500 transition-transform duration-200 dark:text-slate-400",
+                    accountMenuOpen && "rotate-180"
                   )}
-                </div>
+                />
+              </button>
 
-                <div className="mt-4 flex flex-col gap-2">
-                  {!isOfflineRoute && pending > 0 && (
-                    <button
-                      onClick={onRetry}
-                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "justify-start")}
-                      title="Reintentar sincronizacion"
-                    >
-                      <RotateCw className="mr-2 h-3.5 w-3.5" />
-                      Sincronizar ahora
-                    </button>
-                  )}
+              {accountMenuOpen && (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Cerrar menu de cuenta"
+                    className="fixed inset-0 z-40 bg-transparent"
+                    onClick={closeAccountMenu}
+                  />
 
-                  <div className="w-full [&>button]:w-full [&>button]:justify-center">
-                    <ThemeToggle />
+                  <div
+                    ref={accountMenuRef}
+                    className={cn(
+                      "fixed inset-x-4 z-50 rounded-[24px] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-[0_24px_60px_-30px_rgba(15,23,42,0.38)]",
+                      "top-[calc(env(safe-area-inset-top)+5.25rem)] max-h-[calc(100dvh-env(safe-area-inset-top)-6.5rem)] overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+1rem)]",
+                      "sm:absolute sm:inset-x-auto sm:right-0 sm:top-[calc(100%+0.75rem)] sm:w-[20rem] sm:max-h-none sm:overflow-visible sm:pb-4"
+                    )}
+                  >
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-slate-950 dark:text-slate-50">{displayName}</p>
+                      {userEmail && (
+                        <p className="truncate text-xs text-slate-500 dark:text-slate-400">{userEmail}</p>
+                      )}
+                    </div>
+
+                    <div className="mt-4 flex flex-col gap-2">
+                      {!isOfflineRoute && pending > 0 && (
+                        <button
+                          onClick={handleRetryFromMenu}
+                          className={cn(buttonVariants({ variant: "outline", size: "sm" }), "justify-start")}
+                          title="Reintentar sincronizacion"
+                        >
+                          <RotateCw className="mr-2 h-3.5 w-3.5" />
+                          Sincronizar ahora
+                        </button>
+                      )}
+
+                      <div
+                        className="w-full [&>button]:w-full [&>button]:justify-center"
+                        onClick={closeAccountMenu}
+                      >
+                        <ThemeToggle />
+                      </div>
+
+                      {onSignOut && (
+                        <button
+                          onClick={handleSignOutFromMenu}
+                          className={cn(buttonVariants({ variant: "outline", size: "sm" }), "justify-start")}
+                        >
+                          <LogOut className="mr-2 h-3.5 w-3.5" />
+                          Cerrar sesion
+                        </button>
+                      )}
+                    </div>
                   </div>
-
-                  {onSignOut && (
-                    <button
-                      onClick={onSignOut}
-                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "justify-start")}
-                    >
-                      <LogOut className="mr-2 h-3.5 w-3.5" />
-                      Cerrar sesion
-                    </button>
-                  )}
-                </div>
-              </div>
-            </details>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
