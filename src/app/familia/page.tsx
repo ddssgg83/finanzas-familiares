@@ -59,6 +59,8 @@ type FamilyInviteRow = {
   invited_by: string | null;
   token: string | null;
   created_at?: string;
+  email_sent?: boolean | null;
+  email_error?: string | null;
 };
 
 type CreateFamilyForm = {
@@ -282,6 +284,10 @@ export default function FamiliaPage() {
 
   const [savingCreateFamily, setSavingCreateFamily] = useState(false);
   const [savingInvite, setSavingInvite] = useState(false);
+  const [inviteFeedback, setInviteFeedback] = useState<{
+    tone: "success" | "warning" | "error";
+    message: string;
+  } | null>(null);
 
   // -------- LIMPIEZA INVITES (B + C) --------
   const [purgeLoading, setPurgeLoading] = useState(false);
@@ -893,6 +899,7 @@ export default function FamiliaPage() {
 
     try {
       setSavingInvite(true);
+      setInviteFeedback(null);
 
       if (offline) {
         alert("Necesitas conexión a internet para enviar una invitación.");
@@ -932,6 +939,8 @@ export default function FamiliaPage() {
         invited_by: user.id,
         token: json.token ?? null,
         created_at: new Date().toISOString(),
+        email_sent: json.email_sent ?? null,
+        email_error: json.email_error ?? null,
       };
 
       setInvites((prev) => [optimistic, ...prev]);
@@ -945,9 +954,18 @@ export default function FamiliaPage() {
       } catch {}
 
       if (json.email_sent) {
-        alert("Invitación enviada ✅");
+        setInviteFeedback({
+          tone: "success",
+          message: `Invitación creada y enviada a ${email}.`,
+        });
       } else {
-        alert("Invitación creada ✅ (pero el correo falló). Usa 'Copiar link' por ahora.");
+        const reason = String(json.email_error ?? "").trim();
+        setInviteFeedback({
+          tone: "warning",
+          message: reason
+            ? `La invitación se creó, pero el correo no se pudo enviar. Motivo: ${reason}`
+            : "La invitación se creó, pero el correo no se pudo enviar. Puedes compartir el link manualmente.",
+        });
         console.warn("SMTP error:", json.email_error);
       }
 
@@ -955,7 +973,10 @@ export default function FamiliaPage() {
       setReloadTick((n) => n + 1);
     } catch (err: any) {
       console.error("Error invitando:", err);
-      alert(err?.message ?? "No se pudo enviar la invitación.");
+      setInviteFeedback({
+        tone: "error",
+        message: err?.message ?? "No se pudo enviar la invitación.",
+      });
     } finally {
       setSavingInvite(false);
     }
@@ -1453,6 +1474,20 @@ export default function FamiliaPage() {
                 {savingInvite ? "Enviando..." : "Enviar invitación"}
               </Button>
 
+              {inviteFeedback ? (
+                <div
+                  className={`rounded-2xl border px-4 py-3 text-sm ${
+                    inviteFeedback.tone === "success"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200"
+                      : inviteFeedback.tone === "warning"
+                      ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
+                      : "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200"
+                  }`}
+                >
+                  {inviteFeedback.message}
+                </div>
+              ) : null}
+
               {!effectiveFamilyId && <Help>Primero crea tu familia para poder invitar miembros.</Help>}
               {offline && canManageInvitesUI && <Help>Invitar requiere internet.</Help>}
             </form>
@@ -1490,6 +1525,8 @@ export default function FamiliaPage() {
                   const canRevoke = canManageInvitesUI && i.status === "pending";
                   const canDelete = canManageInvitesUI && i.status !== "pending";
                   const canCopy = !!i.token;
+                  const emailFailed = i.email_sent === false;
+                  const emailDelivered = i.email_sent === true;
 
                   return (
                     <ListItem
@@ -1502,6 +1539,23 @@ export default function FamiliaPage() {
                           <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
                             Rol: {i.role.toUpperCase()} · Estado: {i.status}
                           </div>
+                          {emailDelivered ? (
+                            <div className="mt-1 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200">
+                              Correo enviado
+                            </div>
+                          ) : null}
+                          {emailFailed ? (
+                            <div className="mt-1 space-y-1">
+                              <div className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                                Correo no enviado
+                              </div>
+                              <div className="text-[11px] text-amber-700 dark:text-amber-200">
+                                {i.email_error?.trim()
+                                  ? `Motivo: ${i.email_error}`
+                                  : "No pudimos entregar el correo. Puedes compartir el link manualmente."}
+                              </div>
+                            </div>
+                          ) : null}
                           {i.created_at && (
                             <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
                               {formatDateDisplay(i.created_at)}

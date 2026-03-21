@@ -115,8 +115,10 @@ function getSmtpConfig() {
   const pass = (process.env.SMTP_PASS ?? "").trim();
 
   const secureEnv = (process.env.SMTP_SECURE ?? "").trim().toLowerCase();
-  const secure =
-    secureEnv === "true" ? true : secureEnv === "false" ? false : port === 465;
+  // Mantener una combinacion valida:
+  // - 465 => SMTPS directo => secure true
+  // - 587 => STARTTLS/upgrade => secure false
+  const secure = port === 465 ? true : secureEnv === "true" ? true : false;
 
   const tlsRejectUnauthorized =
     (process.env.SMTP_TLS_REJECT_UNAUTHORIZED ?? "true")
