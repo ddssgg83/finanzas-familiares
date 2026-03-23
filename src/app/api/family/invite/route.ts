@@ -320,7 +320,11 @@ export async function POST(req: Request) {
     const inviteUrl = `${baseUrl}/familia/aceptar?token=${encodeURIComponent(inviteToken)}`;
 
     // 7) SMTP send (si falla, NO tronamos la invitación)
-    const from = (process.env.SMTP_FROM || `RINDAY <${process.env.SMTP_USER || ""}>`).trim();
+    const from = (
+      process.env.SMTP_FROM ||
+      process.env.RESEND_FROM ||
+      "RINDAY <no-reply@send.rinday.app>"
+    ).trim();
 
     const smtp = getSmtpConfig();
     const hasSmtp = !!smtp.host && !!smtp.port && !!smtp.user && !!smtp.pass && !!from;
