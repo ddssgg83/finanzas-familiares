@@ -51,27 +51,36 @@ function renderInviteEmailHTML(opts: {
 
           <tr>
             <td style="font-size:20px;font-weight:700;color:#0F172A;padding-bottom:10px;">
-              Te invitaron a unirte a una familia
+              Te invitaron a unirte a RINDAY
             </td>
           </tr>
 
           <tr>
             <td style="font-size:15px;line-height:1.7;color:#334155;padding-bottom:16px;">
-              <strong>${inviterName}</strong> te invitó a unirte a su familia en <strong>RINDAY</strong>.
-              <br />
-              Este correo fue enviado a: <strong>${inviteeEmail}</strong>
+              Hola,
+              <br /><br />
+              <strong>${inviterName}</strong> te invitó a unirte a una familia en <strong>RINDAY</strong>
+              para gestionar finanzas en conjunto.
+              <br /><br />
+              Esta invitación fue enviada a: <strong>${inviteeEmail}</strong>
             </td>
           </tr>
 
           ${
             customMsg
               ? `<tr>
-                   <td style="font-size:14px;line-height:1.7;color:#0F172A;background:#F1F5F9;border-radius:12px;padding:12px 14px;margin-bottom:14px;">
+                   <td style="font-size:14px;line-height:1.7;color:#0F172A;background:#F1F5F9;border-radius:12px;padding:12px 14px;">
                      <strong>Mensaje:</strong><br/>${customMsg}
                    </td>
                  </tr>`
               : ""
           }
+
+          <tr>
+            <td style="font-size:15px;line-height:1.7;color:#334155;padding-top:18px;padding-bottom:12px;">
+              Puedes aceptar tu invitación aquí:
+            </td>
+          </tr>
 
           <tr>
             <td align="center" style="padding:10px 0 24px 0;">
@@ -86,10 +95,11 @@ function renderInviteEmailHTML(opts: {
 
           <tr>
             <td style="font-size:13px;color:#64748B;line-height:1.6;">
-              Si no esperabas este correo, puedes ignorarlo.
+              Si no esperabas este correo, puedes ignorarlo con tranquilidad.
               <br /><br />
-              —<br /><strong>RINDAY</strong><br />
-              Tranquilidad financiera compartida
+              Saludos,
+              <br />
+              <strong>Equipo RINDAY</strong>
             </td>
           </tr>
         </table>
@@ -320,11 +330,7 @@ export async function POST(req: Request) {
     const inviteUrl = `${baseUrl}/familia/aceptar?token=${encodeURIComponent(inviteToken)}`;
 
     // 7) SMTP send (si falla, NO tronamos la invitación)
-    const from = (
-      process.env.SMTP_FROM ||
-      process.env.RESEND_FROM ||
-      "RINDAY <no-reply@send.rinday.app>"
-    ).trim();
+    const from = (process.env.SMTP_FROM || "RINDAY <hola@rinday.app>").trim();
 
     const smtp = getSmtpConfig();
     const hasSmtp = !!smtp.host && !!smtp.port && !!smtp.user && !!smtp.pass && !!from;
@@ -337,7 +343,7 @@ export async function POST(req: Request) {
     try {
       if (!hasSmtp) {
         throw new Error(
-          "SMTP env missing. Required: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM (or SMTP_USER fallback)"
+          "SMTP env missing. Required: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM"
         );
       }
 
@@ -362,7 +368,7 @@ export async function POST(req: Request) {
       await transporter.sendMail({
         from,
         to: inviteEmail,
-        subject: "Te invitaron a unirte a una familia en RINDAY",
+        subject: "Te invitaron a unirte a RINDAY",
         html: renderInviteEmailHTML({
           inviterName: niceInviter,
           inviteUrl,
