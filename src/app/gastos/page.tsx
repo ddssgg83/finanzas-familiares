@@ -6,6 +6,7 @@ import type { User } from "@supabase/supabase-js";
 import { useTheme } from "next-themes";
 
 import { supabase } from "@/lib/supabase";
+import { getSupabaseConfigError, prettySupabaseAuthError } from "@/lib/authErrors";
 import { saveOfflineTx, getOfflineTxs, syncOfflineTxs } from "@/lib/offline";
 
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -433,39 +434,53 @@ export default function GastosPage() {
   const handleSignIn = async (e: FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+
+    const configError = getSupabaseConfigError();
+    if (configError) {
+      setAuthError(configError);
+      return;
+    }
+
     try {
       const { error } = await supabase.auth.signInWithPassword({
         email: authEmail.trim(),
         password: authPassword,
       });
       if (error) {
-        setAuthError(error.message);
+        setAuthError(prettySupabaseAuthError(error.message));
         return;
       }
       setAuthEmail("");
       setAuthPassword("");
-    } catch {
-      setAuthError("No se pudo iniciar sesión.");
+    } catch (err: any) {
+      setAuthError(prettySupabaseAuthError(err?.message));
     }
   };
 
   const handleSignUp = async (e: FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+
+    const configError = getSupabaseConfigError();
+    if (configError) {
+      setAuthError(configError);
+      return;
+    }
+
     try {
       const { error } = await supabase.auth.signUp({
         email: authEmail.trim(),
         password: authPassword,
       });
       if (error) {
-        setAuthError(error.message);
+        setAuthError(prettySupabaseAuthError(error.message));
         return;
       }
       alert("Cuenta creada. Revisa tu correo si tienes verificación activada.");
       setAuthMode("login");
       setAuthPassword("");
-    } catch {
-      setAuthError("No se pudo crear la cuenta.");
+    } catch (err: any) {
+      setAuthError(prettySupabaseAuthError(err?.message));
     }
   };
 

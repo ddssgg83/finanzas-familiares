@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import type React from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { getSupabaseConfigError, prettySupabaseAuthError } from "@/lib/authErrors";
 import { AppHeader } from "@/components/AppHeader";
 import { PageShell } from "@/components/ui/PageShell";
 import Link from "next/link";
@@ -68,13 +69,20 @@ export default function AprendePage() {
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+
+    const configError = getSupabaseConfigError();
+    if (configError) {
+      setAuthError(configError);
+      return;
+    }
+
     try {
       const { error } = await supabase.auth.signInWithPassword({
         email: authEmail.trim(),
         password: authPassword,
       });
       if (error) {
-        setAuthError(error.message);
+        setAuthError(prettySupabaseAuthError(error.message));
         return;
       }
       setAuthEmail("");
@@ -89,22 +97,29 @@ export default function AprendePage() {
         }
       }
       // Si ya lo vio, se queda en Aprende
-    } catch (err) {
-      console.error(err);
-      setAuthError("No se pudo iniciar sesión.");
+    } catch (err: any) {
+      console.error("Error during password sign-in", err);
+      setAuthError(prettySupabaseAuthError(err?.message));
     }
   };
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+
+    const configError = getSupabaseConfigError();
+    if (configError) {
+      setAuthError(configError);
+      return;
+    }
+
     try {
       const { error } = await supabase.auth.signUp({
         email: authEmail.trim(),
         password: authPassword,
       });
       if (error) {
-        setAuthError(error.message);
+        setAuthError(prettySupabaseAuthError(error.message));
         return;
       }
 
@@ -117,9 +132,9 @@ export default function AprendePage() {
       setAuthMode("login");
 
       router.push("/onboarding");
-    } catch (err) {
-      console.error(err);
-      setAuthError("No se pudo crear la cuenta.");
+    } catch (err: any) {
+      console.error("Error during password sign-up", err);
+      setAuthError(prettySupabaseAuthError(err?.message));
     }
   };
 

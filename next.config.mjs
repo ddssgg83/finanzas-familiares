@@ -94,7 +94,7 @@ const withPWA = createNextPWA({
       // ✅ Supabase: NO cache (evita datos privados en SW cache)
       {
         urlPattern:
-          /^https:\/\/[^/]+\.supabase\.co\/(rest\/v1|storage\/v1)\/.*/i,
+          /^https:\/\/[^/]+\.supabase\.co\/(auth\/v1|rest\/v1|storage\/v1)\/.*/i,
         handler: "NetworkOnly",
         options: { cacheName: "supabase-bypass" },
       },

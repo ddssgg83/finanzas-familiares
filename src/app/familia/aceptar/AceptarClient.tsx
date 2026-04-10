@@ -6,6 +6,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { PageShell } from "@/components/ui/PageShell";
 import { Button, Card, EmptyState, Help, LinkButton, Section } from "@/components/ui/kit";
 import { supabase } from "@/lib/supabase";
+import { getSupabaseConfigError, prettySupabaseAuthError } from "@/lib/authErrors";
 
 type InviteRow = {
   id: string;
@@ -29,25 +30,6 @@ function formatDateMX(iso: string) {
   } catch {
     return iso;
   }
-}
-
-function prettySupabaseAuthError(message?: string) {
-  const msg = (message ?? "").toLowerCase();
-
-  if (msg.includes("invalid login credentials")) {
-    return "Correo o contraseña incorrectos.";
-  }
-  if (msg.includes("user already registered")) {
-    return "Este correo ya tiene cuenta. Usa la opción Ya tengo cuenta.";
-  }
-  if (msg.includes("password")) {
-    return "La contraseña no es válida. Usa al menos 6 caracteres.";
-  }
-  if (msg.includes("email not confirmed")) {
-    return "Tu cuenta requiere verificación de correo antes de continuar.";
-  }
-
-  return message ?? "No pudimos completar el acceso.";
 }
 
 export default function AceptarClient() {
@@ -173,6 +155,12 @@ export default function AceptarClient() {
     setError(null);
 
     try {
+      const configError = getSupabaseConfigError();
+      if (configError) {
+        setAuthError(configError);
+        return;
+      }
+
       if (!fullName.trim()) {
         setAuthError("Escribe tu nombre para crear la cuenta.");
         return;
@@ -242,6 +230,12 @@ export default function AceptarClient() {
     setError(null);
 
     try {
+      const configError = getSupabaseConfigError();
+      if (configError) {
+        setAuthError(configError);
+        return;
+      }
+
       if (!password) {
         setAuthError("Escribe tu contraseña para continuar.");
         return;
