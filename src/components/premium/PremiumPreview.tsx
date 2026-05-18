@@ -20,8 +20,8 @@ export function PremiumPreview({ model }: Props) {
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">Premium Preview</Badge>
-            <span className="text-xs text-slate-500 dark:text-slate-400">Sin IA, sin datos nuevos</span>
+            <Badge variant="secondary">Vista premium</Badge>
+            <span className="text-xs text-slate-500 dark:text-slate-400">Calculado con tus datos actuales</span>
           </div>
           <div>
             <p className="eyebrow">Insights financieros</p>
@@ -36,7 +36,7 @@ export function PremiumPreview({ model }: Props) {
       <div className="grid gap-4 xl:grid-cols-[1.05fr,0.95fr]">
         <PremiumHealthCard health={model.health} />
         <PremiumInsightCard
-          eyebrow="Siguiente accion"
+          eyebrow="Siguiente acción"
           title={model.nextAction.title}
           body={model.nextAction.body}
           href={model.nextAction.href}

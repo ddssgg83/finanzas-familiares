@@ -1160,7 +1160,7 @@ export default function PatrimonioPage() {
   if (authLoading) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
-        Cargando sesión...
+        Cargando sesión…
       </div>
     );
   }
@@ -1194,7 +1194,7 @@ export default function PatrimonioPage() {
         <section className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200">
           {isOfflineNow() ? (
             <div>
-              Estás en <span className="font-semibold">modo offline</span>. Puedes agregar/editar/eliminar y se sincroniza al volver el internet.
+              Estás en <span className="font-semibold">modo offline</span>. Puedes agregar, editar o eliminar; RINDAY sincronizará los cambios cuando vuelva la conexión.
             </div>
           ) : (
             <div>
@@ -1218,14 +1218,14 @@ export default function PatrimonioPage() {
                   label="Vista"
                   help="En modo familiar se suman activos y deudas de miembros activos."
                   options={[
-                    { value: "personal", label: "Sólo yo" },
+                    { value: "personal", label: "Solo yo" },
                     { value: "family", label: "Familiar" },
                   ]}
                 />
               ) : (
                 <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
-                  Vista actual: <span className="font-semibold">Sólo tu patrimonio.</span>
-                  {familyCtx && !isFamilyOwner && <> El modo familiar sólo está disponible para el administrador familiar.</>}
+                  Vista actual: <span className="font-semibold">Solo tu patrimonio.</span>
+                  {familyCtx && !isFamilyOwner && <> El modo familiar solo está disponible para el administrador familiar.</>}
                 </div>
               )
             }
@@ -1239,7 +1239,7 @@ export default function PatrimonioPage() {
                 <div>
                   Miembros activos: <span className="font-semibold">{familyCtx.activeMembers}</span>
                 </div>
-                {familyLoading && <div className="text-[10px] text-slate-400">Actualizando información de familia...</div>}
+                {familyLoading && <div className="text-[10px] text-slate-400">Actualizando información de familia…</div>}
               </div>
             )}
             {familyError && <p className="mt-2 text-[11px] text-rose-500">{familyError}</p>}
@@ -1365,7 +1365,7 @@ export default function PatrimonioPage() {
               </div>
 
               <Button type="submit" disabled={savingAsset}>
-                {savingAsset ? (editingAssetId ? "Actualizando..." : "Guardando...") : editingAssetId ? "Guardar cambios" : "Guardar activo"}
+                {savingAsset ? (editingAssetId ? "Actualizando…" : "Guardando…") : editingAssetId ? "Guardar cambios" : "Guardar activo"}
               </Button>
             </form>
           </Section>
@@ -1446,7 +1446,7 @@ export default function PatrimonioPage() {
               </div>
 
               <Button type="submit" disabled={savingDebt}>
-                {savingDebt ? (editingDebtId ? "Actualizando..." : "Guardando...") : editingDebtId ? "Guardar cambios" : "Guardar deuda"}
+                {savingDebt ? (editingDebtId ? "Actualizando…" : "Guardando…") : editingDebtId ? "Guardar cambios" : "Guardar deuda"}
               </Button>
             </form>
           </Section>
@@ -1458,9 +1458,9 @@ export default function PatrimonioPage() {
         <Card>
           <Section title="Activos" right={<span className="text-[11px] text-slate-500 dark:text-slate-400">{assets.length} activos</span>}>
             {loading ? (
-              <EmptyState>Cargando activos...</EmptyState>
+              <EmptyState>Cargando activos…</EmptyState>
             ) : assets.length === 0 ? (
-              <EmptyState>Aún no has registrado activos en esta vista.</EmptyState>
+              <EmptyState>Agrega tu primer activo para completar tu foto patrimonial.</EmptyState>
             ) : (
               <ul className="space-y-2">
                 {assets.map((a) => (
@@ -1511,9 +1511,9 @@ export default function PatrimonioPage() {
         <Card>
           <Section title="Deudas" right={<span className="text-[11px] text-slate-500 dark:text-slate-400">{debts.length} deudas</span>}>
             {loading ? (
-              <EmptyState>Cargando deudas...</EmptyState>
+              <EmptyState>Cargando deudas…</EmptyState>
             ) : debts.length === 0 ? (
-              <EmptyState>Aún no has registrado deudas en esta vista.</EmptyState>
+              <EmptyState>Registra tus deudas para ver tu patrimonio neto con mayor precisión.</EmptyState>
             ) : (
               <ul className="space-y-2">
                 {debts.map((d) => (

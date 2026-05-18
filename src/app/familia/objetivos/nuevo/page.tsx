@@ -253,7 +253,7 @@ export default function NewFamilyGoalPage() {
 
         {familyLoading && (
           <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-200">
-            Cargando la información de tu familia antes de crear la meta...
+            Cargando la información de tu familia antes de crear la meta…
           </div>
         )}
 
@@ -433,7 +433,7 @@ export default function NewFamilyGoalPage() {
               disabled={saving || familyLoading || !familyCtx?.familyId}
               className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {saving ? "Guardando…" : familyLoading ? "Cargando familia..." : "Guardar meta"}
+              {saving ? "Guardando…" : familyLoading ? "Cargando familia…" : "Guardar meta"}
             </button>
           </div>
         </form>

@@ -993,7 +993,7 @@ export default function FamiliaPage() {
   // =========================================================
   const handleRemoveMember = async (memberId: string) => {
     if (!user) return;
-    if (!isFamilyOwnerUI) return alert("Sólo el administrador familiar puede remover miembros.");
+    if (!isFamilyOwnerUI) return alert("Solo el administrador familiar puede remover miembros.");
     if (!window.confirm("¿Remover miembro de la familia?")) return;
 
     setMembers((prev) => prev.map((m) => (m.id === memberId ? { ...m, status: "removed" } : m)));
@@ -1198,7 +1198,7 @@ export default function FamiliaPage() {
   if (authLoading) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
-        Cargando sesión...
+        Cargando sesión…
       </div>
     );
   }
@@ -1235,8 +1235,8 @@ export default function FamiliaPage() {
           {isOfflineNow() ? (
             <div className="space-y-1">
               <div>
-                Estás en <span className="font-semibold">modo offline</span>. Puedes remover/cambiar
-                roles y se sincroniza al volver el internet.{" "}
+                Estás en <span className="font-semibold">modo offline</span>. Puedes remover o cambiar
+                roles; RINDAY sincronizará los cambios cuando vuelva la conexión.{" "}
                 <span className="font-semibold">Las invitaciones requieren internet.</span>
               </div>
               {showSnapshotBadge && (
@@ -1279,7 +1279,7 @@ export default function FamiliaPage() {
                 disabled={purgeLoading || offline}
                 title={offline ? "Necesitas internet" : undefined}
               >
-                {purgeLoading ? "Limpiando..." : "Limpiar historial"}
+                {purgeLoading ? "Limpiando…" : "Limpiar historial"}
               </Button>
               <LinkButton tone="info" onClick={handleHideCleanupNudge}>
                 Ocultar
@@ -1331,7 +1331,7 @@ export default function FamiliaPage() {
           <StatCard
             label="Miembros activos"
             value={String(activeMembers)}
-            hint="Personas que cuentan en el dashboard familiar."
+            hint="Personas activas dentro de tu espacio familiar."
             tone="good"
           />
           <StatCard
@@ -1343,7 +1343,7 @@ export default function FamiliaPage() {
           <StatCard
             label="Tu rol"
             value={
-              roleLoading ? "..." : isFamilyOwnerUI ? "Owner" : myRole === "admin" ? "Admin" : "Member"
+              roleLoading ? "..." : isFamilyOwnerUI ? "Administrador" : myRole === "admin" ? "Admin" : "Miembro"
             }
             hint={
               isFamilyOwnerUI
@@ -1363,7 +1363,7 @@ export default function FamiliaPage() {
           <Card>
             <Section
               title="Crear familia"
-              subtitle="Crea tu grupo familiar para invitar miembros y habilitar el Dashboard familiar."
+              subtitle="Crea tu espacio familiar para invitar miembros y habilitar el dashboard familiar."
             >
               <form onSubmit={handleCreateFamily} className="mt-2 space-y-3">
                 <div>
@@ -1384,12 +1384,12 @@ export default function FamiliaPage() {
                     placeholder="Ej. Reglas internas, propósito, etc."
                   />
                   <Help>
-                    Estas notas son solo informativas (si luego quieres guardarlas en BD, lo conectamos).
+                    Estas notas son solo informativas para orientar el uso del espacio familiar.
                   </Help>
                 </div>
 
                 <Button type="submit" disabled={savingCreateFamily}>
-                  {savingCreateFamily ? "Creando..." : "Crear familia"}
+                  {savingCreateFamily ? "Creando…" : "Crear familia"}
                 </Button>
               </form>
             </Section>
@@ -1404,10 +1404,10 @@ export default function FamiliaPage() {
             title="Invitar miembro"
             subtitle={
               isFamilyOwnerUI
-                ? "Invita por email y define el rol."
+                ? "Invita por email y define el rol de cada persona."
                 : myRole === "admin"
                 ? "Puedes invitar miembros y gestionar invitaciones."
-                : "Sólo owner o admin pueden invitar miembros."
+                : "Solo administradores pueden invitar miembros."
             }
             right={
               !canManageInvitesUI ? (
@@ -1454,10 +1454,10 @@ export default function FamiliaPage() {
                     disabled={!canManageInvitesUI || offline}
                   >
                     <option value="member">Miembro</option>
-                    <option value="admin">Admin</option>
+                    <option value="admin">Administrador</option>
                   </Select>
                   <Help>
-                    Admin: puede ver/gestionar más pantallas (si lo habilitas). Por ahora Owner controla todo.
+                    Administrador: puede apoyar con invitaciones y gestión familiar.
                   </Help>
                 </div>
 
@@ -1477,7 +1477,7 @@ export default function FamiliaPage() {
                 disabled={!canManageInvitesUI || savingInvite || !effectiveFamilyId || offline}
                 title={offline ? "Necesitas conexión para enviar invitaciones" : undefined}
               >
-                {savingInvite ? "Enviando..." : "Enviar invitación"}
+                {savingInvite ? "Enviando…" : "Enviar invitación"}
               </Button>
 
               {inviteFeedback ? (
@@ -1515,16 +1515,16 @@ export default function FamiliaPage() {
                     disabled={purgeLoading || offline}
                     title={offline ? "Necesitas internet" : undefined}
                   >
-                    {purgeLoading ? "Limpiando..." : "Limpiar historial"}
+                    {purgeLoading ? "Limpiando…" : "Limpiar historial"}
                   </Button>
                 ) : null}
               </div>
             }
           >
             {loading ? (
-              <EmptyState>Cargando invitaciones...</EmptyState>
+              <EmptyState>Cargando invitaciones…</EmptyState>
             ) : invites.length === 0 ? (
-              <EmptyState>Aún no tienes invitaciones.</EmptyState>
+              <EmptyState>Cuando invites a alguien, podrás dar seguimiento desde aquí.</EmptyState>
             ) : (
               <ul className="space-y-2">
                 {invites.map((i) => {
@@ -1615,12 +1615,12 @@ export default function FamiliaPage() {
             }
           >
             {loading ? (
-              <EmptyState>Cargando miembros...</EmptyState>
+              <EmptyState>Cargando miembros…</EmptyState>
             ) : members.length === 0 ? (
               <EmptyState>
                 {isOfflineNow() && (familyCtx?.activeMembers ?? 0) > 0
-                  ? "No pude leer la lista completa sin internet, pero tu familia existe (snapshot guardado)."
-                  : "No hay miembros cargados todavía (o aún no existe la familia)."}
+                  ? "No pude leer la lista completa sin internet, pero tu familia existe y guardamos una vista reciente."
+                  : "Crea o invita a tu primer miembro para activar la vista familiar."}
               </EmptyState>
             ) : (
               <ul className="space-y-2">
@@ -1670,7 +1670,7 @@ export default function FamiliaPage() {
                               }
                             >
                               <option value="member">Miembro</option>
-                              <option value="admin">Admin</option>
+                              <option value="admin">Administrador</option>
                             </Select>
                             <LinkButton tone="danger" onClick={() => handleRemoveMember(m.id)}>
                               Remover
@@ -1697,7 +1697,7 @@ export default function FamiliaPage() {
 
       <section className="mt-4">
         <Card>
-          <Section title="Siguiente paso" subtitle="Para completar el módulo Familia al 100%">
+          <Section title="Siguiente paso" subtitle="Mejoras futuras para seguir fortaleciendo Familia">
             <div className="space-y-2 text-[12px] text-slate-600 dark:text-slate-300">
               <p>
                 1) <span className="font-semibold">Aceptar invitación</span>: ya está listo el flujo con token.

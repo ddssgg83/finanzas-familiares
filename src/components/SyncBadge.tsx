@@ -33,8 +33,8 @@ export function SyncBadge({ pendingCount, pendingDetails, isOnline, syncing, cla
   const view = useMemo(() => {
     if (!mounted) {
       return {
-        label: "Todo al dia",
-        title: "Todo al dia",
+        label: "Todo al día",
+        title: "Todo al día",
         dot: "bg-emerald-500",
         tone:
           "border-slate-200 bg-white text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200",
@@ -43,8 +43,8 @@ export function SyncBadge({ pendingCount, pendingDetails, isOnline, syncing, cla
 
     if (!isOnline) {
       return {
-        label: pendingCount > 0 ? `${pendingCount} pendiente${pendingCount === 1 ? "" : "s"}` : "Sin conexion",
-        title: pendingCount > 0 ? `Sin conexion · ${pendingTitle}` : "Sin conexion",
+        label: pendingCount > 0 ? `${pendingCount} pendiente${pendingCount === 1 ? "" : "s"}` : "Sin conexión",
+        title: pendingCount > 0 ? `Sin conexión · ${pendingTitle}` : "Sin conexión",
         dot: "bg-amber-500",
         tone:
           "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200",
@@ -72,8 +72,8 @@ export function SyncBadge({ pendingCount, pendingDetails, isOnline, syncing, cla
     }
 
     return {
-      label: "Todo al dia",
-      title: "Todo al dia",
+      label: "Todo al día",
+      title: "Todo al día",
       dot: "bg-emerald-500",
       tone:
         "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200",

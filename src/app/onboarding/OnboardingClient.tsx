@@ -19,10 +19,10 @@ type Step = {
 const STEPS: Step[] = [
   {
     id: "overview",
-    badge: "🚀 Bienvenido",
-    title: "Controla tu lana sin complicarte la vida",
+    badge: "Bienvenido",
+    title: "Controla tu dinero familiar con claridad",
     subtitle:
-      "Registra ingresos y gastos en segundos. La app hace las cuentas por ti y te dice si vas bien o ya se te está saliendo de control.",
+      "Registra ingresos y gastos en segundos. RINDAY organiza la información y te ayuda a entender cómo va tu mes.",
     accent: "from-sky-500/20 via-emerald-400/10 to-transparent",
     points: [
       "Captura gastos al momento, incluso sin internet.",
@@ -32,10 +32,10 @@ const STEPS: Step[] = [
   },
   {
     id: "patrimonio",
-    badge: "📊 Patrimonio",
-    title: "Ten claro cuánto realmente vales… en números",
+    badge: "Patrimonio",
+    title: "Entiende tu patrimonio con una vista completa",
     subtitle:
-      "Activos, deudas y patrimonio neto en un solo lugar, sin excels raros ni fórmulas escondidas.",
+      "Activos, deudas y patrimonio neto en un solo lugar, sin hojas de cálculo ni fórmulas escondidas.",
     accent: "from-violet-500/20 via-sky-400/10 to-transparent",
     points: [
       "Registra casa, coche, ahorros, inversiones, etc.",
@@ -45,10 +45,10 @@ const STEPS: Step[] = [
   },
   {
     id: "familia",
-    badge: "👨‍👩‍👧‍👦 Familia",
-    title: "Cada quien gasta, tú ves el mapa completo",
+    badge: "Familia",
+    title: "Cada movimiento suma a una visión familiar clara",
     subtitle:
-      "Conecta a tu familia: cada uno registra sus gastos y tú puedes ver el resumen familiar sin mezclar cuentas.",
+      "Conecta a tu familia para revisar gastos, metas y decisiones compartidas sin mezclar cuentas personales.",
     accent: "from-amber-400/25 via-rose-400/10 to-transparent",
     points: [
       "Invita a tu pareja, hijos u otros miembros.",
@@ -417,7 +417,7 @@ export default function OnboardingClient() {
         <div className="mb-4 flex items-center justify-between text-xs text-slate-400">
           <div className="flex items-center gap-2">
             <span className="text-[10px] uppercase tracking-[0.2em] text-sky-400">
-              Finanzas Familiares
+              RINDAY
             </span>
             <span className="h-1 w-1 rounded-full bg-slate-600" />
             <span>
@@ -501,9 +501,9 @@ export default function OnboardingClient() {
 
                   <div className="space-y-2 rounded-2xl bg-slate-900/80 p-3">
                     <div className="flex items-center justify-between text-[10px] text-slate-400">
-                      <span className="font-medium">Finanzas Familiares</span>
+                      <span className="font-medium">RINDAY</span>
                       <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[9px] text-sky-300">
-                        Vista rápida
+                        Vista previa
                       </span>
                     </div>
 
@@ -526,7 +526,7 @@ export default function OnboardingClient() {
                             {currentStep.id === "patrimonio" && "Patrimonio neto"}
                             {currentStep.id === "familia" && "Gasto familiar"}
                           </span>
-                          <span className="text-[9px] text-slate-100/80">Demo</span>
+                          <span className="text-[9px] text-slate-100/80">Vista previa</span>
                         </div>
 
                         {currentStep.id === "overview" && (

@@ -22,7 +22,7 @@ const COLORS = ['#34d399', '#f87171', '#60a5fa', '#fbbf24', '#a78bfa', '#fb7185'
 
 export default function DashboardCharts({ transactions }: Props) {
   if (!transactions.length) {
-    return <p className="text-gray-500 text-center">No hay datos suficientes para generar gráficas.</p>;
+    return <p className="text-center text-gray-500">Agrega más movimientos para activar tus gráficas.</p>;
   }
 
   // Agrupar gastos por categoría

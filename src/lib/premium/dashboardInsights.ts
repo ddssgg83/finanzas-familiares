@@ -101,7 +101,7 @@ function scoreTone(score: number): PremiumTone {
 function scoreLabel(score: number, loading?: boolean) {
   if (loading) return "Calculando";
   if (score >= 78) return "Buen ritmo";
-  if (score >= 52) return "Atencion";
+  if (score >= 52) return "Atención";
   if (score > 0) return "Prioridad";
   return "Sin datos suficientes";
 }
@@ -123,12 +123,12 @@ export function buildPremiumDashboardModel(input: PremiumDashboardInput): Premiu
       },
       nextAction: {
         title: "Revisar el tablero",
-        body: "En cuanto carguen tus datos, RINDAY priorizara una accion concreta para este mes.",
+        body: "En cuanto carguen tus datos, RINDAY priorizará una acción concreta para este mes.",
       },
       risks: [
         {
           title: "Datos en carga",
-          body: "Las alertas se actualizaran automaticamente al terminar la lectura.",
+          body: "Las alertas se actualizarán automáticamente al terminar la lectura.",
           severity: "info",
         },
       ],
@@ -145,7 +145,7 @@ export function buildPremiumDashboardModel(input: PremiumDashboardInput): Premiu
 
   if (!summary) {
     score = 0;
-    factors.push("Aun faltan movimientos para calcular tu salud financiera.");
+    factors.push("Aún faltan movimientos para calcular tu salud financiera.");
   } else {
     const income = Math.max(0, Number(summary.incomes) || 0);
     const expenses = Math.max(0, Number(summary.expenses) || 0);
@@ -160,13 +160,13 @@ export function buildPremiumDashboardModel(input: PremiumDashboardInput): Premiu
       factors.push("Registra ingresos para tener una lectura completa.");
     } else if (expenseRatio <= 0.65) {
       score += 18;
-      factors.push("Tus gastos estan por debajo del 65% de tus ingresos.");
+      factors.push("Tus gastos están por debajo del 65% de tus ingresos.");
     } else if (expenseRatio <= 0.9) {
       score += 8;
-      factors.push("Tu gasto esta dentro de un rango manejable.");
+      factors.push("Tu gasto está dentro de un rango manejable.");
     } else if (expenseRatio <= 1) {
       score -= 5;
-      factors.push("Tu margen mensual esta muy justo.");
+      factors.push("Tu margen mensual está muy justo.");
     } else {
       score -= 24;
       factors.push("Este mes los gastos superan los ingresos.");
@@ -205,7 +205,7 @@ export function buildPremiumDashboardModel(input: PremiumDashboardInput): Premiu
     factors.push("Ya tienes objetivos financieros visibles.");
   } else {
     score -= 5;
-    factors.push("Una meta clara ayudaria a enfocar el ahorro.");
+    factors.push("Una meta clara ayudaría a enfocar el ahorro.");
   }
 
   const finalScore = clampScore(score);
@@ -236,7 +236,7 @@ function buildNextAction(
   if (!summary) {
     return {
       title: "Captura tu primer movimiento",
-      body: "Registra un ingreso o gasto para activar una lectura premium mas precisa.",
+      body: "Registra un ingreso o gasto para activar una lectura más precisa.",
       href: "/gastos",
       actionLabel: "Ir a movimientos",
     };
@@ -253,7 +253,7 @@ function buildNextAction(
 
   if (summary.balance < 0) {
     return {
-      title: "Reduce presion del mes",
+      title: "Reduce presión del mes",
       body: "Tu gasto supera tus ingresos. Revisa movimientos variables antes de cerrar el periodo.",
       href: "/gastos",
       actionLabel: "Revisar gastos",
@@ -263,7 +263,7 @@ function buildNextAction(
   if (netWorth && netWorth.debts > Math.max(0, netWorth.assets)) {
     return {
       title: "Prioriza deuda",
-      body: "Tus deudas pesan mas que tus activos registrados. El siguiente avance esta en ordenar saldos.",
+      body: "Tus deudas pesan más que tus activos registrados. El siguiente avance está en ordenar saldos.",
       href: "/patrimonio",
       actionLabel: "Ver patrimonio",
     };
@@ -273,8 +273,8 @@ function buildNextAction(
     return {
       title: "Define una meta",
       body: family?.familyId
-        ? "Crea una meta familiar para convertir el excedente en una decision compartida."
-        : "Crea una meta simple para darle direccion a tu ahorro.",
+        ? "Crea una meta familiar para convertir el excedente en una decisión compartida."
+        : "Crea una meta simple para darle dirección a tu ahorro.",
       href: family?.familyId ? "/familia/objetivos/nuevo" : "/familia",
       actionLabel: family?.familyId ? "Crear meta" : "Configurar familia",
     };
@@ -299,7 +299,7 @@ function buildRisks(
   if (dataError) {
     risks.push({
       title: "Datos incompletos",
-      body: "Algunas lecturas no se actualizaron. Intenta de nuevo con conexion estable.",
+      body: "Algunas lecturas no se actualizaron. Intenta de nuevo con conexión estable.",
       severity: "warning",
     });
   }
@@ -307,14 +307,14 @@ function buildRisks(
   if (!summary) {
     risks.push({
       title: "Sin lectura mensual",
-      body: "Aun no hay movimientos suficientes para detectar tendencias.",
+      body: "Aún no hay movimientos suficientes para detectar tendencias.",
       severity: "info",
     });
   } else {
     if (summary.incomes <= 0 && summary.expenses > 0) {
       risks.push({
         title: "Ingresos faltantes",
-        body: "Hay gastos sin ingresos registrados, asi que el balance puede verse peor de lo real.",
+        body: "Hay gastos sin ingresos registrados, así que el balance puede verse peor de lo real.",
         severity: "warning",
       });
     }
@@ -330,7 +330,7 @@ function buildRisks(
     if (summary.incomes > 0 && summary.expenses / summary.incomes > 0.9) {
       risks.push({
         title: "Margen reducido",
-        body: "Mas del 90% del ingreso esta comprometido en gastos del mes.",
+        body: "Más del 90% del ingreso está comprometido en gastos del mes.",
         severity: "warning",
       });
     }
@@ -347,7 +347,7 @@ function buildRisks(
   if (goals.length === 0) {
     risks.push({
       title: "Sin meta activa",
-      body: "Una meta visible ayuda a convertir el ahorro en una decision concreta.",
+      body: "Una meta visible ayuda a convertir el ahorro en una decisión concreta.",
       severity: "info",
     });
   }
@@ -379,7 +379,7 @@ function buildFamilySummary(family: PremiumFamilyInput): PremiumFamilySummaryMod
     body:
       members > 1
         ? `${members} miembros activos para revisar decisiones y metas en conjunto.`
-        : "Tu espacio familiar ya esta listo. Invita miembros para colaborar.",
+        : "Tu espacio familiar ya está listo. Invita miembros para colaborar.",
     href: "/familia/dashboard",
     actionLabel: "Ver familia",
   };

@@ -396,7 +396,7 @@ export default function FamilyGoalsPage() {
                   activos: <span className="font-semibold">{familyCtx.activeMembers}</span>
                 </>
               ) : (
-                <>Aún no tienes familia configurada (modo individual).</>
+                <>Aún no tienes familia configurada.</>
               )}
             </div>
           </div>
@@ -438,15 +438,14 @@ export default function FamilyGoalsPage() {
                   Aún no tienes metas familiares.
                 </p>
                 <p>
-                  Crea tu primera meta para vacaciones, un fondo de emergencia, el enganche de una
-                  casa o cualquier objetivo importante.
+                  Crea tu primera meta para convertir el ahorro familiar en un plan claro y compartido.
                 </p>
                 <div className="mt-4 flex justify-center">
                   <Link
                     href="/familia/objetivos/nuevo"
                     className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600"
                   >
-                    Crear mi primera meta
+                    Crear primera meta
                   </Link>
                 </div>
               </section>

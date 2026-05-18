@@ -41,8 +41,8 @@ export default function OfflinePage() {
             </h1>
             <p className="mt-2 text-[12px] text-slate-600 dark:text-slate-300">
               {isOnline
-                ? "Ya volvió el internet. Recarga para volver a la app normal."
-                : "Puedes seguir usando tu app. Tus movimientos se guardan localmente y se sincronizan cuando vuelva el internet."}
+                ? "Ya volvió la conexión. Recarga para volver a RINDAY."
+                : "Puedes seguir usando RINDAY. Tus cambios se guardan localmente y se sincronizan cuando vuelva la conexión."}
             </p>
           </div>
 
@@ -58,8 +58,8 @@ export default function OfflinePage() {
         </div>
 
         <div className="mt-4 rounded-xl bg-slate-50 p-3 text-[11px] text-slate-600 dark:bg-slate-950 dark:text-slate-300">
-          Tip: si caes aquí por un <span className="font-semibold">hard refresh</span>,
-          normalmente es por caché del Service Worker. Con internet de vuelta,
+          Si llegaste aquí después de recargar,
+          puede ser por caché offline. Con internet de vuelta,
           presiona <span className="font-semibold">Recargar</span>.
         </div>
 
@@ -77,7 +77,7 @@ export default function OfflinePage() {
             onClick={goHome}
             className="inline-flex w-full items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-[12px] font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
           >
-            Volver al Dashboard
+            Volver al inicio
           </button>
         </div>
 

@@ -42,7 +42,7 @@ export function OfflineBanner({ className = "", onRetry }: Props) {
           <div className="mt-0.5 text-[12px] opacity-80">
             {isOnline
               ? "Sincronizando en cuanto sea posible…"
-              : "Puedes seguir usando la app. Guardamos localmente y sincronizamos al volver el internet."}
+              : "Puedes seguir usando RINDAY. Guardamos tus cambios y los sincronizamos cuando vuelva la conexión."}
           </div>
         </div>
 

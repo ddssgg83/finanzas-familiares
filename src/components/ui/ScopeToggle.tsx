@@ -27,7 +27,7 @@ export function ScopeToggle({
               : "text-slate-700 hover:bg-white/60 dark:text-slate-200 dark:hover:bg-slate-800"
           }`}
         >
-          Sólo yo
+          Solo yo
         </button>
         <button
           type="button"

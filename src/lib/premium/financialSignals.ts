@@ -130,7 +130,7 @@ export function buildFinancialSignals(input: FinancialSignalsInput): FinancialSi
     signals.push({
       id: "no-summary",
       title: "Faltan movimientos",
-      body: "Registra ingresos y gastos para activar señales mas precisas.",
+      body: "Registra ingresos y gastos para activar señales más precisas.",
       severity: "info",
     });
   } else {
@@ -143,7 +143,7 @@ export function buildFinancialSignals(input: FinancialSignalsInput): FinancialSi
       signals.push({
         id: "missing-income",
         title: "Ingresos sin capturar",
-        body: "Hay gastos registrados, pero faltan ingresos. El balance puede verse mas negativo de lo real.",
+        body: "Hay gastos registrados, pero faltan ingresos. El balance puede verse más negativo de lo real.",
         severity: "warning",
       });
     }
@@ -179,7 +179,7 @@ export function buildFinancialSignals(input: FinancialSignalsInput): FinancialSi
       signals.push({
         id: "projection-risk",
         title: "Riesgo de cierre negativo",
-        body: `Al ritmo actual, el mes podria cerrar en ${formatMoney(projection.projectedBalance)}.`,
+        body: `Al ritmo actual, el mes podría cerrar en ${formatMoney(projection.projectedBalance)}.`,
         severity: "warning",
       });
     }
@@ -192,7 +192,7 @@ export function buildFinancialSignals(input: FinancialSignalsInput): FinancialSi
       signals.push({
         id: "debt-pressure",
         title: "Deuda con peso alto",
-        body: "Las deudas ya pesan mas del 70% de los activos registrados.",
+        body: "Las deudas ya pesan más del 70% de los activos registrados.",
         severity: "warning",
       });
     }
@@ -211,8 +211,8 @@ export function buildFinancialSignals(input: FinancialSignalsInput): FinancialSi
       id: "no-goals",
       title: "Sin meta activa",
       body: family?.familyId
-        ? "Crea una meta familiar para convertir el ahorro en una decision compartida."
-        : "Una meta simple ayuda a dar direccion al excedente.",
+        ? "Crea una meta familiar para convertir el ahorro en una decisión compartida."
+        : "Una meta simple ayuda a dar dirección al excedente.",
       severity: "info",
     });
   }

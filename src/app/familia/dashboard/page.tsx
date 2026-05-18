@@ -548,7 +548,7 @@ export default function FamilyDashboardPage() {
                   <span className="font-semibold">{familyCtx.activeMembers}</span>
                 </>
               ) : (
-                <>Aún no tienes familia configurada (modo individual).</>
+                <>Aún no tienes familia configurada.</>
               )}
             </div>
           </div>
@@ -629,7 +629,7 @@ export default function FamilyDashboardPage() {
 
                 {goalsWithProgress.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
-                    Aún no tienes objetivos familiares. Crea metas para vacaciones, estudios, fondo de emergencia, etc.
+                    Crea una meta familiar para convertir el ahorro en un plan compartido.
                   </div>
                 ) : (
                   <div className="grid gap-3 md:grid-cols-2">
@@ -741,7 +741,7 @@ export default function FamilyDashboardPage() {
                   {showGoalsChart && (
                     <>
                       {goalsChartData.length === 0 ? (
-                        <div className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">Crea al menos una meta para ver la gráfica.</div>
+                        <div className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">Crea al menos una meta para ver su avance visual.</div>
                       ) : (
                         <div className="mt-3 h-40">
                           <ResponsiveContainer width="100%" height="100%">
@@ -764,7 +764,7 @@ export default function FamilyDashboardPage() {
                   <p className="mb-2 mt-1 text-[11px] text-slate-500 dark:text-slate-400">Quién está aportando más a las metas (según movimientos ligados).</p>
 
                   {memberContributionChartData.length === 0 ? (
-                    <div className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">Aún no hay aportaciones ligadas a metas por miembro.</div>
+                    <div className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">Vincula movimientos a metas para ver aportaciones por miembro.</div>
                   ) : (
                     <div className="h-40">
                       <ResponsiveContainer width="100%" height="100%">

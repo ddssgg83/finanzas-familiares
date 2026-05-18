@@ -435,7 +435,7 @@ export default function AceptarClient() {
                         <Button>Ir a Familia</Button>
                       </a>
                       <a href="/familia/dashboard">
-                        <LinkButton tone="info">Ir a Dashboard Familiar</LinkButton>
+                        <LinkButton tone="info">Ir al dashboard familiar</LinkButton>
                       </a>
                     </div>
                   </div>

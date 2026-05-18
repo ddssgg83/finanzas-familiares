@@ -29,7 +29,7 @@ export function PremiumRiskList({ risks }: Props) {
     <Card className="h-full">
       <CardHeader>
         <CardTitle>Riesgos detectados</CardTitle>
-        <CardDescription>Senales cortas para revisar antes de cerrar el mes.</CardDescription>
+        <CardDescription>Señales cortas para revisar antes de cerrar el mes.</CardDescription>
       </CardHeader>
       <CardContent>
         <ul className="space-y-3">

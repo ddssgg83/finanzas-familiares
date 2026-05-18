@@ -27,7 +27,7 @@ const NAV_ITEMS: {
   label: string;
   href: string;
 }[] = [
-  { key: "dashboard", label: "Dashboard", href: "/" },
+  { key: "dashboard", label: "Inicio", href: "/" },
   { key: "gastos", label: "Movimientos", href: "/gastos" },
   { key: "patrimonio", label: "Patrimonio", href: "/patrimonio" },
   { key: "familia", label: "Familia", href: "/familia" },
@@ -145,7 +145,7 @@ export function AppHeader({
               <div className="flex flex-wrap items-center gap-2">
                 <span className="eyebrow">RINDAY</span>
                 <Badge variant="secondary" className="uppercase tracking-[0.14em]">
-                  Premium Base
+                  Beta privada
                 </Badge>
               </div>
               <div>
@@ -198,7 +198,7 @@ export function AppHeader({
                 <>
                   <button
                     type="button"
-                    aria-label="Cerrar menu de cuenta"
+                    aria-label="Cerrar menú de cuenta"
                     className="fixed inset-0 z-40 bg-transparent"
                     onClick={closeAccountMenu}
                   />
@@ -223,7 +223,7 @@ export function AppHeader({
                         <button
                           onClick={handleRetryFromMenu}
                           className={cn(buttonVariants({ variant: "outline", size: "sm" }), "justify-start")}
-                          title="Reintentar sincronizacion"
+                          title="Reintentar sincronización"
                         >
                           <RotateCw className="mr-2 h-3.5 w-3.5" />
                           Sincronizar ahora
@@ -249,7 +249,7 @@ export function AppHeader({
                           className={cn(buttonVariants({ variant: "outline", size: "sm" }), "justify-start")}
                         >
                           <LogOut className="mr-2 h-3.5 w-3.5" />
-                          Cerrar sesion
+                          Cerrar sesión
                         </button>
                       )}
                     </div>

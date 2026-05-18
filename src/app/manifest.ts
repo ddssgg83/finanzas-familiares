@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "RINDAY",
     short_name: "RINDAY",
-    description: "Finanzas familiares para tener claridad, control y tranquilidad.",
+    description: "Claridad financiera para tu familia.",
     start_url: "/",
     scope: "/",
     display: "standalone",

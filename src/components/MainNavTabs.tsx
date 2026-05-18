@@ -27,13 +27,13 @@ export function MainNavTabs({ active, className = "", ...rest }: Props) {
     >
       {/* Dashboard */}
       {active === "dashboard" ? (
-        <span className={`${basePill} ${activeDefault}`}>Dashboard</span>
+        <span className={`${basePill} ${activeDefault}`}>Inicio</span>
       ) : (
         <Link
           href="/"
           className={`${basePill} ${inactiveDefault}`}
         >
-          Dashboard
+          Inicio
         </Link>
       )}
 

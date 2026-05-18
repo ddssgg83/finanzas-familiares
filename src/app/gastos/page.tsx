@@ -1158,7 +1158,7 @@ if (!key) return;
     }
 
     if (totalIngresos === 0 && totalGastos > 0) {
-      lines.push("Este mes sólo has registrado gastos, pero ningún ingreso. Revisa si falta capturar tu sueldo o ingresos principales.");
+      lines.push("Este mes solo has registrado gastos, pero ningún ingreso. Revisa si falta capturar tu sueldo o ingresos principales.");
     }
 
     if (totalIngresos > 0) {
@@ -1568,7 +1568,7 @@ if (!key) return;
 
   const handleDeleteCard = async (cardId: string) => {
     if (!user) return;
-    const ok = confirm("¿Seguro que quieres eliminar esta tarjeta? No se borran tus movimientos, sólo la etiqueta.");
+    const ok = confirm("¿Seguro que quieres eliminar esta tarjeta? No se borran tus movimientos, solo la etiqueta.");
     if (!ok) return;
 
     const ownerId = familyCtx?.ownerUserId ?? user.id;
@@ -1614,7 +1614,7 @@ if (!key) return;
   if (authLoading) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
-        Cargando sesión...
+        Cargando sesión…
       </div>
     );
   }
@@ -1625,8 +1625,8 @@ if (!key) return;
         <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-lg font-semibold">Finanzas familiares</h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Registra tus ingresos y gastos en un solo lugar.</p>
+              <h1 className="text-lg font-semibold">RINDAY</h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Claridad financiera para tu familia.</p>
             </div>
             <ThemeToggle />
           </div>
@@ -1694,7 +1694,7 @@ if (!key) return;
       <Card>
         <Section
           title="Mes"
-          subtitle="Elige el mes, exporta y (si eres jefe) alterna entre Solo yo / Familia."
+          subtitle="Elige el mes, exporta y alterna entre tu vista personal y familiar cuando aplique."
           right={
             <div className="flex flex-col items-end gap-2">
               <div
@@ -1721,7 +1721,7 @@ if (!key) return;
                 />
               ) : familyCtx ? (
                 <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
-                  Vista “Familia” sólo para el administrador familiar.
+                  Vista “Familia” solo para el administrador familiar.
                 </div>
               ) : null}
             </div>
@@ -1767,7 +1767,7 @@ if (!key) return;
                           : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                       }`}
                     >
-                      {t === "todos" ? "Todos" : t === "ingresos" ? "Sólo ingresos" : "Sólo gastos"}
+                      {t === "todos" ? "Todos" : t === "ingresos" ? "Solo ingresos" : "Solo gastos"}
                     </button>
                   ))}
                 </div>
@@ -1831,7 +1831,7 @@ if (!key) return;
       <Card>
         <Section title="Resumen inteligente del mes" subtitle="Incluye impacto estimado a Patrimonio (flujo neto).">
           {smartSummary.length === 0 ? (
-            <EmptyState>Aún no hay suficiente información para generar un resumen.</EmptyState>
+            <EmptyState>Registra más movimientos para activar tu resumen inteligente.</EmptyState>
           ) : (
             <ul className="list-disc space-y-1 pl-5 text-xs text-slate-700 dark:text-slate-200">
               {smartSummary.map((line, idx) => (
@@ -1874,15 +1874,15 @@ if (!key) return;
             </div>
 
             <Button type="submit" disabled={savingCard}>
-              {savingCard ? "Guardando..." : "Agregar tarjeta"}
+              {savingCard ? "Guardando…" : "Agregar tarjeta"}
             </Button>
           </form>
 
           <div className="mt-4">
             {!showCardsList ? (
-              <EmptyState>Lista oculta para mantener la pantalla limpia.</EmptyState>
+              <EmptyState>Lista oculta para mantener esta vista enfocada.</EmptyState>
             ) : cards.length === 0 ? (
-              <EmptyState>Aún no tienes tarjetas registradas.</EmptyState>
+              <EmptyState>Agrega tu primera tarjeta para entender mejor tus pagos.</EmptyState>
             ) : (
               <ul className="space-y-2">
                 {cards.map((c) => (
@@ -1892,7 +1892,7 @@ if (!key) return;
                       <>
                         <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{c.name}</div>
                         <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                          Estado: {c.shared_with_family ? "Compartida" : "Sólo tú"}
+                          Estado: {c.shared_with_family ? "Compartida" : "Solo tú"}
                         </div>
                       </>
                     }
@@ -2114,7 +2114,7 @@ if (!key) return;
 
             <div className="flex flex-wrap items-center gap-3">
               <Button type="submit" disabled={saving}>
-                {saving ? "Guardando..." : editingId ? "Guardar cambios" : "Agregar"}
+                {saving ? "Guardando…" : editingId ? "Guardar cambios" : "Agregar"}
               </Button>
 
               {editingId && (
@@ -2193,7 +2193,7 @@ if (!key) return;
       <Card>
         <Section title="Gastos por categoría" subtitle="Distribución del mes actual.">
           {gastosPorCategoria.length === 0 ? (
-            <EmptyState>Aún no hay gastos registrados en este mes.</EmptyState>
+            <EmptyState>Registra tu primer gasto del mes para ver la distribución por categoría.</EmptyState>
           ) : (
             <div className="space-y-2">
               {gastosPorCategoria.map((item) => (
@@ -2228,9 +2228,9 @@ if (!key) return;
             }
           >
             {!showGastosPorPersona ? (
-              <EmptyState>Oculto. Ábrelo cuando quieras revisar distribución por persona.</EmptyState>
+              <EmptyState>Vista oculta. Ábrela cuando quieras revisar la distribución por persona.</EmptyState>
             ) : gastosPorPersona.length === 0 ? (
-              <EmptyState>Aún no hay gastos por persona en este mes.</EmptyState>
+              <EmptyState>Aún no hay gastos familiares por persona en este mes.</EmptyState>
             ) : (
               <div className="space-y-2">
                 {gastosPorPersona.map((item) => (
@@ -2275,7 +2275,7 @@ if (!key) return;
                 {loading && (
                   <tr>
                     <td colSpan={9} className="py-4 text-center text-slate-500 dark:text-slate-400">
-                      Cargando movimientos...
+                      Cargando movimientos…
                     </td>
                   </tr>
                 )}
@@ -2283,7 +2283,7 @@ if (!key) return;
                 {!loading && filteredTransactions.length === 0 && (
                   <tr>
                     <td colSpan={9} className="py-4 text-center text-slate-500 dark:text-slate-400">
-                      Sin movimientos registrados con esos filtros.
+                      No encontramos movimientos con estos filtros.
                     </td>
                   </tr>
                 )}

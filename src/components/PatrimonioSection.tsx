@@ -561,7 +561,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
 
       {loading && (
         <p className="mt-2 text-xs text-slate-500">
-          Cargando información de patrimonio...
+          Cargando información de patrimonio…
         </p>
       )}
 
@@ -618,7 +618,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                 disabled={saving}
                 className="rounded-lg bg-sky-500 px-3 py-1 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-60"
               >
-                {saving ? "Guardando..." : "Agregar"}
+                {saving ? "Guardando…" : "Agregar"}
               </button>
             </form>
 
@@ -652,7 +652,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                         colSpan={4}
                         className="px-2 py-2 text-center text-slate-400"
                       >
-                        Aún no registras activos.
+                        Agrega tu primer activo para completar tu foto patrimonial.
                       </td>
                     </tr>
                   )}
@@ -728,7 +728,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                 disabled={saving}
                 className="rounded-lg bg-sky-500 px-3 py-1 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-60"
               >
-                {saving ? "Guardando..." : "Agregar"}
+                {saving ? "Guardando…" : "Agregar"}
               </button>
             </form>
 
@@ -772,7 +772,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                         colSpan={5}
                         className="px-2 py-2 text-center text-slate-400"
                       >
-                        Aún no registras deudas.
+                        Registra tus deudas para ver tu patrimonio neto con mayor precisión.
                       </td>
                     </tr>
                   )}
@@ -835,7 +835,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                 disabled={saving}
                 className="rounded-lg bg-sky-500 px-3 py-1 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-60"
               >
-                {saving ? "Guardando..." : "Agregar"}
+                {saving ? "Guardando…" : "Agregar"}
               </button>
             </form>
 
@@ -882,7 +882,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                         colSpan={5}
                         className="px-2 py-2 text-center text-slate-400"
                       >
-                        Aún no registras metas.
+                        Agrega una meta para conectar tu patrimonio con un plan concreto.
                       </td>
                     </tr>
                   )}
@@ -961,7 +961,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                 disabled={saving}
                 className="rounded-lg bg-sky-500 px-3 py-1 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-60"
               >
-                {saving ? "Guardando..." : "Agregar"}
+                {saving ? "Guardando…" : "Agregar"}
               </button>
             </form>
 
@@ -997,7 +997,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                         colSpan={4}
                         className="px-2 py-2 text-center text-slate-400"
                       >
-                        Aún no registras inversiones.
+                        Agrega tu primera inversión para completar tu visión patrimonial.
                       </td>
                     </tr>
                   )}

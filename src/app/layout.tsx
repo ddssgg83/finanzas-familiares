@@ -4,7 +4,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 
 export const viewport: Viewport = {
-  themeColor: "#0f3f8f",
+  themeColor: "#5B5FFF",
 };
 
 export const metadata: Metadata = {
@@ -13,7 +13,7 @@ export const metadata: Metadata = {
     template: "%s · RINDAY",
   },
   description:
-    "App de finanzas familiares para gestionar ingresos y gastos de forma clara, colaborativa y elegante.",
+    "Claridad financiera para tu familia: gastos, patrimonio, metas y decisiones compartidas en RINDAY.",
   applicationName: "RINDAY",
   appleWebApp: {
     capable: true,

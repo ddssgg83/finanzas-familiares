@@ -323,14 +323,14 @@ export default function DashboardPage() {
   const dashboardNarrative = useMemo(() => {
     if (loading) return "Estamos armando tu vista financiera de este mes.";
     if (dataError) return dataError;
-    if (!summary) return "Aun no hay movimientos suficientes para este periodo.";
+    if (!summary) return "Aún no hay movimientos suficientes para este periodo.";
     if (summary.balance > 0) {
       return "Tu mes va sano. Es un buen momento para mandar una parte del excedente a ahorro o deuda.";
     }
     if (summary.balance < 0) {
-      return "Hay presion en el flujo mensual. Conviene revisar categorias variables antes de cerrar el mes.";
+      return "Hay presión en el flujo mensual. Conviene revisar categorías variables antes de cerrar el mes.";
     }
-    return "Vas parejo este mes. Una pequena mejora en gasto variable puede darte margen de ahorro.";
+    return "Vas parejo este mes. Una pequeña mejora en gasto variable puede darte margen de ahorro.";
   }, [loading, dataError, summary]);
 
   const premiumModel = useMemo(
@@ -376,7 +376,7 @@ export default function DashboardPage() {
     <main className="flex min-h-screen flex-col pb-16 md:pb-8">
       <AppHeader
         title="Dashboard"
-        subtitle="Empieza aqui para ver lo que entra, lo que sale y como va tu patrimonio."
+        subtitle="Empieza aquí para ver lo que entra, lo que sale y cómo va tu patrimonio."
         activeTab="dashboard"
         userName={(user?.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user?.email ?? undefined}
@@ -483,7 +483,7 @@ export default function DashboardPage() {
                     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                       <div className="space-y-1">
                         <p className="text-sm font-semibold text-slate-950 dark:text-slate-50">
-                          Contexto rapido
+                          Contexto rápido
                         </p>
                         <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
                           {dataError
@@ -522,7 +522,7 @@ export default function DashboardPage() {
                     </div>
                     <div className="space-y-1">
                       <p className="text-sm font-semibold text-slate-950 dark:text-slate-50">
-                        Recomendacion del sistema
+                        Recomendación del sistema
                       </p>
                       <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
                         Usa el dashboard como lectura ejecutiva. El detalle operativo vive en movimientos,
@@ -578,12 +578,12 @@ export default function DashboardPage() {
                     className="w-full"
                     disabled={!goalTitle.trim() || !goalTarget.trim()}
                   >
-                    Guardar objetivo rapido
+                    Guardar objetivo rápido
                   </Button>
 
                   <p className="text-xs leading-6 text-slate-500 dark:text-slate-400">
-                    Esta captura rapida sigue siendo personal. El seguimiento automatizado de metas
-                    familiares se mantiene en el modulo de Familia.
+                    Esta captura rápida sigue siendo personal. El seguimiento automatizado de metas
+                    familiares se mantiene en el módulo de Familia.
                   </p>
                 </CardContent>
               </Card>
@@ -594,7 +594,7 @@ export default function DashboardPage() {
                     <div>
                       <CardTitle>Tus objetivos</CardTitle>
                       <CardDescription>
-                        Jerarquia clara entre vacio, progreso activo y proximas acciones.
+                        Jerarquía clara entre vacío, progreso activo y próximas acciones.
                       </CardDescription>
                     </div>
                     <Badge variant={goals.length > 0 ? "success" : "secondary"}>
@@ -611,11 +611,11 @@ export default function DashboardPage() {
                         </div>
                         <div className="space-y-2">
                           <p className="text-base font-semibold text-slate-950 dark:text-slate-50">
-                            Tus metas apareceran aqui
+                            Tus metas aparecerán aquí
                           </p>
                           <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
                             Empieza con una meta simple y convierte este tablero en una herramienta de
-                            decision, no solo de registro.
+                            decisión, no solo de registro.
                           </p>
                         </div>
                       </div>
@@ -639,7 +639,7 @@ export default function DashboardPage() {
                                 </span>
                                 {goal.deadline
                                   ? ` · Para el ${new Date(goal.deadline).toLocaleDateString("es-MX")}`
-                                  : " · Sin fecha limite"}
+                                  : " · Sin fecha límite"}
                               </p>
                             </div>
                             <Badge variant="warning">En proceso</Badge>
@@ -657,18 +657,18 @@ export default function DashboardPage() {
         <section className="grid gap-4 lg:grid-cols-3">
           <SystemTile
             icon={ChartNoAxesCombined}
-            title="Jerarquia de cards"
-            description="Hero, card principal, card secundaria y panel de metrica con bordes y sombras mas controladas."
+            title="Jerarquía visual"
+            description="Lectura principal, cards secundarias y métricas con bordes y sombras más controladas."
           />
           <SystemTile
             icon={PiggyBank}
             title="Spacing y ritmo"
-            description="Separaciones mas amplias, radios consistentes y respiracion visual para lectura ejecutiva."
+            description="Separaciones más amplias, radios consistentes y respiración visual para lectura ejecutiva."
           />
           <SystemTile
             icon={ArrowRight}
             title="Acciones premium"
-            description="Botones mas firmes, inputs mas limpios y tabs con contraste claro entre contexto y seleccion."
+            description="Botones más firmes, inputs más limpios y tabs con contraste claro entre contexto y selección."
           />
         </section>
       </PageShell>
@@ -776,7 +776,7 @@ function HeroStat({
             {label}
           </p>
           <p className="mt-1 text-xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-slate-50">
-            {loading ? "Cargando..." : formatCurrency(value)}
+            {loading ? "Cargando…" : formatCurrency(value)}
           </p>
         </div>
       </div>
