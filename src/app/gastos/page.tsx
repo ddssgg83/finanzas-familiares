@@ -19,6 +19,7 @@ import { Input as RefInput } from "@/components/ui/input";
 import { formatMoney as fmtMoney, formatDateDisplay, toNumberSafe } from "@/lib/format";
 import { useFamilyContext } from "@/hooks/useFamilyContext";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { generateMonthlyPdfReport } from "@/lib/premium/monthlyPdfReport";
 
 import {
   Button,
@@ -363,6 +364,7 @@ export default function GastosPage() {
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [exportType, setExportType] = useState<ExportType>("todos");
   const [exportIncludeCategorySummary, setExportIncludeCategorySummary] = useState(true);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
 
   // UI collapsibles
   const [showCardsList, setShowCardsList] = useState(false);
@@ -1239,65 +1241,28 @@ if (!key) return;
     URL.revokeObjectURL(url);
   };
 
-  const handleExportPdf = async () => {
-    if (!transactions.length) {
-      alert("No hay movimientos en este mes para generar el PDF.");
+  const handleExportPdf = () => {
+    if (!filteredTransactions.length) {
+      alert("No hay movimientos visibles en este mes para generar el reporte PDF.");
       return;
     }
 
-    const jsPDFmod = await import("jspdf");
-    const autoTable = (await import("jspdf-autotable")).default as any;
-    const doc = new jsPDFmod.jsPDF();
-
-    const now = new Date();
-    const generatedAt = now.toLocaleString("es-MX");
-
-    doc.setFontSize(14);
-    doc.text("Finanzas familiares - Reporte mensual", 14, 18);
-    doc.setFontSize(11);
-    doc.text(`Mes: ${monthLabel}`, 14, 26);
-    doc.text(`Generado: ${generatedAt}`, 14, 32);
-
-    let y = 42;
-    doc.setFontSize(10);
-    doc.text(`Ingresos del mes: ${formatMoney(totalIngresos)}`, 14, y);
-    y += 6;
-    doc.text(`Gastos del mes: ${formatMoney(totalGastos)}`, 14, y);
-    y += 6;
-    doc.text(`Flujo (Ingresos - Gastos): ${formatMoney(flujo)}`, 14, y);
-    y += 6;
-
-    if (budget != null) {
-      doc.text(
-        `Presupuesto definido: ${formatMoney(budget)} · Disponible: ${disponible != null ? formatMoney(disponible) : "-"}`,
-        14,
-        y
-      );
-      y += 6;
+    try {
+      setGeneratingPdf(true);
+      const isFamilyReport = viewScope === "family" && canUseFamilyScope;
+      generateMonthlyPdfReport({
+        transactions: filteredTransactions,
+        month,
+        monthLabel,
+        scopeLabel: isFamilyReport ? "Reporte familiar" : "Reporte personal",
+        familyName: isFamilyReport ? familyCtx?.familyName ?? null : null,
+      });
+    } catch (err: any) {
+      console.error("Error generando reporte PDF:", err);
+      alert(err?.message ?? "No se pudo generar el reporte PDF. Intenta de nuevo.");
+    } finally {
+      setGeneratingPdf(false);
     }
-
-    const txForPdf = filteredTransactions.slice(0, 80);
-    const body = txForPdf.map((t) => [
-      formatDateDisplay(t.date),
-      t.type === "ingreso" ? "Ingreso" : "Gasto",
-      t.category,
-      formatMoney(t.amount),
-      t.method,
-      t.notes ?? "",
-    ]);
-
-    autoTable(doc, {
-      head: [["Fecha", "Tipo", "Categoría", "Monto", "Método", "Notas"]],
-      body,
-      startY: y,
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [15, 23, 42], textColor: 255 },
-      columnStyles: { 3: { halign: "right" } },
-      theme: "grid",
-    });
-
-    const fileMonth = month.replace("-", "_");
-    doc.save(`reporte_finanzas_${fileMonth}.pdf`);
   };
 
   // =========================================================
@@ -1823,8 +1788,13 @@ if (!key) return;
                   <button type="button" onClick={handleExportCsv} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700">
                     Descargar CSV
                   </button>
-                  <button type="button" onClick={handleExportPdf} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-black dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white">
-                    Descargar PDF del mes
+                  <button
+                    type="button"
+                    onClick={handleExportPdf}
+                    disabled={generatingPdf}
+                    className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
+                  >
+                    {generatingPdf ? "Generando PDF…" : "Reporte PDF"}
                   </button>
                 </div>
               </div>
