@@ -596,6 +596,14 @@ export default function AceptarClient() {
                           <LinkButton tone="info">Volver a Familia</LinkButton>
                         </a>
                       </div>
+
+                      {authMode === "login" ? (
+                        <div className="text-xs text-slate-600 dark:text-slate-300">
+                          <a href="/auth/reset-password" className="text-sky-600 underline">
+                            Olvidé mi contraseña
+                          </a>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ) : (

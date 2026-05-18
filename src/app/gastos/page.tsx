@@ -1621,7 +1621,7 @@ if (!key) return;
 
   const handleToggleCardSharing = async (cardId: string, current: boolean | null | undefined) => {
     if (!user || !familyCtx) return;
-    if (!canUseFamilyScope) return alert("Sólo el jefe de familia puede cambiar si una tarjeta se comparte o no.");
+    if (!canUseFamilyScope) return alert("Sólo el administrador familiar puede cambiar si una tarjeta se comparte o no.");
 
     const newValue = !current;
     const ownerId = familyCtx?.ownerUserId ?? user.id;
@@ -1691,6 +1691,10 @@ if (!key) return;
                 <button className="text-sky-600 underline" onClick={() => { setAuthMode("signup"); setAuthError(null); }}>
                   Crear una nueva
                 </button>
+                <span className="mx-2 text-slate-300 dark:text-slate-700">·</span>
+                <a href="/auth/reset-password" className="text-sky-600 underline">
+                  Olvidé mi contraseña
+                </a>
               </>
             ) : (
               <>
@@ -1752,7 +1756,7 @@ if (!key) return;
                 />
               ) : familyCtx ? (
                 <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
-                  Vista “Familia” sólo para el jefe de familia.
+                  Vista “Familia” sólo para el administrador familiar.
                 </div>
               ) : null}
             </div>

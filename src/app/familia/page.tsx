@@ -211,6 +211,24 @@ function writeOps(userId: string, ops: OfflineOp[]) {
   writeCache(opsKey(userId), ops);
 }
 
+function friendlyFamilyError(message?: string | null) {
+  const msg = String(message ?? "").toLowerCase();
+  if (!msg) return "No pudimos completar la acción. Intenta de nuevo.";
+  if (msg.includes("auth session") || msg.includes("not authenticated") || msg.includes("bearer")) {
+    return "Tu sesión expiró. Vuelve a iniciar sesión e inténtalo de nuevo.";
+  }
+  if (msg.includes("family not found")) {
+    return "No encontramos esta familia. Actualiza la pantalla e inténtalo de nuevo.";
+  }
+  if (msg.includes("not allowed") || msg.includes("permission") || msg.includes("rls")) {
+    return "No tienes permisos para hacer esta acción.";
+  }
+  if (msg.includes("network") || msg.includes("failed to fetch") || msg.includes("offline")) {
+    return "No pudimos conectarnos. Revisa tu internet e inténtalo de nuevo.";
+  }
+  return message ?? "No pudimos completar la acción. Intenta de nuevo.";
+}
+
 // =========================================================
 // Página
 // =========================================================
@@ -396,16 +414,12 @@ export default function FamiliaPage() {
 
         const res = await fetchMyMembership(user.id);
 
-        // debug útil
-        console.log("[FAMILY] uid", user.id);
-        console.log("[FAMILY] my membership", res);
-
         if (!alive) return;
 
         if (res.error) {
           setMyRole("member");
           setDbFamilyId(null);
-          setRoleError(res.error.message ?? "No pude leer tu rol (RLS).");
+          setRoleError(friendlyFamilyError(res.error.message));
           return;
         }
 
@@ -416,7 +430,7 @@ export default function FamiliaPage() {
         if (!row) {
           setMyRole("member");
           setDbFamilyId(null);
-          setRoleError("No encontré tu membresía activa en family_members.");
+          setRoleError("No encontramos una membresía familiar activa para tu cuenta.");
           return;
         }
 
@@ -427,7 +441,7 @@ export default function FamiliaPage() {
         if (!alive) return;
         setMyRole("member");
         setDbFamilyId(null);
-        setRoleError(err?.message ?? "Error leyendo tu rol.");
+        setRoleError(friendlyFamilyError(err?.message));
       } finally {
         if (alive) setRoleLoading(false);
       }
@@ -538,7 +552,7 @@ export default function FamiliaPage() {
                 familyId: op.payload.family_id,
                 email: op.payload.email,
                 role: op.payload.role,
-                inviterName: user.email ?? "Jefe de familia",
+                inviterName: user.email ?? "Administrador familiar",
                 message: op.payload.message ?? null,
               }),
             });
@@ -684,14 +698,6 @@ export default function FamiliaPage() {
         const group = (groupRes.data ?? null) as FamilyGroupRow | null;
         const mems = (membersRes.data ?? []) as FamilyMemberRow[];
         const invs = (invitesRes.data ?? []) as FamilyInviteRow[];
-
-        // debug
-        console.log("[FAMILY] data fetch", {
-          famId,
-          members: mems.length,
-          invites: invs.length,
-          invitesError: invitesRes.error?.message ?? null,
-        });
 
         setFamilyGroup(groupRes.error ? cachedGroup : group);
         setMembers((prev) => {
@@ -987,7 +993,7 @@ export default function FamiliaPage() {
   // =========================================================
   const handleRemoveMember = async (memberId: string) => {
     if (!user) return;
-    if (!isFamilyOwnerUI) return alert("Sólo el jefe de familia puede remover miembros.");
+    if (!isFamilyOwnerUI) return alert("Sólo el administrador familiar puede remover miembros.");
     if (!window.confirm("¿Remover miembro de la familia?")) return;
 
     setMembers((prev) => prev.map((m) => (m.id === memberId ? { ...m, status: "removed" } : m)));
@@ -1106,7 +1112,7 @@ export default function FamiliaPage() {
       if (error) throw error;
 
       if (!data || data.length === 0) {
-        throw new Error("No se eliminó (RLS/permiso o el registro ya no existe).");
+        throw new Error("No se eliminó. Puede que ya no exista o que no tengas permisos.");
       }
 
       await syncOfflineOps();
@@ -1250,9 +1256,9 @@ export default function FamiliaPage() {
 
       {!offline && roleError ? (
         <section className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
-          <div className="font-semibold">No pude confirmar tu rol desde la base de datos</div>
+          <div className="font-semibold">No pude confirmar tu rol familiar</div>
           <div className="mt-1 text-[11px] opacity-90">
-            {roleError} — Si aquí aparece “permission denied”, es RLS SELECT en family_members.
+            {roleError}
           </div>
         </section>
       ) : null}
@@ -1298,7 +1304,7 @@ export default function FamiliaPage() {
                   </span>{" "}
                   ·{" "}
                   {isFamilyOwnerUI ? (
-                    <span className="font-semibold">Jefe de familia</span>
+                    <span className="font-semibold">Administrador familiar</span>
                   ) : myRole === "admin" ? (
                     <span className="font-semibold">Admin</span>
                   ) : (
@@ -1344,7 +1350,7 @@ export default function FamiliaPage() {
                 ? "Controlas invitaciones y roles."
                 : myRole === "admin"
                 ? "Tienes permisos elevados dentro de la familia."
-                : "Tu jefe de familia controla invitaciones y roles."
+                : "El administrador familiar controla invitaciones y roles."
             }
             tone={isFamilyOwnerUI ? "good" : "neutral"}
           />
@@ -1700,7 +1706,7 @@ export default function FamiliaPage() {
                 2) <span className="font-semibold">Tarjetas compartidas</span>: tabla puente para asignar tarjetas a miembros.
               </p>
               <p>
-                3) <span className="font-semibold">Permisos/RLS</span>: afinar qué ve owner/admin vs miembro.
+                3) <span className="font-semibold">Permisos familiares</span>: afinar qué ve administrador vs miembro.
               </p>
             </div>
           </Section>

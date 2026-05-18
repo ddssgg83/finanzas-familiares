@@ -275,6 +275,10 @@ export default function AprendePage() {
                 >
                   Crear una nueva
                 </button>
+                <span className="mx-2 text-slate-300 dark:text-slate-700">·</span>
+                <Link href="/auth/reset-password" className="text-sky-600 underline">
+                  Olvidé mi contraseña
+                </Link>
               </>
             ) : (
               <>

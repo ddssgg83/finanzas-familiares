@@ -499,7 +499,7 @@ export default function FamilyDashboardPage() {
 
   const headerRoleLabel = useMemo(() => {
     if (!familyCtx?.familyId) return "Cuenta individual";
-    return isFamilyOwner ? "Jefe de familia" : "Miembro";
+    return isFamilyOwner ? "Administrador familiar" : "Miembro";
   }, [familyCtx?.familyId, isFamilyOwner]);
 
   return (

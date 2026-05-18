@@ -6,11 +6,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronDown, Landmark, LogOut, RotateCw } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
-import { getOfflineTxs, syncOfflineTxs } from "@/lib/offline";
 import { SyncBadge } from "./SyncBadge";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useSyncCenter } from "@/lib/syncCenter";
 
 type AppHeaderProps = {
   title: string;
@@ -56,25 +56,6 @@ function pathToTab(pathname: string): AppHeaderProps["activeTab"] {
   return "dashboard";
 }
 
-function useOnlineStatus() {
-  const [isOnline, setIsOnline] = useState<boolean>(() =>
-    typeof navigator === "undefined" ? true : navigator.onLine
-  );
-
-  useEffect(() => {
-    const on = () => setIsOnline(true);
-    const off = () => setIsOnline(false);
-    window.addEventListener("online", on);
-    window.addEventListener("offline", off);
-    return () => {
-      window.removeEventListener("online", on);
-      window.removeEventListener("offline", off);
-    };
-  }, []);
-
-  return isOnline;
-}
-
 export function AppHeader({
   title,
   subtitle,
@@ -88,75 +69,13 @@ export function AppHeader({
   const derivedTab = pathToTab(pathname);
   const currentTab = activeTab ?? derivedTab;
 
-  const isOnline = useOnlineStatus();
+  const { state: syncState, summary: syncSummary, syncNow } = useSyncCenter();
+  const isOnline = syncState.isOnline;
   const isOfflineRoute = pathname.startsWith("/offline");
 
-  const [pending, setPending] = useState(0);
-  const [syncing, setSyncing] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const accountTriggerRef = useRef<HTMLButtonElement | null>(null);
-
-  const refreshPending = useCallback(async () => {
-    try {
-      if (!userId) {
-        setPending(0);
-        return 0;
-      }
-
-      const txs = await getOfflineTxs(userId);
-      const count = txs?.length ?? 0;
-      setPending(count);
-      return count;
-    } catch {
-      setPending(0);
-      return 0;
-    }
-  }, [userId]);
-
-  useEffect(() => {
-    refreshPending();
-  }, [refreshPending]);
-
-  useEffect(() => {
-    if (!isOnline) return;
-
-    let cancelled = false;
-
-    const run = async () => {
-      const count = await refreshPending();
-      if (cancelled || count <= 0 || !userId) return;
-
-      setSyncing(true);
-      try {
-        await syncOfflineTxs(userId);
-        await refreshPending();
-      } finally {
-        if (!cancelled) setSyncing(false);
-      }
-    };
-
-    run();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isOnline, userId, refreshPending]);
-
-  const onRetry = useCallback(async () => {
-    if (!isOnline) return;
-
-    const count = await refreshPending();
-    if (count <= 0 || !userId) return;
-
-    setSyncing(true);
-    try {
-      await syncOfflineTxs(userId);
-      await refreshPending();
-    } finally {
-      setSyncing(false);
-    }
-  }, [isOnline, userId, refreshPending]);
 
   const displayName = useMemo(() => toDisplayName(userName, userEmail), [userEmail, userName]);
 
@@ -204,9 +123,9 @@ export function AppHeader({
   }, []);
 
   const handleRetryFromMenu = useCallback(async () => {
-    await onRetry();
+    await syncNow();
     setAccountMenuOpen(false);
-  }, [onRetry]);
+  }, [syncNow]);
 
   const handleSignOutFromMenu = useCallback(() => {
     setAccountMenuOpen(false);
@@ -243,7 +162,14 @@ export function AppHeader({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-            {!isOfflineRoute && <SyncBadge pendingCount={pending} isOnline={isOnline} syncing={syncing} />}
+            {!isOfflineRoute && (
+              <SyncBadge
+                pendingCount={syncSummary.pendingTotal}
+                pendingDetails={syncSummary.details}
+                isOnline={isOnline}
+                syncing={syncState.isSyncing}
+              />
+            )}
 
             <div className="sm:relative">
               <button
@@ -293,7 +219,7 @@ export function AppHeader({
                     </div>
 
                     <div className="mt-4 flex flex-col gap-2">
-                      {!isOfflineRoute && pending > 0 && (
+                      {!isOfflineRoute && syncSummary.canSync && (
                         <button
                           onClick={handleRetryFromMenu}
                           className={cn(buttonVariants({ variant: "outline", size: "sm" }), "justify-start")}
@@ -302,6 +228,12 @@ export function AppHeader({
                           <RotateCw className="mr-2 h-3.5 w-3.5" />
                           Sincronizar ahora
                         </button>
+                      )}
+
+                      {!isOfflineRoute && syncSummary.pendingTotal > 0 && !syncSummary.canSync && (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+                          Tienes cambios pendientes. Se sincronizarán cuando vuelvas a tener conexión y abras el módulo correspondiente.
+                        </div>
                       )}
 
                       <div

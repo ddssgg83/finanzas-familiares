@@ -12,8 +12,11 @@ type SyncState = {
   // Gastos (transactions offline)
   pendingTx: number;
 
-  // Patrimonio/Familia (assets/debts ops offline)
+  // Patrimonio (assets/debts ops offline)
   pendingOps: number;
+
+  // Familia (roles/invitaciones/familia ops offline)
+  pendingFamilyOps: number;
 
   isSyncing: boolean;
   lastSyncAt: number | null;
@@ -25,12 +28,25 @@ function getOnline(): boolean {
   return navigator.onLine;
 }
 
+function getPendingFamilyOpsCount(userId: string) {
+  if (typeof window === "undefined") return 0;
+  try {
+    const raw = localStorage.getItem(`ff-familia-ops-v1:${userId}`);
+    if (!raw) return 0;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export function useSyncCenter() {
   const [state, setState] = useState<SyncState>({
     isOnline: getOnline(),
     userId: null,
     pendingTx: 0,
     pendingOps: 0,
+    pendingFamilyOps: 0,
     isSyncing: false,
     lastSyncAt: null,
     lastError: null,
@@ -91,7 +107,7 @@ export function useSyncCenter() {
     async function refreshCounts() {
       if (!state.userId) {
         if (!alive) return;
-        setState((s) => ({ ...s, pendingTx: 0, pendingOps: 0 }));
+        setState((s) => ({ ...s, pendingTx: 0, pendingOps: 0, pendingFamilyOps: 0 }));
         return;
       }
 
@@ -100,16 +116,18 @@ export function useSyncCenter() {
         const txs = await getOfflineTxs(state.userId);
         const pendingTx = txs?.length ?? 0;
 
-        // ✅ ops de patrimonio/familia
+        // ✅ ops de patrimonio
         const pendingOps = getPendingOfflineOpsCount(state.userId);
+        const pendingFamilyOps = getPendingFamilyOpsCount(state.userId);
 
         if (!alive) return;
-        setState((s) => ({ ...s, pendingTx, pendingOps }));
+        setState((s) => ({ ...s, pendingTx, pendingOps, pendingFamilyOps }));
       } catch {
         if (!alive) return;
         // en caso de error, no tronar UI
         const pendingOps = getPendingOfflineOpsCount(state.userId);
-        setState((s) => ({ ...s, pendingTx: 0, pendingOps }));
+        const pendingFamilyOps = getPendingFamilyOpsCount(state.userId);
+        setState((s) => ({ ...s, pendingTx: 0, pendingOps, pendingFamilyOps }));
       }
     }
 
@@ -160,12 +178,19 @@ export function useSyncCenter() {
   }, [state.isOnline, state.userId]);
 
   const summary = useMemo(() => {
-    const pendingTotal = (state.pendingTx ?? 0) + (state.pendingOps ?? 0);
+    const pendingSyncable = (state.pendingTx ?? 0) + (state.pendingOps ?? 0);
+    const pendingTotal = pendingSyncable + (state.pendingFamilyOps ?? 0);
     return {
       pendingTotal,
-      canSync: state.isOnline && !!state.userId && pendingTotal > 0,
+      pendingSyncable,
+      canSync: state.isOnline && !!state.userId && pendingSyncable > 0,
+      details: {
+        gastos: state.pendingTx ?? 0,
+        patrimonio: state.pendingOps ?? 0,
+        familia: state.pendingFamilyOps ?? 0,
+      },
     };
-  }, [state.isOnline, state.userId, state.pendingTx, state.pendingOps]);
+  }, [state.isOnline, state.userId, state.pendingTx, state.pendingOps, state.pendingFamilyOps]);
 
   return { state, summary, syncNow };
 }

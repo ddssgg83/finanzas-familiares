@@ -1209,7 +1209,7 @@ export default function PatrimonioPage() {
         <Card>
           <Section
             title="Resumen"
-            subtitle="Aquí ves tus activos, deudas y patrimonio neto. Si eres jefe de familia, puedes cambiar la vista a patrimonio familiar."
+            subtitle="Aquí ves tus activos, deudas y patrimonio neto. Si eres administrador familiar, puedes cambiar la vista a patrimonio familiar."
             right={
               familyCtx && isFamilyOwner ? (
                 <SegmentedControl<ViewScope>
@@ -1225,7 +1225,7 @@ export default function PatrimonioPage() {
               ) : (
                 <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
                   Vista actual: <span className="font-semibold">Sólo tu patrimonio.</span>
-                  {familyCtx && !isFamilyOwner && <> El modo familiar sólo está disponible para el jefe de familia.</>}
+                  {familyCtx && !isFamilyOwner && <> El modo familiar sólo está disponible para el administrador familiar.</>}
                 </div>
               )
             }
@@ -1234,7 +1234,7 @@ export default function PatrimonioPage() {
               <div className="mt-2 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
                 <div>
                   Familia: <span className="font-semibold">{familyCtx.familyName}</span>{" "}
-                  {isFamilyOwner ? "(jefe de familia)" : "(miembro)"}
+                  {isFamilyOwner ? "(administrador familiar)" : "(miembro)"}
                 </div>
                 <div>
                   Miembros activos: <span className="font-semibold">{familyCtx.activeMembers}</span>
