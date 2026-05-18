@@ -4,7 +4,9 @@ import { Sparkles, UsersRound } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { PremiumHealthCard } from "@/components/premium/PremiumHealthCard";
 import { PremiumInsightCard } from "@/components/premium/PremiumInsightCard";
+import { PremiumProjectionCard } from "@/components/premium/PremiumProjectionCard";
 import { PremiumRiskList } from "@/components/premium/PremiumRiskList";
+import { PremiumSignalList } from "@/components/premium/PremiumSignalList";
 import type { PremiumDashboardModel } from "@/lib/premium/dashboardInsights";
 
 type Props = {
@@ -54,6 +56,11 @@ export function PremiumPreview({ model }: Props) {
           icon={UsersRound}
           tone="default"
         />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[1fr,0.86fr]">
+        <PremiumSignalList signals={model.signals} />
+        <PremiumProjectionCard projection={model.projection} />
       </div>
     </section>
   );

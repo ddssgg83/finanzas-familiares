@@ -1,3 +1,10 @@
+import {
+  buildFinancialSignals,
+  buildMonthlyProjection,
+  type FinancialSignal,
+  type MonthlyProjection,
+} from "@/lib/premium/financialSignals";
+
 export type PremiumTone = "good" | "warning" | "critical" | "neutral";
 
 export type PremiumSummaryInput = {
@@ -68,6 +75,8 @@ export type PremiumDashboardModel = {
   nextAction: PremiumActionModel;
   risks: PremiumRiskModel[];
   familySummary: PremiumFamilySummaryModel;
+  signals: FinancialSignal[];
+  projection: MonthlyProjection;
 };
 
 function clampScore(score: number) {
@@ -103,6 +112,8 @@ export function buildPremiumDashboardModel(input: PremiumDashboardInput): Premiu
   let score = 50;
 
   if (loading) {
+    const signals = buildFinancialSignals(input);
+    const projection = buildMonthlyProjection(input);
     return {
       health: {
         score: 0,
@@ -122,6 +133,8 @@ export function buildPremiumDashboardModel(input: PremiumDashboardInput): Premiu
         },
       ],
       familySummary: buildFamilySummary(family),
+      signals,
+      projection,
     };
   }
 
@@ -196,6 +209,8 @@ export function buildPremiumDashboardModel(input: PremiumDashboardInput): Premiu
   }
 
   const finalScore = clampScore(score);
+  const signals = buildFinancialSignals(input);
+  const projection = buildMonthlyProjection(input);
 
   return {
     health: {
@@ -207,6 +222,8 @@ export function buildPremiumDashboardModel(input: PremiumDashboardInput): Premiu
     nextAction: buildNextAction(summary, netWorth, goals, family),
     risks: buildRisks(summary, netWorth, goals, dataError),
     familySummary: buildFamilySummary(family),
+    signals,
+    projection,
   };
 }
 
