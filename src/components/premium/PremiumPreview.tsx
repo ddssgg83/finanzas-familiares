@@ -3,6 +3,7 @@
 import { Sparkles, UsersRound } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { PremiumHealthCard } from "@/components/premium/PremiumHealthCard";
+import { PremiumCoachPanel } from "@/components/premium/PremiumCoachPanel";
 import { PremiumInsightCard } from "@/components/premium/PremiumInsightCard";
 import { PremiumProjectionCard } from "@/components/premium/PremiumProjectionCard";
 import { PremiumRiskList } from "@/components/premium/PremiumRiskList";
@@ -62,6 +63,8 @@ export function PremiumPreview({ model }: Props) {
         <PremiumSignalList signals={model.signals} />
         <PremiumProjectionCard projection={model.projection} />
       </div>
+
+      <PremiumCoachPanel model={model} />
     </section>
   );
 }
