@@ -1,0 +1,60 @@
+"use client";
+
+import { Sparkles, UsersRound } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { PremiumHealthCard } from "@/components/premium/PremiumHealthCard";
+import { PremiumInsightCard } from "@/components/premium/PremiumInsightCard";
+import { PremiumRiskList } from "@/components/premium/PremiumRiskList";
+import type { PremiumDashboardModel } from "@/lib/premium/dashboardInsights";
+
+type Props = {
+  model: PremiumDashboardModel;
+};
+
+export function PremiumPreview({ model }: Props) {
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary">Premium Preview</Badge>
+            <span className="text-xs text-slate-500 dark:text-slate-400">Sin IA, sin datos nuevos</span>
+          </div>
+          <div>
+            <p className="eyebrow">Insights financieros</p>
+            <h2 className="section-title">Decisiones claras para este mes</h2>
+          </div>
+        </div>
+        <p className="max-w-xl text-sm leading-6 text-slate-600 dark:text-slate-300">
+          Lecturas calculadas con tus movimientos, patrimonio y contexto familiar actual.
+        </p>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.05fr,0.95fr]">
+        <PremiumHealthCard health={model.health} />
+        <PremiumInsightCard
+          eyebrow="Siguiente accion"
+          title={model.nextAction.title}
+          body={model.nextAction.body}
+          href={model.nextAction.href}
+          actionLabel={model.nextAction.actionLabel}
+          icon={Sparkles}
+          tone="good"
+        />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[1fr,0.86fr]">
+        <PremiumRiskList risks={model.risks} />
+        <PremiumInsightCard
+          eyebrow="Familia"
+          title={model.familySummary.title}
+          body={model.familySummary.body}
+          href={model.familySummary.href}
+          actionLabel={model.familySummary.actionLabel}
+          icon={UsersRound}
+          tone="default"
+        />
+      </div>
+    </section>
+  );
+}

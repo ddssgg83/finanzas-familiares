@@ -17,12 +17,14 @@ import {
 import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
 import { PageShell } from "@/components/ui/PageShell";
+import { PremiumPreview } from "@/components/premium/PremiumPreview";
 import { useFamilyContext } from "@/hooks/useFamilyContext";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { buildPremiumDashboardModel } from "@/lib/premium/dashboardInsights";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -331,6 +333,25 @@ export default function DashboardPage() {
     return "Vas parejo este mes. Una pequena mejora en gasto variable puede darte margen de ahorro.";
   }, [loading, dataError, summary]);
 
+  const premiumModel = useMemo(
+    () =>
+      buildPremiumDashboardModel({
+        summary,
+        netWorth,
+        goals,
+        family: familyCtx
+          ? {
+              familyId: familyCtx.familyId,
+              familyName: familyCtx.familyName,
+              activeMembers: familyCtx.activeMembers,
+            }
+          : null,
+        loading,
+        dataError,
+      }),
+    [dataError, familyCtx, goals, loading, netWorth, summary]
+  );
+
   const handleAddGoal = () => {
     if (!goalTitle.trim() || !goalTarget.trim()) return;
 
@@ -416,6 +437,8 @@ export default function DashboardPage() {
             </div>
           </div>
         </section>
+
+        <PremiumPreview model={premiumModel} />
 
         <Tabs defaultValue="overview" className="w-full">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
