@@ -7,6 +7,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
 import { PageShell } from "@/components/ui/PageShell";
+import { useFamilyContext } from "@/hooks/useFamilyContext";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,8 @@ export default function NewFamilyGoalPage() {
     track_direction: "",
     track_category: "",
   });
+
+  const { familyCtx, familyLoading, familyError } = useFamilyContext(user);
 
   // ---------- AUTH ----------
   useEffect(() => {
@@ -114,6 +117,16 @@ export default function NewFamilyGoalPage() {
       setSaving(true);
       setError(null);
 
+      if (familyLoading) {
+        setError("Estamos cargando la información de tu familia. Intenta de nuevo en unos segundos.");
+        return;
+      }
+
+      if (!familyCtx?.familyId) {
+        setError("Necesitas crear o unirte a una familia antes de crear metas familiares.");
+        return;
+      }
+
       const targetAmountNum = Number(form.target_amount || 0);
       if (!targetAmountNum || targetAmountNum <= 0) {
         setError("Ingresa un monto objetivo válido mayor a 0.");
@@ -123,20 +136,6 @@ export default function NewFamilyGoalPage() {
       if (form.auto_track && !form.track_direction) {
         setError("Selecciona la dirección del avance para el seguimiento automático.");
         return;
-      }
-
-      // Intentamos obtener family_group_id (si existe profiles)
-      let familyGroupId: string | null = null;
-      try {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("family_group_id")
-          .eq("id", user.id)
-          .maybeSingle();
-
-        if (profile) familyGroupId = profile.family_group_id ?? null;
-      } catch {
-        // modo individual / tabla no existe
       }
 
       // Si no hay track_category y sí puso category (UI), la usamos como fallback
@@ -158,7 +157,8 @@ export default function NewFamilyGoalPage() {
         track_category: effectiveTrackCategory ? effectiveTrackCategory : null,
 
         owner_user_id: user.id,
-        family_group_id: familyGroupId,
+        family_group_id: familyCtx.familyId,
+        family_id: familyCtx.familyId,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -248,6 +248,19 @@ export default function NewFamilyGoalPage() {
         {error && (
           <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-300">
             {error}
+          </div>
+        )}
+
+        {familyLoading && (
+          <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-200">
+            Cargando la información de tu familia antes de crear la meta...
+          </div>
+        )}
+
+        {!familyLoading && !familyCtx?.familyId && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+            Necesitas crear o unirte a una familia antes de crear metas familiares.
+            {familyError ? <span className="mt-1 block">{familyError}</span> : null}
           </div>
         )}
 
@@ -417,10 +430,10 @@ export default function NewFamilyGoalPage() {
             </button>
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || familyLoading || !familyCtx?.familyId}
               className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {saving ? "Guardando…" : "Guardar meta"}
+              {saving ? "Guardando…" : familyLoading ? "Cargando familia..." : "Guardar meta"}
             </button>
           </div>
         </form>
