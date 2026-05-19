@@ -223,8 +223,32 @@ export function StatCard({
   );
 }
 
-export function EmptyState({ children }: { children: React.ReactNode }) {
-  return <p className="text-xs text-slate-500 dark:text-slate-400">{children}</p>;
+export function EmptyState({
+  children,
+  title,
+  icon,
+}: {
+  children: React.ReactNode;
+  title?: React.ReactNode;
+  icon?: React.ReactNode;
+}) {
+  return (
+    <div className="soft-enter rounded-[24px] border border-dashed border-slate-200 bg-gradient-to-b from-white to-slate-50/80 px-4 py-6 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] dark:border-slate-800 dark:from-slate-950 dark:to-slate-900/70">
+      <div className="mx-auto flex max-w-sm flex-col items-center gap-3">
+        {icon ? (
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+            {icon}
+          </div>
+        ) : null}
+        <div className="space-y-1.5">
+          {title ? (
+            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</p>
+          ) : null}
+          <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">{children}</p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function ListItem({

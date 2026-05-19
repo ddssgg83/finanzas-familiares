@@ -1524,7 +1524,7 @@ export default function FamiliaPage() {
             {loading ? (
               <EmptyState>Cargando invitaciones…</EmptyState>
             ) : invites.length === 0 ? (
-              <EmptyState>Cuando invites a alguien, podrás dar seguimiento desde aquí.</EmptyState>
+              <EmptyState>Cuando invites a alguien, aquí verás el estado de cada invitación.</EmptyState>
             ) : (
               <ul className="space-y-2">
                 {invites.map((i) => {
@@ -1620,7 +1620,7 @@ export default function FamiliaPage() {
               <EmptyState>
                 {isOfflineNow() && (familyCtx?.activeMembers ?? 0) > 0
                   ? "No pude leer la lista completa sin internet, pero tu familia existe y guardamos una vista reciente."
-                  : "Crea o invita a tu primer miembro para activar la vista familiar."}
+                  : "Invita a tu primer miembro para convertir RINDAY en una vista familiar compartida."}
               </EmptyState>
             ) : (
               <ul className="space-y-2">

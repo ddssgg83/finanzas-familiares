@@ -1153,7 +1153,7 @@ if (!key) return;
     const lines: string[] = [];
 
     if (!transactions.length) {
-      lines.push("Aún no tienes movimientos en este mes. Empieza registrando ingresos y gastos para ver tu resumen.");
+      lines.push("Tu resumen aparecerá cuando registres los primeros movimientos del mes.");
       return lines;
     }
 
@@ -1831,7 +1831,7 @@ if (!key) return;
       <Card>
         <Section title="Resumen inteligente del mes" subtitle="Incluye impacto estimado a Patrimonio (flujo neto).">
           {smartSummary.length === 0 ? (
-            <EmptyState>Registra más movimientos para activar tu resumen inteligente.</EmptyState>
+            <EmptyState>Tu resumen inteligente aparecerá cuando haya suficientes movimientos del mes.</EmptyState>
           ) : (
             <ul className="list-disc space-y-1 pl-5 text-xs text-slate-700 dark:text-slate-200">
               {smartSummary.map((line, idx) => (
@@ -1880,9 +1880,9 @@ if (!key) return;
 
           <div className="mt-4">
             {!showCardsList ? (
-              <EmptyState>Lista oculta para mantener esta vista enfocada.</EmptyState>
+              <EmptyState>La lista está guardada para mantener esta vista enfocada.</EmptyState>
             ) : cards.length === 0 ? (
-              <EmptyState>Agrega tu primera tarjeta para entender mejor tus pagos.</EmptyState>
+              <EmptyState>Agrega una tarjeta para ver tus pagos con más claridad.</EmptyState>
             ) : (
               <ul className="space-y-2">
                 {cards.map((c) => (
@@ -1936,7 +1936,7 @@ if (!key) return;
     }
   >
     {!showCharts ? (
-      <EmptyState>Gráficas ocultas. Ábrelas cuando quieras revisar tendencias.</EmptyState>
+      <EmptyState>Tus gráficas están guardadas para cuando quieras revisar tendencias.</EmptyState>
     ) : (
       <GastosCharts
         isDark={isDark}
@@ -2193,7 +2193,7 @@ if (!key) return;
       <Card>
         <Section title="Gastos por categoría" subtitle="Distribución del mes actual.">
           {gastosPorCategoria.length === 0 ? (
-            <EmptyState>Registra tu primer gasto del mes para ver la distribución por categoría.</EmptyState>
+            <EmptyState>Registra tu primer gasto y RINDAY empezará a ordenar tus categorías.</EmptyState>
           ) : (
             <div className="space-y-2">
               {gastosPorCategoria.map((item) => (
@@ -2228,9 +2228,9 @@ if (!key) return;
             }
           >
             {!showGastosPorPersona ? (
-              <EmptyState>Vista oculta. Ábrela cuando quieras revisar la distribución por persona.</EmptyState>
+              <EmptyState>Esta vista está guardada para cuando quieras revisar el gasto por persona.</EmptyState>
             ) : gastosPorPersona.length === 0 ? (
-              <EmptyState>Aún no hay gastos familiares por persona en este mes.</EmptyState>
+              <EmptyState>Cuando haya gastos familiares este mes, aquí verás cómo se distribuyen por persona.</EmptyState>
             ) : (
               <div className="space-y-2">
                 {gastosPorPersona.map((item) => (

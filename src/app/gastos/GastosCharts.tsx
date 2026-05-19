@@ -44,7 +44,7 @@ export default function GastosCharts({
       <Card>
         <Section title="Gastos por categoría">
           {chartDataCategorias.length === 0 ? (
-            <EmptyState>Aún no hay gastos registrados.</EmptyState>
+            <EmptyState>Cuando registres gastos, esta gráfica revelará tus categorías principales.</EmptyState>
           ) : (
             <ResponsiveContainer width="100%" height={260}>
               <BarChart
@@ -76,7 +76,7 @@ export default function GastosCharts({
       <Card>
         <Section title="Ingresos vs Gastos por día">
           {chartDataLinea.length === 0 ? (
-            <EmptyState>Aún no hay movimientos suficientes.</EmptyState>
+            <EmptyState>La tendencia aparecerá cuando haya movimientos suficientes para comparar.</EmptyState>
           ) : (
             <ResponsiveContainer width="100%" height={260}>
               <LineChart data={chartDataLinea}>

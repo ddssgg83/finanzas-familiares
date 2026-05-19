@@ -1460,7 +1460,7 @@ export default function PatrimonioPage() {
             {loading ? (
               <EmptyState>Cargando activos…</EmptyState>
             ) : assets.length === 0 ? (
-              <EmptyState>Agrega tu primer activo para completar tu foto patrimonial.</EmptyState>
+              <EmptyState>Agrega tu primer activo para empezar a construir tu foto patrimonial.</EmptyState>
             ) : (
               <ul className="space-y-2">
                 {assets.map((a) => (
@@ -1513,7 +1513,7 @@ export default function PatrimonioPage() {
             {loading ? (
               <EmptyState>Cargando deudas…</EmptyState>
             ) : debts.length === 0 ? (
-              <EmptyState>Registra tus deudas para ver tu patrimonio neto con mayor precisión.</EmptyState>
+              <EmptyState>Registra tus deudas para ver tu patrimonio con honestidad y precisión.</EmptyState>
             ) : (
               <ul className="space-y-2">
                 {debts.map((d) => (
