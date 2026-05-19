@@ -19,41 +19,41 @@ type Step = {
 const STEPS: Step[] = [
   {
     id: "overview",
-    badge: "Bienvenido",
-    title: "Controla tu dinero familiar con claridad",
+    badge: "Beta privada",
+    title: "Tu dinero familiar, por fin en calma",
     subtitle:
-      "Registra ingresos y gastos en segundos. RINDAY organiza la información y te ayuda a entender cómo va tu mes.",
+      "RINDAY convierte tus movimientos diarios en una vista clara para decidir mejor este mes.",
     accent: "from-sky-500/20 via-emerald-400/10 to-transparent",
     points: [
-      "Captura gastos al momento, incluso sin internet.",
-      "Organiza todo por categorías y métodos de pago.",
-      "Ve mes con mes en qué se está yendo tu dinero.",
+      "Captura gastos al momento, incluso cuando estás sin internet.",
+      "Ordena ingresos, gastos, categorías y métodos de pago.",
+      "Entiende qué está pasando sin abrir hojas de cálculo.",
     ],
   },
   {
     id: "patrimonio",
     badge: "Patrimonio",
-    title: "Entiende tu patrimonio con una vista completa",
+    title: "Una foto honesta de lo que estás construyendo",
     subtitle:
-      "Activos, deudas y patrimonio neto en un solo lugar, sin hojas de cálculo ni fórmulas escondidas.",
+      "Activos, deudas y patrimonio neto conviven en una vista sobria, útil y fácil de revisar.",
     accent: "from-violet-500/20 via-sky-400/10 to-transparent",
     points: [
-      "Registra casa, coche, ahorros, inversiones, etc.",
-      "Da de alta tus deudas: tarjetas, créditos, hipoteca.",
-      "Ve cómo cambia tu patrimonio mes a mes.",
+      "Registra casa, coche, ahorros, inversiones y otros activos.",
+      "Ten presentes tarjetas, créditos, hipoteca y compromisos.",
+      "Mira tu patrimonio con perspectiva, no solo con números sueltos.",
     ],
   },
   {
     id: "familia",
     badge: "Familia",
-    title: "Cada movimiento suma a una visión familiar clara",
+    title: "Una misma visión para decidir en familia",
     subtitle:
-      "Conecta a tu familia para revisar gastos, metas y decisiones compartidas sin mezclar cuentas personales.",
+      "Comparte gastos, metas y decisiones importantes sin perder privacidad ni mezclar lo personal.",
     accent: "from-amber-400/25 via-rose-400/10 to-transparent",
     points: [
-      "Invita a tu pareja, hijos u otros miembros.",
-      "Ve quién hizo cada gasto y con qué tarjeta.",
-      "Consulta el gasto total familiar por categoría o tarjeta.",
+      "Invita a quienes toman decisiones contigo.",
+      "Ve aportaciones y movimientos familiares con contexto.",
+      "Convierte las metas compartidas en algo visible y alcanzable.",
     ],
   },
 ];
@@ -406,246 +406,249 @@ export default function OnboardingClient() {
   // ✅ RENDER: TU TOUR ORIGINAL
   // =========================
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-slate-950 px-4 py-6 text-slate-50">
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -left-40 -top-40 h-72 w-72 rounded-full bg-sky-500/20 blur-3xl" />
-        <div className="absolute -right-32 top-10 h-64 w-64 rounded-full bg-emerald-400/15 blur-3xl" />
-        <div className="absolute bottom-0 left-1/2 h-64 w-64 -translate-x-1/2 rounded-full bg-violet-500/10 blur-3xl" />
-      </div>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-4 py-6 text-slate-50">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(14,116,217,0.18),transparent_34%),linear-gradient(135deg,rgba(15,23,42,0.2),rgba(2,6,23,0.96))]" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(148,163,184,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(148,163,184,0.06)_1px,transparent_1px)] bg-[size:36px_36px] opacity-40 [mask-image:linear-gradient(to_bottom,black,transparent_78%)]" />
 
-      <main className="relative z-10 w-full max-w-4xl">
-        <div className="mb-4 flex items-center justify-between text-xs text-slate-400">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] uppercase tracking-[0.2em] text-sky-400">
+      <main className="soft-enter relative z-10 w-full max-w-5xl">
+        <div className="mb-4 flex items-center justify-between gap-3 text-xs text-slate-400">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-sky-300">
               RINDAY
             </span>
             <span className="h-1 w-1 rounded-full bg-slate-600" />
-            <span>
-              Paso {currentStepIndex + 1} de {totalSteps}
-            </span>
+            <span className="truncate">Beta privada para familias que quieren claridad</span>
           </div>
 
           <button
             onClick={handleSkip}
-            className="rounded-full border border-slate-700/70 px-3 py-1 text-[11px] font-medium text-slate-300 hover:border-slate-500 hover:text-slate-50"
+            className="tap-feedback shrink-0 rounded-full border border-slate-700/70 px-3 py-1.5 text-[11px] font-medium text-slate-300 transition-all hover:border-slate-500 hover:bg-slate-900/70 hover:text-slate-50"
           >
-            Saltar e ir a la app
+            Entrar ahora
           </button>
         </div>
 
-        <section className="overflow-hidden rounded-3xl border border-slate-800/80 bg-slate-950/70 shadow-[0_18px_60px_rgba(0,0,0,0.65)] backdrop-blur-xl">
-          <div className="grid gap-0 md:grid-cols-[1.2fr,1fr]">
-            <div className="relative border-b border-slate-900/60 p-5 md:border-b-0 md:border-r">
+        <section className="overflow-hidden rounded-[34px] border border-white/10 bg-slate-950/72 shadow-[0_28px_90px_-38px_rgba(0,0,0,0.95)] backdrop-blur-2xl">
+          <div className="grid gap-0 lg:grid-cols-[1.05fr,0.95fr]">
+            <div className="relative border-b border-white/10 p-5 md:p-7 lg:border-b-0 lg:border-r">
               <div
                 className={cn(
-                  "pointer-events-none absolute inset-0 transition-opacity duration-500",
-                  currentStep.id === "overview" &&
-                    "bg-gradient-to-br from-sky-500/10 via-slate-900/0 to-slate-900/0",
-                  currentStep.id === "patrimonio" &&
-                    "bg-gradient-to-br from-violet-500/10 via-slate-900/0 to-slate-900/0",
-                  currentStep.id === "familia" &&
-                    "bg-gradient-to-br from-amber-400/10 via-slate-900/0 to-slate-900/0"
+                  "pointer-events-none absolute inset-0 bg-gradient-to-br opacity-90 transition-opacity duration-500",
+                  currentStep.accent
                 )}
               />
 
-              <div className="relative space-y-4">
-                <span className="inline-flex items-center gap-2 rounded-full bg-slate-900/80 px-3 py-1 text-[11px] font-medium text-slate-300 ring-1 ring-slate-700/80">
-                  <span className="text-base">{currentStep.badge}</span>
-                  <span className="h-1 w-1 rounded-full bg-slate-500" />
-                  <span>Cómo funciona</span>
-                </span>
+              <div className="relative flex min-h-[25rem] flex-col justify-between gap-7">
+                <div className="space-y-6">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center rounded-full border border-sky-300/20 bg-sky-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-200">
+                      {currentStep.badge}
+                    </span>
+                    <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium text-slate-300">
+                      Paso {currentStepIndex + 1} de {totalSteps}
+                    </span>
+                  </div>
 
-                <div className="space-y-2">
-                  <h1 className="text-2xl font-semibold tracking-tight text-slate-50 md:text-3xl">
-                    {currentStep.title}
-                  </h1>
-                  <p className="max-w-xl text-[13px] leading-relaxed text-slate-300">
-                    {currentStep.subtitle}
-                  </p>
+                  <div className="space-y-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                      Una app para decidir con calma
+                    </p>
+                    <h1 className="max-w-2xl text-balance text-3xl font-semibold tracking-[-0.05em] text-white md:text-5xl">
+                      {currentStep.title}
+                    </h1>
+                    <p className="max-w-xl text-sm leading-6 text-slate-300 md:text-base md:leading-7">
+                      {currentStep.subtitle}
+                    </p>
+                  </div>
+
+                  <ul className="grid gap-2.5 text-sm text-slate-200">
+                    {currentStep.points.map((point, idx) => (
+                      <li
+                        key={idx}
+                        className="interactive-surface rounded-[22px] border border-white/10 bg-white/[0.045] px-3.5 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+                      >
+                        <div className="flex items-start gap-3">
+                          <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-400/12 text-[11px] font-semibold text-sky-200 ring-1 ring-sky-300/20">
+                            {idx + 1}
+                          </span>
+                          <span className="leading-6">{point}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
 
-                <ul className="mt-3 space-y-2 text-[12px] text-slate-200">
-                  {currentStep.points.map((point, idx) => (
-                    <li key={idx} className="flex items-start gap-2">
-                      <span className="mt-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-sky-500/20 text-[10px] text-sky-300">
-                        {idx + 1}
-                      </span>
-                      <span className="leading-snug">{point}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="relative mt-6 space-y-2">
-                <div className="flex items-center justify-between text-[11px] text-slate-400">
-                  <span>Progreso</span>
-                  <span>
-                    {currentStepIndex + 1} / {totalSteps}
-                  </span>
-                </div>
-                <div className="h-1.5 overflow-hidden rounded-full bg-slate-800/80">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-sky-400 via-emerald-400 to-amber-300 transition-all duration-500"
-                    style={{ width: `${progressPercent}%` }}
-                  />
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <span>Preparando tu espacio financiero</span>
+                    <span>{Math.round(progressPercent)}%</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-sky-300 via-emerald-300 to-amber-200 transition-all duration-500"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="relative flex items-stretch justify-center bg-slate-950/90 p-5">
-              <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-slate-900/0 via-slate-900/60 to-slate-950/90" />
+            <div className="relative flex flex-col justify-between gap-5 bg-slate-950/88 p-5 md:p-7">
+              <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(160deg,rgba(14,116,217,0.08),transparent_46%,rgba(16,185,129,0.06))]" />
 
-              <div className="relative flex w-full max-w-xs flex-col items-center justify-center">
-                <div className="relative w-full max-w-[260px] rounded-[32px] border border-slate-700/70 bg-slate-950/80 p-3 shadow-[0_20px_40px_rgba(0,0,0,0.85)]">
-                  <div className="mx-auto mb-3 h-1.5 w-16 rounded-full bg-slate-700/80" />
+              <div className="relative mx-auto flex w-full max-w-sm flex-1 items-center justify-center">
+                <div className="interactive-card relative w-full max-w-[292px] rounded-[38px] border border-slate-700/80 bg-slate-950 p-3 shadow-[0_28px_70px_-30px_rgba(8,47,73,0.95)]">
+                  <div className="mx-auto mb-3 h-1.5 w-16 rounded-full bg-slate-700/90" />
 
-                  <div className="space-y-2 rounded-2xl bg-slate-900/80 p-3">
-                    <div className="flex items-center justify-between text-[10px] text-slate-400">
-                      <span className="font-medium">RINDAY</span>
-                      <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[9px] text-sky-300">
-                        Vista previa
+                  <div className="overflow-hidden rounded-[30px] border border-white/10 bg-slate-900/90">
+                    <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-300">
+                          RINDAY
+                        </p>
+                        <p className="mt-0.5 text-[10px] text-slate-400">Vista privada</p>
+                      </div>
+                      <span className="rounded-full bg-emerald-400/12 px-2.5 py-1 text-[9px] font-semibold text-emerald-200 ring-1 ring-emerald-300/20">
+                        En calma
                       </span>
                     </div>
 
-                    <div
-                      className={cn(
-                        "relative overflow-hidden rounded-2xl border border-slate-700/80 bg-slate-900/90 p-3 text-[11px]",
-                        "shadow-[0_12px_30px_rgba(8,47,73,0.75)]"
-                      )}
-                    >
+                    <div className="space-y-3 p-4">
                       <div
                         className={cn(
-                          "pointer-events-none absolute inset-0 bg-gradient-to-br opacity-80",
-                          currentStep.accent
+                          "relative overflow-hidden rounded-[26px] border border-white/10 bg-slate-950 p-4 shadow-[0_16px_44px_-28px_rgba(14,116,217,0.9)]",
+                          "soft-enter"
                         )}
-                      />
-                      <div className="relative space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-200">
-                            {currentStep.id === "overview" && "Gastos e ingresos"}
-                            {currentStep.id === "patrimonio" && "Patrimonio neto"}
-                            {currentStep.id === "familia" && "Gasto familiar"}
-                          </span>
-                          <span className="text-[9px] text-slate-100/80">Vista previa</span>
+                        key={currentStep.id}
+                      >
+                        <div
+                          className={cn(
+                            "pointer-events-none absolute inset-0 bg-gradient-to-br opacity-80",
+                            currentStep.accent
+                          )}
+                        />
+                        <div className="relative space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-300">
+                              {currentStep.id === "overview" && "Resumen del mes"}
+                              {currentStep.id === "patrimonio" && "Patrimonio"}
+                              {currentStep.id === "familia" && "Familia"}
+                            </span>
+                            <span className="text-[9px] text-slate-400">Hoy</span>
+                          </div>
+
+                          {currentStep.id === "overview" && (
+                            <>
+                              <div>
+                                <p className="text-2xl font-semibold tracking-[-0.05em] text-sky-50">$24,870</p>
+                                <p className="text-[10px] text-sky-100/75">Balance disponible estimado</p>
+                              </div>
+                              <div className="grid grid-cols-3 gap-1.5 text-[9px] text-slate-100/90">
+                                <div className="rounded-2xl bg-white/[0.07] px-2 py-2">
+                                  <p className="text-slate-400">Ingresos</p>
+                                  <p className="mt-0.5 font-semibold">$65k</p>
+                                </div>
+                                <div className="rounded-2xl bg-white/[0.07] px-2 py-2">
+                                  <p className="text-slate-400">Gastos</p>
+                                  <p className="mt-0.5 font-semibold">$40k</p>
+                                </div>
+                                <div className="rounded-2xl bg-white/[0.07] px-2 py-2">
+                                  <p className="text-slate-400">Señales</p>
+                                  <p className="mt-0.5 font-semibold">3</p>
+                                </div>
+                              </div>
+                            </>
+                          )}
+
+                          {currentStep.id === "patrimonio" && (
+                            <>
+                              <div>
+                                <p className="text-2xl font-semibold tracking-[-0.05em] text-emerald-50">$1.25M</p>
+                                <p className="text-[10px] text-emerald-100/80">Patrimonio neto estimado</p>
+                              </div>
+                              <div className="space-y-2 text-[10px] text-slate-200">
+                                <div className="flex items-center justify-between rounded-2xl bg-white/[0.07] px-3 py-2">
+                                  <span>Activos</span>
+                                  <span className="font-semibold">$1.8M</span>
+                                </div>
+                                <div className="flex items-center justify-between rounded-2xl bg-white/[0.07] px-3 py-2">
+                                  <span>Deudas</span>
+                                  <span className="font-semibold">$550k</span>
+                                </div>
+                              </div>
+                            </>
+                          )}
+
+                          {currentStep.id === "familia" && (
+                            <>
+                              <div>
+                                <p className="text-2xl font-semibold tracking-[-0.05em] text-amber-50">$18,430</p>
+                                <p className="text-[10px] text-amber-100/80">Gasto familiar visible</p>
+                              </div>
+                              <div className="space-y-2 text-[10px] text-slate-200">
+                                <div className="rounded-2xl bg-white/[0.07] px-3 py-2">
+                                  Meta casa: avance claro para todos
+                                </div>
+                                <div className="rounded-2xl bg-white/[0.07] px-3 py-2">
+                                  Decisiones compartidas, cuentas personales intactas
+                                </div>
+                              </div>
+                            </>
+                          )}
                         </div>
-
-                        {currentStep.id === "overview" && (
-                          <>
-                            <p className="text-lg font-semibold text-sky-50">$ 24,870</p>
-                            <p className="text-[10px] text-sky-100/80">Disponible este mes</p>
-                            <div className="mt-2 grid grid-cols-3 gap-1.5 text-[9px] text-slate-100/90">
-                              <div className="rounded-lg bg-slate-900/70 px-2 py-1">
-                                <p className="text-[9px] text-slate-300">Ingresos</p>
-                                <p className="font-semibold">$ 65,000</p>
-                              </div>
-                              <div className="rounded-lg bg-slate-900/70 px-2 py-1">
-                                <p className="text-[9px] text-slate-300">Gastos</p>
-                                <p className="font-semibold">$ 40,130</p>
-                              </div>
-                              <div className="rounded-lg bg-slate-900/70 px-2 py-1">
-                                <p className="text-[9px] text-slate-300">Movimientos</p>
-                                <p className="font-semibold">132</p>
-                              </div>
-                            </div>
-                          </>
-                        )}
-
-                        {currentStep.id === "patrimonio" && (
-                          <>
-                            <p className="text-lg font-semibold text-emerald-50">$ 1,250,000</p>
-                            <p className="text-[10px] text-emerald-100/90">Patrimonio neto</p>
-                            <div className="mt-2 grid grid-cols-2 gap-1.5 text-[9px] text-slate-100/90">
-                              <div className="rounded-lg bg-slate-900/70 px-2 py-1">
-                                <p className="text-[9px] text-slate-300">Activos</p>
-                                <p className="font-semibold">$ 1,800,000</p>
-                              </div>
-                              <div className="rounded-lg bg-slate-900/70 px-2 py-1">
-                                <p className="text-[9px] text-slate-300">Deudas</p>
-                                <p className="font-semibold">$ 550,000</p>
-                              </div>
-                            </div>
-                            <p className="mt-1 text-[9px] text-emerald-200/90">
-                              + $ 35,000 vs. mes anterior
-                            </p>
-                          </>
-                        )}
-
-                        {currentStep.id === "familia" && (
-                          <>
-                            <p className="text-lg font-semibold text-amber-50">$ 18,430</p>
-                            <p className="text-[10px] text-amber-100/90">
-                              Gasto familiar este mes
-                            </p>
-                          </>
-                        )}
                       </div>
 
-                      <div className="mt-3 flex items-center justify-between text-[9px] text-slate-400">
-                        <span>Así se ve dentro de la app</span>
-                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-900/80 px-2 py-0.5">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                          <span>Listo para usar</span>
-                        </span>
+                      <div className="grid grid-cols-3 gap-2 text-[9px] text-slate-300">
+                        <span className="rounded-full bg-white/[0.07] px-2 py-1.5 text-center">Movs</span>
+                        <span className="rounded-full bg-white/[0.07] px-2 py-1.5 text-center">Patrimonio</span>
+                        <span className="rounded-full bg-white/[0.07] px-2 py-1.5 text-center">Familia</span>
                       </div>
-                    </div>
-
-                    <div className="mt-2 flex items-center justify-between gap-2 text-[9px]">
-                      <span className="inline-flex flex-1 items-center justify-center gap-1 rounded-full bg-slate-900/80 px-2 py-1 text-slate-200">
-                        <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-                        Gastos
-                      </span>
-                      <span className="inline-flex flex-1 items-center justify-center gap-1 rounded-full bg-slate-900/80 px-2 py-1 text-slate-200">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                        Patrimonio
-                      </span>
-                      <span className="inline-flex flex-1 items-center justify-center gap-1 rounded-full bg-slate-900/80 px-2 py-1 text-slate-200">
-                        <span className="h-1.5 w-1.5 rounded-full bg-amber-300" />
-                        Familia
-                      </span>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="absolute inset-x-0 bottom-0 flex items-center justify-between border-t border-slate-900/70 bg-slate-950/80 px-5 py-3 text-[11px] text-slate-200">
-                <button
-                  onClick={handlePrev}
-                  disabled={currentStepIndex === 0}
-                  className={cn(
-                    "rounded-full px-3 py-1.5 text-[11px] transition-all",
-                    currentStepIndex === 0
-                      ? "cursor-not-allowed text-slate-500"
-                      : "text-slate-200 hover:bg-slate-900/80"
-                  )}
-                >
-                  Anterior
-                </button>
+              <div className="relative rounded-[28px] border border-white/10 bg-white/[0.045] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                <div className="flex items-center justify-between gap-3">
+                  <button
+                    onClick={handlePrev}
+                    disabled={currentStepIndex === 0}
+                    className={cn(
+                      "tap-feedback rounded-full px-3 py-2 text-[11px] font-semibold transition-all",
+                      currentStepIndex === 0
+                        ? "cursor-not-allowed text-slate-600"
+                        : "text-slate-200 hover:bg-white/[0.08]"
+                    )}
+                  >
+                    Anterior
+                  </button>
 
-                <div className="flex items-center gap-1.5">
-                  {STEPS.map((step, idx) => (
-                    <button
-                      key={step.id}
-                      onClick={() => setCurrentStepIndex(idx)}
-                      className={cn(
-                        "h-1.5 rounded-full transition-all",
-                        idx === currentStepIndex
-                          ? "w-6 bg-sky-400"
-                          : "w-1.5 bg-slate-600 hover:bg-slate-400"
-                      )}
-                      aria-label={`Ir al paso ${idx + 1}`}
-                    />
-                  ))}
+                  <div className="flex items-center gap-1.5">
+                    {STEPS.map((step, idx) => (
+                      <button
+                        key={step.id}
+                        onClick={() => setCurrentStepIndex(idx)}
+                        className={cn(
+                          "tap-feedback h-2 rounded-full transition-all",
+                          idx === currentStepIndex
+                            ? "w-7 bg-sky-300 shadow-[0_0_22px_rgba(125,211,252,0.45)]"
+                            : "w-2 bg-slate-700 hover:bg-slate-500"
+                        )}
+                        aria-label={`Ir al paso ${idx + 1}`}
+                      />
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={handleNext}
+                    className={cn(
+                      "tap-feedback rounded-full px-4 py-2 text-[11px] font-semibold text-slate-950 shadow-[0_16px_36px_-24px_rgba(125,211,252,0.95)] transition-all hover:-translate-y-0.5",
+                      isLastStep ? "bg-emerald-300 hover:bg-emerald-200" : "bg-sky-300 hover:bg-sky-200"
+                    )}
+                  >
+                    {isLastStep ? "Empezar con calma" : "Continuar"}
+                  </button>
                 </div>
-
-                <button
-                  onClick={handleNext}
-                  className={cn(
-                    "rounded-full px-4 py-1.5 text-[11px] font-semibold text-slate-900 transition-all",
-                    isLastStep ? "bg-emerald-400 hover:bg-emerald-300" : "bg-sky-400 hover:bg-sky-300"
-                  )}
-                >
-                  {isLastStep ? "Entrar a mi app" : "Siguiente"}
-                </button>
               </div>
             </div>
           </div>
