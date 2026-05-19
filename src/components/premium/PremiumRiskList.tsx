@@ -39,7 +39,7 @@ export function PremiumRiskList({ risks }: Props) {
             return (
               <li
                 key={`${risk.title}-${risk.severity}`}
-                className="rounded-[22px] border border-[hsl(var(--border)/0.76)] bg-[hsl(var(--muted)/0.38)] p-3"
+                className="soft-enter rounded-[22px] border border-[hsl(var(--border)/0.76)] bg-[hsl(var(--muted)/0.38)] p-3 shadow-[inset_0_1px_0_hsl(var(--card)/0.54)]"
               >
                 <div className="flex items-start gap-3">
                   <div className={cn("mt-0.5 rounded-2xl p-2", meta.className)}>

@@ -129,7 +129,7 @@ export function PremiumCoachPanel({ model }: Props) {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="rounded-[24px] border border-[hsl(var(--border)/0.76)] bg-[hsl(var(--muted)/0.34)] p-4">
+        <div className="rounded-[24px] border border-[hsl(var(--border)/0.76)] bg-[hsl(var(--muted)/0.34)] p-4 shadow-[inset_0_1px_0_hsl(var(--card)/0.58)]">
           <div className="flex items-start gap-3">
             <div className="rounded-[20px] bg-sky-500/12 p-3 text-sky-700 dark:text-sky-300">
               <Bot className="h-5 w-5" />
@@ -161,8 +161,8 @@ export function PremiumCoachPanel({ model }: Props) {
                 onClick={() => runCoach(item.action)}
                 disabled={disabled}
                 className={cn(
-                  "inline-flex min-h-10 items-center justify-center gap-2 rounded-2xl border px-3 py-2 text-xs font-semibold transition",
-                  "border-slate-200 bg-white text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60",
+                  "interactive-surface tap-feedback premium-ring inline-flex min-h-10 items-center justify-center gap-2 rounded-2xl border px-3 py-2 text-xs font-semibold transition-all duration-200",
+                  "border-slate-200 bg-white text-slate-800 shadow-[var(--shadow-soft)] hover:border-sky-200 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60",
                   "dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900"
                 )}
               >
@@ -174,13 +174,13 @@ export function PremiumCoachPanel({ model }: Props) {
         </div>
 
         {error ? (
-          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
+          <div className="soft-enter rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200">
             {error}
           </div>
         ) : null}
 
         {result ? (
-          <div className="space-y-3 rounded-[24px] border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+          <div className="soft-enter space-y-3 rounded-[24px] border border-slate-200 bg-white p-4 shadow-[var(--shadow-soft)] dark:border-slate-800 dark:bg-slate-950">
             <div className="flex items-start gap-3">
               <div className="rounded-2xl bg-emerald-500/12 p-2 text-emerald-700 dark:text-emerald-300">
                 <MessageSquareText className="h-4 w-4" />

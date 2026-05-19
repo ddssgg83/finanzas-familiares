@@ -33,8 +33,10 @@ export function PremiumInsightCard({
   icon: Icon,
   tone = "default",
 }: Props) {
+  const isActionable = Boolean(href && actionLabel);
+
   return (
-    <Card className="h-full">
+    <Card className={cn("h-full", isActionable && "interactive-card")}>
       <CardContent className="flex h-full flex-col gap-4 pt-6">
         <div className="flex items-start justify-between gap-3">
           <div className={cn("rounded-[20px] p-3", toneClasses[tone])}>

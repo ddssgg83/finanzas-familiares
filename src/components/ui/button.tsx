@@ -4,16 +4,16 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center whitespace-nowrap rounded-full text-sm font-semibold tracking-[-0.01em] transition-all duration-200 active:scale-[0.98] active:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--background))] disabled:pointer-events-none disabled:opacity-50 disabled:active:scale-100 disabled:active:brightness-100",
+  "tap-feedback inline-flex items-center justify-center whitespace-nowrap rounded-full text-sm font-semibold tracking-[-0.01em] transition-all duration-200 motion-reduce:transition-none active:scale-[0.98] active:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--background))] disabled:pointer-events-none disabled:opacity-50 disabled:active:scale-100 disabled:active:brightness-100",
   {
     variants: {
       variant: {
         default:
-          "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-[0_14px_36px_-22px_rgba(14,116,217,0.85)] hover:-translate-y-0.5 hover:brightness-105",
+          "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] shadow-[0_14px_36px_-22px_rgba(14,116,217,0.85)] hover:-translate-y-0.5 hover:brightness-105 hover:shadow-[0_18px_42px_-24px_rgba(14,116,217,0.95)] motion-reduce:hover:translate-y-0",
         destructive:
-          "bg-[hsl(var(--danger))] text-white shadow-[0_14px_36px_-22px_rgba(239,68,68,0.75)] hover:-translate-y-0.5 hover:brightness-105",
+          "bg-[hsl(var(--danger))] text-white shadow-[0_14px_36px_-22px_rgba(239,68,68,0.75)] hover:-translate-y-0.5 hover:brightness-105 hover:shadow-[0_18px_42px_-24px_rgba(239,68,68,0.88)] motion-reduce:hover:translate-y-0",
         outline:
-          "border border-[hsl(var(--border))] bg-[hsl(var(--card)/0.82)] text-[hsl(var(--foreground))] shadow-[var(--shadow-soft)] hover:-translate-y-0.5 hover:bg-[hsl(var(--card))]",
+          "border border-[hsl(var(--border))] bg-[hsl(var(--card)/0.82)] text-[hsl(var(--foreground))] shadow-[var(--shadow-soft)] hover:-translate-y-0.5 hover:border-[hsl(var(--ring)/0.28)] hover:bg-[hsl(var(--card))] hover:shadow-[var(--shadow-card)] motion-reduce:hover:translate-y-0",
         secondary:
           "bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))] hover:bg-[hsl(var(--secondary)/0.86)]",
         ghost:
