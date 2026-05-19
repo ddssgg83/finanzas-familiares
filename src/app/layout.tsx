@@ -4,7 +4,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 
 export const viewport: Viewport = {
-  themeColor: "#5B5FFF",
+  themeColor: "#0E74D9",
 };
 
 export const metadata: Metadata = {

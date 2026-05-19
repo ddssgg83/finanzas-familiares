@@ -2,9 +2,10 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronDown, Landmark, LogOut, RotateCw } from "lucide-react";
+import { ChevronDown, LogOut, RotateCw } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { SyncBadge } from "./SyncBadge";
 import { MobileBottomNav } from "./MobileBottomNav";
@@ -139,9 +140,14 @@ export function AppHeader({
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-4 py-3 md:gap-5 md:px-6 md:py-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start gap-3 md:gap-4">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[16px] bg-[linear-gradient(145deg,#0f3f8f,#1d74d8)] text-white shadow-[0_22px_44px_-28px_rgba(14,116,217,0.9)] md:h-12 md:w-12 md:rounded-[18px]">
-                <Landmark className="h-4 w-4 md:h-5 md:w-5" />
-              </div>
+              <Image
+                src="/brand/rinday-isotipo.svg"
+                alt=""
+                aria-hidden="true"
+                width={48}
+                height={48}
+                className="h-10 w-10 shrink-0 rounded-[16px] shadow-[0_22px_44px_-28px_rgba(14,116,217,0.9)] md:h-12 md:w-12 md:rounded-[18px]"
+              />
 
               <div className="min-w-0 flex-1 space-y-1.5 md:space-y-2">
                 <div className="flex flex-wrap items-center gap-2">

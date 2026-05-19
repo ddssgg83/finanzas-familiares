@@ -9,7 +9,7 @@
        H120
        L40 180
        V40Z"
-    fill="#5B5FFF"/>
+    fill="#0E74D9"/>
   <text
     x="260"
     y="210"
@@ -17,7 +17,7 @@
     font-size="160"
     font-weight="600"
     letter-spacing="-0.04em"
-    fill="#0F172A">
+    fill="#0B1220">
     RINDAY
   </text>
 </svg>
