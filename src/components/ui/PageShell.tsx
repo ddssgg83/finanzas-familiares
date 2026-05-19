@@ -21,7 +21,13 @@ export function PageShell({ children, className = "", maxWidth = "6xl" }: Props)
       : "max-w-6xl";
 
   return (
-    <div className={cn("shell-section mx-auto w-full px-4 pb-20 pt-6 md:px-6 md:pt-8", mw, className)}>
+    <div
+      className={cn(
+        "shell-section mx-auto w-full px-4 pb-[calc(env(safe-area-inset-bottom)+6rem)] pt-5 md:px-6 md:pb-20 md:pt-8",
+        mw,
+        className
+      )}
+    >
       <div className="space-y-6 md:space-y-8">{children}</div>
     </div>
   );

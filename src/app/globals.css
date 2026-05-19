@@ -76,6 +76,9 @@
     font-family: var(--font-sans);
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
   }
 
   body::before {
@@ -112,10 +115,19 @@
 @layer components {
   .app-shell {
     @apply relative min-h-screen;
+    padding-bottom: env(safe-area-inset-bottom);
   }
 
   .shell-section {
     @apply relative;
+  }
+
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
   }
 
   .surface-1 {
