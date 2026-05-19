@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { buildPremiumDashboardModel } from "@/lib/premium/dashboardInsights";
 import { cn } from "@/lib/utils";
@@ -384,9 +385,9 @@ export default function DashboardPage() {
       />
 
       <PageShell maxWidth="6xl">
-        <section className="surface-hero overflow-hidden rounded-[32px] px-5 py-6 md:px-8 md:py-8">
-          <div className="grid gap-6 lg:grid-cols-[1.35fr,0.9fr] lg:items-end">
-            <div className="space-y-5">
+        <section className="surface-hero overflow-hidden rounded-[28px] px-4 py-5 md:rounded-[32px] md:px-8 md:py-8">
+          <div className="grid gap-5 md:gap-6 lg:grid-cols-[1.35fr,0.9fr] lg:items-end">
+            <div className="space-y-4 md:space-y-5">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="secondary">{summary?.monthLabel ?? "Resumen mensual"}</Badge>
                 <Badge variant={balanceTag.variant}>{balanceTag.label}</Badge>
@@ -394,10 +395,10 @@ export default function DashboardPage() {
 
               <div className="space-y-3">
                 <p className="eyebrow">Resumen mensual</p>
-                <h2 className="max-w-3xl text-balance text-3xl font-semibold tracking-[-0.05em] text-slate-950 dark:text-slate-50 md:text-5xl">
+                <h2 className="max-w-3xl text-balance text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-slate-50 md:text-5xl md:tracking-[-0.05em]">
                   Todo lo importante de tu dinero, en un solo vistazo.
                 </h2>
-                <p className="max-w-2xl text-sm leading-7 text-slate-600 dark:text-slate-300 md:text-base">
+                <p className="max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300 md:text-base md:leading-7">
                   {dashboardNarrative}
                 </p>
               </div>
@@ -470,12 +471,13 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent className="space-y-5">
                   <div className="grid gap-3 md:grid-cols-3">
-                    <MetricPanel label="Ingresos del mes" value={summary?.incomes ?? 0} tone="positive" />
-                    <MetricPanel label="Gastos del mes" value={summary?.expenses ?? 0} tone="negative" />
+                    <MetricPanel label="Ingresos del mes" value={summary?.incomes ?? 0} tone="positive" loading={loading} />
+                    <MetricPanel label="Gastos del mes" value={summary?.expenses ?? 0} tone="negative" loading={loading} />
                     <MetricPanel
                       label="Balance del mes"
                       value={summary?.balance ?? 0}
                       tone={summary && summary.balance >= 0 ? "positive" : "negative"}
+                      loading={loading}
                     />
                   </div>
 
@@ -506,9 +508,9 @@ export default function DashboardPage() {
                     <CardDescription>Activos menos deudas con lectura compacta y accionable.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <ValueRow label="Activos personales" value={netWorth?.assets ?? 0} />
-                    <ValueRow label="Deudas personales" value={netWorth?.debts ?? 0} />
-                    <ValueRow label="Valor neto" value={netWorth?.netWorth ?? 0} highlight />
+                    <ValueRow label="Activos personales" value={netWorth?.assets ?? 0} loading={loading} />
+                    <ValueRow label="Deudas personales" value={netWorth?.debts ?? 0} loading={loading} />
+                    <ValueRow label="Valor neto" value={netWorth?.netWorth ?? 0} highlight loading={loading} />
                     <Link href="/patrimonio" className={cn(buttonVariants({ variant: "outline" }), "w-full")}>
                       Ver detalle patrimonial
                     </Link>
@@ -654,7 +656,7 @@ export default function DashboardPage() {
           </TabsContent>
         </Tabs>
 
-        <section className="grid gap-4 lg:grid-cols-3">
+        <section className="hidden gap-4 md:grid lg:grid-cols-3">
           <SystemTile
             icon={ChartNoAxesCombined}
             title="Jerarquía visual"
@@ -697,10 +699,12 @@ function MetricPanel({
   label,
   value,
   tone,
+  loading,
 }: {
   label: string;
   value: number;
   tone: "positive" | "negative";
+  loading?: boolean;
 }) {
   const isPositive = tone === "positive";
 
@@ -709,14 +713,18 @@ function MetricPanel({
       <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
         {label}
       </p>
-      <p
-        className={cn(
-          "mt-3 text-2xl font-semibold tracking-[-0.04em]",
-          isPositive ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"
-        )}
-      >
-        {formatCurrency(value)}
-      </p>
+      {loading ? (
+        <Skeleton className="mt-3 h-8 w-32 rounded-xl" />
+      ) : (
+        <p
+          className={cn(
+            "mt-3 text-2xl font-semibold tracking-[-0.04em]",
+            isPositive ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"
+          )}
+        >
+          {formatCurrency(value)}
+        </p>
+      )}
     </div>
   );
 }
@@ -725,22 +733,28 @@ function ValueRow({
   label,
   value,
   highlight,
+  loading,
 }: {
   label: string;
   value: number;
   highlight?: boolean;
+  loading?: boolean;
 }) {
   return (
     <div className="flex items-center justify-between gap-4 rounded-[22px] border border-[hsl(var(--border)/0.76)] bg-[hsl(var(--muted)/0.45)] px-4 py-3">
       <span className="text-sm text-slate-600 dark:text-slate-300">{label}</span>
-      <span
-        className={cn(
-          "text-sm font-semibold text-slate-950 dark:text-slate-50",
-          highlight && "text-[hsl(var(--primary))] dark:text-sky-300"
-        )}
-      >
-        {formatCurrency(value)}
-      </span>
+      {loading ? (
+        <Skeleton className="h-5 w-24 rounded-xl" />
+      ) : (
+        <span
+          className={cn(
+            "text-sm font-semibold text-slate-950 dark:text-slate-50",
+            highlight && "text-[hsl(var(--primary))] dark:text-sky-300"
+          )}
+        >
+          {formatCurrency(value)}
+        </span>
+      )}
     </div>
   );
 }
@@ -775,9 +789,13 @@ function HeroStat({
           <p className="text-xs uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
             {label}
           </p>
-          <p className="mt-1 text-xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-slate-50">
-            {loading ? "Cargando…" : formatCurrency(value)}
-          </p>
+          {loading ? (
+            <Skeleton className="mt-2 h-7 w-28 rounded-xl" />
+          ) : (
+            <p className="mt-1 text-xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-slate-50">
+              {formatCurrency(value)}
+            </p>
+          )}
         </div>
       </div>
     </div>

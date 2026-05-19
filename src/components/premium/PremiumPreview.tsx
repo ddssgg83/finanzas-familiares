@@ -16,8 +16,8 @@ type Props = {
 
 export function PremiumPreview({ model }: Props) {
   return (
-    <section className="space-y-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+    <section className="space-y-3 md:space-y-4">
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between md:gap-3">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary">Vista premium</Badge>
@@ -33,7 +33,7 @@ export function PremiumPreview({ model }: Props) {
         </p>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.05fr,0.95fr]">
+      <div className="grid gap-3 md:gap-4 xl:grid-cols-[1.05fr,0.95fr]">
         <PremiumHealthCard health={model.health} />
         <PremiumInsightCard
           eyebrow="Siguiente acción"
@@ -46,7 +46,7 @@ export function PremiumPreview({ model }: Props) {
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr,0.86fr]">
+      <div className="grid gap-3 md:gap-4 lg:grid-cols-[1fr,0.86fr]">
         <PremiumRiskList risks={model.risks} />
         <PremiumInsightCard
           eyebrow="Familia"
@@ -59,7 +59,7 @@ export function PremiumPreview({ model }: Props) {
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr,0.86fr]">
+      <div className="grid gap-3 md:gap-4 lg:grid-cols-[1fr,0.86fr]">
         <PremiumSignalList signals={model.signals} />
         <PremiumProjectionCard projection={model.projection} />
       </div>
