@@ -4,57 +4,28 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
+import { LanguageToggle } from "@/components/LanguageToggle";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 type StepId = "overview" | "patrimonio" | "familia";
 
 type Step = {
   id: StepId;
-  title: string;
-  subtitle: string;
-  badge: string;
   accent: string;
-  points: string[];
 };
 
 const STEPS: Step[] = [
   {
     id: "overview",
-    badge: "Beta privada",
-    title: "Tu dinero familiar, por fin en calma",
-    subtitle:
-      "RINDAY convierte tus movimientos diarios en una vista clara para decidir mejor este mes.",
     accent: "from-sky-500/20 via-emerald-400/10 to-transparent",
-    points: [
-      "Captura gastos al momento, incluso cuando estás sin internet.",
-      "Ordena ingresos, gastos, categorías y métodos de pago.",
-      "Entiende qué está pasando sin abrir hojas de cálculo.",
-    ],
   },
   {
     id: "patrimonio",
-    badge: "Patrimonio",
-    title: "Una foto honesta de lo que estás construyendo",
-    subtitle:
-      "Activos, deudas y patrimonio neto conviven en una vista sobria, útil y fácil de revisar.",
     accent: "from-violet-500/20 via-sky-400/10 to-transparent",
-    points: [
-      "Registra casa, coche, ahorros, inversiones y otros activos.",
-      "Ten presentes tarjetas, créditos, hipoteca y compromisos.",
-      "Mira tu patrimonio con perspectiva, no solo con números sueltos.",
-    ],
   },
   {
     id: "familia",
-    badge: "Familia",
-    title: "Una misma visión para decidir en familia",
-    subtitle:
-      "Comparte gastos, metas y decisiones importantes sin perder privacidad ni mezclar lo personal.",
     accent: "from-amber-400/25 via-rose-400/10 to-transparent",
-    points: [
-      "Invita a quienes toman decisiones contigo.",
-      "Ve aportaciones y movimientos familiares con contexto.",
-      "Convierte las metas compartidas en algo visible y alcanzable.",
-    ],
   },
 ];
 
@@ -95,17 +66,18 @@ function prettyAuthError(msg?: string) {
   const m = (msg ?? "").toLowerCase();
 
   if (m.includes("rate") && m.includes("limit")) {
-    return "Te topaste con el límite de correos (rate limit). Intenta en unos minutos o sube el límite en Supabase Auth → Rate Limits.";
+    return "RATE_LIMIT";
   }
   if (m.includes("invalid") && m.includes("email")) {
-    return "Ingresa un correo válido.";
+    return "INVALID_EMAIL";
   }
-  return msg ?? "No se pudo enviar el link. Intenta de nuevo.";
+  return msg ?? "MAGIC_LINK_ERROR";
 }
 
 export default function OnboardingClient() {
   const router = useRouter();
   const sp = useSearchParams();
+  const { dictionary } = useI18n();
 
   const modeParam = (sp.get("mode") ?? "").toLowerCase(); // login | signup
   const emailParam = (sp.get("email") ?? "").trim();
@@ -200,7 +172,7 @@ export default function OnboardingClient() {
     try {
       const cleanEmail = email.trim().toLowerCase();
       if (!cleanEmail || !cleanEmail.includes("@")) {
-        setAuthMsg("Ingresa un correo válido.");
+        setAuthMsg(dictionary.onboarding.invalidEmail);
         return;
       }
 
@@ -225,10 +197,19 @@ export default function OnboardingClient() {
       startCooldown(20);
 
       setAuthMsg(
-        "Listo. Te mandamos un correo con un link para entrar. Revisa spam/promociones y ábrelo desde el mismo dispositivo."
+        dictionary.onboarding.magicLinkSent
       );
     } catch (e: any) {
-      setAuthMsg(prettyAuthError(e?.message));
+      const code = prettyAuthError(e?.message);
+      setAuthMsg(
+        code === "RATE_LIMIT"
+          ? dictionary.onboarding.rateLimit
+          : code === "INVALID_EMAIL"
+          ? dictionary.onboarding.invalidEmail
+          : code === "MAGIC_LINK_ERROR"
+          ? dictionary.onboarding.magicLinkError
+          : code
+      );
     } finally {
       setAuthBusy(false);
     }
@@ -246,6 +227,7 @@ export default function OnboardingClient() {
 
   const totalSteps = STEPS.length;
   const currentStep = STEPS[currentStepIndex];
+  const currentStepCopy = dictionary.onboarding.slides[currentStepIndex];
   const isLastStep = currentStepIndex === totalSteps - 1;
 
   const progressPercent = useMemo(
@@ -306,35 +288,39 @@ export default function OnboardingClient() {
   if (isInviteFlow) {
     return (
       <div className="relative flex min-h-screen items-center justify-center bg-slate-950 px-4 py-10 text-slate-50">
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
           <div className="absolute -left-40 -top-40 h-72 w-72 rounded-full bg-sky-500/20 blur-3xl" />
           <div className="absolute -right-32 top-10 h-64 w-64 rounded-full bg-emerald-400/15 blur-3xl" />
           <div className="absolute bottom-0 left-1/2 h-64 w-64 -translate-x-1/2 rounded-full bg-violet-500/10 blur-3xl" />
         </div>
 
         <main className="relative z-10 w-full max-w-md">
+          <div className="mb-3 flex justify-end">
+            <LanguageToggle compact className="border-slate-800 bg-slate-950/70 [&_button]:text-slate-300" />
+          </div>
+
           <div className="rounded-3xl border border-slate-800/80 bg-slate-950/70 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.65)] backdrop-blur-xl">
             <div className="text-[10px] uppercase tracking-[0.2em] text-sky-400">
               RINDAY
             </div>
 
             <h1 className="mt-2 text-xl font-semibold tracking-tight">
-              {authMode === "signup" ? "Crear cuenta" : "Iniciar sesión"}
+              {authMode === "signup" ? dictionary.common.signup : dictionary.common.login}
             </h1>
 
             <p className="mt-1 text-[12px] leading-relaxed text-slate-300">
-              Te mandaremos un link seguro por email para entrar a tu cuenta.
+              {dictionary.onboarding.authSubtitle}
             </p>
 
             <div className="mt-4 space-y-2">
               <label className="block text-[12px] font-semibold text-slate-200">
-                Correo
+                {dictionary.onboarding.email}
               </label>
               <input
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-2xl border border-slate-700/70 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-sky-300/30"
-                placeholder="tu@correo.com"
+                placeholder={dictionary.onboarding.emailPlaceholder}
                 autoComplete="email"
                 disabled={authBusy}
               />
@@ -353,12 +339,12 @@ export default function OnboardingClient() {
                 className="flex-1 rounded-full bg-sky-400 px-4 py-2 text-[12px] font-semibold text-slate-900 hover:bg-sky-300 disabled:opacity-60"
               >
                 {authBusy
-                  ? "Enviando…"
+                  ? dictionary.common.loading
                   : cooldown > 0
-                  ? `Espera ${cooldown}s…`
+                  ? `${dictionary.onboarding.wait} ${cooldown}s…`
                   : authMode === "signup"
-                  ? "Crear cuenta y enviar link"
-                  : "Enviar link de acceso"}
+                  ? dictionary.onboarding.createAndSend
+                  : dictionary.onboarding.sendAccessLink}
               </button>
 
               <button
@@ -366,7 +352,7 @@ export default function OnboardingClient() {
                 disabled={authBusy}
                 className="rounded-full border border-slate-700/70 px-4 py-2 text-[12px] font-semibold text-slate-200 hover:bg-slate-900/60 disabled:opacity-60"
               >
-                {authMode === "login" ? "Crear cuenta" : "Ya tengo cuenta"}
+                {authMode === "login" ? dictionary.common.signup : dictionary.onboarding.alreadyHaveAccount}
               </button>
             </div>
 
@@ -374,7 +360,7 @@ export default function OnboardingClient() {
               <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400">
                 <span className="inline-flex items-center gap-2">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                  Link enviado
+                  {dictionary.onboarding.linkSent}
                 </span>
 
                 <button
@@ -382,7 +368,7 @@ export default function OnboardingClient() {
                   disabled={authBusy || cooldown > 0}
                   className="rounded-full border border-slate-800 px-3 py-1 hover:bg-slate-900/60 disabled:opacity-60"
                 >
-                  Reenviar
+                  {dictionary.onboarding.resend}
                 </button>
               </div>
             ) : (
@@ -391,7 +377,7 @@ export default function OnboardingClient() {
                   onClick={clearNextAndGoApp}
                   className="rounded-full border border-slate-800 px-3 py-1 hover:bg-slate-900/60"
                 >
-                  Ir a la app sin invitación
+                  {dictionary.onboarding.goWithoutInvite}
                 </button>
                 <span className="text-[10px] opacity-80">{SITE_URL ? "" : ""}</span>
               </div>
@@ -417,15 +403,18 @@ export default function OnboardingClient() {
               RINDAY
             </span>
             <span className="h-1 w-1 rounded-full bg-slate-600" />
-            <span className="truncate">Beta privada para familias que quieren claridad</span>
+            <span className="truncate">{dictionary.onboarding.betaLine}</span>
           </div>
 
-          <button
-            onClick={handleSkip}
-            className="tap-feedback shrink-0 rounded-full border border-slate-700/70 px-3 py-1.5 text-[11px] font-medium text-slate-300 transition-all hover:border-slate-500 hover:bg-slate-900/70 hover:text-slate-50"
-          >
-            Entrar ahora
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <LanguageToggle compact className="border-slate-700/70 bg-slate-950/70 [&_button]:text-slate-300" />
+            <button
+              onClick={handleSkip}
+              className="tap-feedback rounded-full border border-slate-700/70 px-3 py-1.5 text-[11px] font-medium text-slate-300 transition-all hover:border-slate-500 hover:bg-slate-900/70 hover:text-slate-50"
+            >
+              {dictionary.onboarding.enterNow}
+            </button>
+          </div>
         </div>
 
         <section className="overflow-hidden rounded-[34px] border border-white/10 bg-slate-950/72 shadow-[0_28px_90px_-38px_rgba(0,0,0,0.95)] backdrop-blur-2xl">
@@ -442,27 +431,27 @@ export default function OnboardingClient() {
                 <div className="space-y-6">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="inline-flex items-center rounded-full border border-sky-300/20 bg-sky-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-200">
-                      {currentStep.badge}
+                      {currentStepCopy.badge}
                     </span>
                     <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium text-slate-300">
-                      Paso {currentStepIndex + 1} de {totalSteps}
+                      {dictionary.onboarding.step} {currentStepIndex + 1} {dictionary.onboarding.of} {totalSteps}
                     </span>
                   </div>
 
                   <div className="space-y-3">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-                      Una app para decidir con calma
+                      {dictionary.onboarding.calmApp}
                     </p>
                     <h1 className="max-w-2xl text-balance text-3xl font-semibold tracking-[-0.05em] text-white md:text-5xl">
-                      {currentStep.title}
+                      {currentStepCopy.title}
                     </h1>
                     <p className="max-w-xl text-sm leading-6 text-slate-300 md:text-base md:leading-7">
-                      {currentStep.subtitle}
+                      {currentStepCopy.subtitle}
                     </p>
                   </div>
 
                   <ul className="grid gap-2.5 text-sm text-slate-200">
-                    {currentStep.points.map((point, idx) => (
+                    {currentStepCopy.points.map((point, idx) => (
                       <li
                         key={idx}
                         className="interactive-surface rounded-[22px] border border-white/10 bg-white/[0.045] px-3.5 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
@@ -480,7 +469,7 @@ export default function OnboardingClient() {
 
                 <div className="space-y-3">
                   <div className="flex items-center justify-between text-[11px] text-slate-400">
-                    <span>Preparando tu espacio financiero</span>
+                    <span>{dictionary.onboarding.preparing}</span>
                     <span>{Math.round(progressPercent)}%</span>
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-white/10">
@@ -506,10 +495,10 @@ export default function OnboardingClient() {
                         <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-300">
                           RINDAY
                         </p>
-                        <p className="mt-0.5 text-[10px] text-slate-400">Vista privada</p>
+                        <p className="mt-0.5 text-[10px] text-slate-400">{dictionary.onboarding.privateView}</p>
                       </div>
                       <span className="rounded-full bg-emerald-400/12 px-2.5 py-1 text-[9px] font-semibold text-emerald-200 ring-1 ring-emerald-300/20">
-                        En calma
+                        {dictionary.onboarding.calm}
                       </span>
                     </div>
 
@@ -530,30 +519,30 @@ export default function OnboardingClient() {
                         <div className="relative space-y-3">
                           <div className="flex items-center justify-between">
                             <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-300">
-                              {currentStep.id === "overview" && "Resumen del mes"}
-                              {currentStep.id === "patrimonio" && "Patrimonio"}
-                              {currentStep.id === "familia" && "Familia"}
+                              {currentStep.id === "overview" && dictionary.onboarding.preview.monthSummary}
+                              {currentStep.id === "patrimonio" && dictionary.nav.netWorth}
+                              {currentStep.id === "familia" && dictionary.nav.family}
                             </span>
-                            <span className="text-[9px] text-slate-400">Hoy</span>
+                            <span className="text-[9px] text-slate-400">{dictionary.onboarding.today}</span>
                           </div>
 
                           {currentStep.id === "overview" && (
                             <>
                               <div>
                                 <p className="text-2xl font-semibold tracking-[-0.05em] text-sky-50">$24,870</p>
-                                <p className="text-[10px] text-sky-100/75">Balance disponible estimado</p>
+                                <p className="text-[10px] text-sky-100/75">{dictionary.onboarding.preview.availableBalance}</p>
                               </div>
                               <div className="grid grid-cols-3 gap-1.5 text-[9px] text-slate-100/90">
                                 <div className="rounded-2xl bg-white/[0.07] px-2 py-2">
-                                  <p className="text-slate-400">Ingresos</p>
+                                  <p className="text-slate-400">{dictionary.onboarding.preview.incomes}</p>
                                   <p className="mt-0.5 font-semibold">$65k</p>
                                 </div>
                                 <div className="rounded-2xl bg-white/[0.07] px-2 py-2">
-                                  <p className="text-slate-400">Gastos</p>
+                                  <p className="text-slate-400">{dictionary.onboarding.preview.expenses}</p>
                                   <p className="mt-0.5 font-semibold">$40k</p>
                                 </div>
                                 <div className="rounded-2xl bg-white/[0.07] px-2 py-2">
-                                  <p className="text-slate-400">Señales</p>
+                                  <p className="text-slate-400">{dictionary.onboarding.preview.signals}</p>
                                   <p className="mt-0.5 font-semibold">3</p>
                                 </div>
                               </div>
@@ -564,15 +553,15 @@ export default function OnboardingClient() {
                             <>
                               <div>
                                 <p className="text-2xl font-semibold tracking-[-0.05em] text-emerald-50">$1.25M</p>
-                                <p className="text-[10px] text-emerald-100/80">Patrimonio neto estimado</p>
+                                <p className="text-[10px] text-emerald-100/80">{dictionary.onboarding.preview.netWorthEstimated}</p>
                               </div>
                               <div className="space-y-2 text-[10px] text-slate-200">
                                 <div className="flex items-center justify-between rounded-2xl bg-white/[0.07] px-3 py-2">
-                                  <span>Activos</span>
+                                  <span>{dictionary.onboarding.preview.assets}</span>
                                   <span className="font-semibold">$1.8M</span>
                                 </div>
                                 <div className="flex items-center justify-between rounded-2xl bg-white/[0.07] px-3 py-2">
-                                  <span>Deudas</span>
+                                  <span>{dictionary.onboarding.preview.debts}</span>
                                   <span className="font-semibold">$550k</span>
                                 </div>
                               </div>
@@ -583,14 +572,14 @@ export default function OnboardingClient() {
                             <>
                               <div>
                                 <p className="text-2xl font-semibold tracking-[-0.05em] text-amber-50">$18,430</p>
-                                <p className="text-[10px] text-amber-100/80">Gasto familiar visible</p>
+                                <p className="text-[10px] text-amber-100/80">{dictionary.onboarding.preview.visibleFamilySpend}</p>
                               </div>
                               <div className="space-y-2 text-[10px] text-slate-200">
                                 <div className="rounded-2xl bg-white/[0.07] px-3 py-2">
-                                  Meta casa: avance claro para todos
+                                  {dictionary.onboarding.preview.homeGoal}
                                 </div>
                                 <div className="rounded-2xl bg-white/[0.07] px-3 py-2">
-                                  Decisiones compartidas, cuentas personales intactas
+                                  {dictionary.onboarding.preview.sharedDecisions}
                                 </div>
                               </div>
                             </>
@@ -599,9 +588,9 @@ export default function OnboardingClient() {
                       </div>
 
                       <div className="grid grid-cols-3 gap-2 text-[9px] text-slate-300">
-                        <span className="rounded-full bg-white/[0.07] px-2 py-1.5 text-center">Movs</span>
-                        <span className="rounded-full bg-white/[0.07] px-2 py-1.5 text-center">Patrimonio</span>
-                        <span className="rounded-full bg-white/[0.07] px-2 py-1.5 text-center">Familia</span>
+                        <span className="rounded-full bg-white/[0.07] px-2 py-1.5 text-center">{dictionary.nav.movementsShort}</span>
+                        <span className="rounded-full bg-white/[0.07] px-2 py-1.5 text-center">{dictionary.nav.netWorth}</span>
+                        <span className="rounded-full bg-white/[0.07] px-2 py-1.5 text-center">{dictionary.nav.family}</span>
                       </div>
                     </div>
                   </div>
@@ -620,7 +609,7 @@ export default function OnboardingClient() {
                         : "text-slate-200 hover:bg-white/[0.08]"
                     )}
                   >
-                    Anterior
+                    {dictionary.onboarding.back}
                   </button>
 
                   <div className="flex items-center gap-1.5">
@@ -634,7 +623,7 @@ export default function OnboardingClient() {
                             ? "w-7 bg-sky-300 shadow-[0_0_22px_rgba(125,211,252,0.45)]"
                             : "w-2 bg-slate-700 hover:bg-slate-500"
                         )}
-                        aria-label={`Ir al paso ${idx + 1}`}
+                        aria-label={`${dictionary.onboarding.step} ${idx + 1}`}
                       />
                     ))}
                   </div>
@@ -646,7 +635,7 @@ export default function OnboardingClient() {
                       isLastStep ? "bg-emerald-300 hover:bg-emerald-200" : "bg-sky-300 hover:bg-sky-200"
                     )}
                   >
-                    {isLastStep ? "Empezar con calma" : "Continuar"}
+                    {isLastStep ? dictionary.onboarding.start : dictionary.onboarding.next}
                   </button>
                 </div>
               </div>

@@ -27,6 +27,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { buildPremiumDashboardModel } from "@/lib/premium/dashboardInsights";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 export const dynamic = "force-dynamic";
 
@@ -95,6 +96,7 @@ export default function DashboardPage() {
   const [goalDeadline, setGoalDeadline] = useState("");
 
   const { familyCtx, familyLoading } = useFamilyContext(user);
+  const { dictionary } = useI18n();
 
   useEffect(() => {
     let ignore = false;
@@ -378,16 +380,16 @@ export default function DashboardPage() {
       <main className="flex min-h-screen items-center justify-center px-4 py-10 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
         <section className="surface-hero w-full max-w-xl rounded-[28px] px-5 py-6 md:px-8 md:py-8">
           <div className="flex items-center gap-2">
-            <Badge variant="secondary">Beta privada</Badge>
+            <Badge variant="secondary">{dictionary.common.betaPrivate}</Badge>
             <span className="eyebrow">RINDAY</span>
           </div>
 
           <div className="mt-5 space-y-3">
             <h1 className="text-balance text-3xl font-semibold tracking-[-0.05em] text-slate-950 dark:text-slate-50 md:text-4xl">
-              Entra a tu espacio financiero.
+              {dictionary.guestHome.title}
             </h1>
             <p className="max-w-lg text-sm leading-6 text-slate-600 dark:text-slate-300 md:text-base md:leading-7">
-              Inicia sesión o crea tu cuenta para ver tus movimientos, patrimonio y familia sin perder contexto.
+              {dictionary.guestHome.body}
             </p>
           </div>
 
@@ -396,18 +398,18 @@ export default function DashboardPage() {
               href="/onboarding?mode=login&next=%2F"
               className={cn(buttonVariants({ variant: "default", size: "lg" }), "w-full sm:w-auto")}
             >
-              Iniciar sesión
+              {dictionary.common.login}
             </Link>
             <Link
               href="/onboarding?mode=signup&next=%2F"
               className={cn(buttonVariants({ variant: "outline", size: "lg" }), "w-full sm:w-auto")}
             >
-              Crear cuenta
+              {dictionary.common.signup}
             </Link>
           </div>
 
           <p className="mt-5 text-xs leading-5 text-slate-500 dark:text-slate-400">
-            Si recibiste una invitación familiar, abre el enlace del correo y usa el mismo email invitado.
+            {dictionary.guestHome.inviteHint}
           </p>
         </section>
       </main>

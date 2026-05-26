@@ -1,0 +1,113 @@
+export const es = {
+  common: {
+    appName: "RINDAY",
+    betaPrivate: "Beta privada",
+    loading: "Cargando…",
+    loadingSession: "Cargando sesión…",
+    login: "Iniciar sesión",
+    signup: "Crear cuenta",
+    logout: "Cerrar sesión",
+    account: "Tu cuenta",
+    syncNow: "Sincronizar ahora",
+    closeAccountMenu: "Cerrar menú de cuenta",
+    language: "Idioma",
+    switchLanguage: "Cambiar idioma",
+    themeLight: "Claro",
+    themeDark: "Oscuro",
+  },
+  nav: {
+    home: "Inicio",
+    movements: "Movimientos",
+    movementsShort: "Movs",
+    netWorth: "Patrimonio",
+    family: "Familia",
+  },
+  appHeader: {
+    pendingChanges:
+      "Tienes cambios pendientes. Se sincronizarán cuando vuelvas a tener conexión y abras el módulo correspondiente.",
+  },
+  guestHome: {
+    title: "Entra a tu espacio financiero.",
+    body: "Inicia sesión o crea tu cuenta para ver tus movimientos, patrimonio y familia sin perder contexto.",
+    inviteHint: "Si recibiste una invitación familiar, abre el enlace del correo y usa el mismo email invitado.",
+  },
+  onboarding: {
+    betaLine: "Beta privada para familias que quieren claridad",
+    enterNow: "Entrar ahora",
+    calmApp: "Una app para decidir con calma",
+    preparing: "Preparando tu espacio financiero",
+    next: "Siguiente",
+    back: "Atrás",
+    start: "Empezar",
+    step: "Paso",
+    of: "de",
+    privateView: "Vista privada",
+    today: "Hoy",
+    calm: "En calma",
+    authSubtitle: "Te mandaremos un link seguro por email para entrar a tu cuenta.",
+    email: "Correo",
+    emailPlaceholder: "tu@correo.com",
+    createAndSend: "Crear cuenta y enviar link",
+    sendAccessLink: "Enviar link de acceso",
+    alreadyHaveAccount: "Ya tengo cuenta",
+    linkSent: "Link enviado",
+    resend: "Reenviar",
+    wait: "Espera",
+    goWithoutInvite: "Ir a la app sin invitación",
+    noInviteApp: "Ir a la app",
+    magicLinkSent:
+      "Listo. Te mandamos un correo con un link para entrar. Revisa spam/promociones y ábrelo desde el mismo dispositivo.",
+    invalidEmail: "Ingresa un correo válido.",
+    rateLimit:
+      "Te topaste con el límite de correos. Intenta en unos minutos o revisa Supabase Auth → Rate Limits.",
+    magicLinkError: "No se pudo enviar el link. Intenta de nuevo.",
+    slides: [
+      {
+        badge: "Beta privada",
+        title: "Tu dinero familiar, por fin en calma",
+        subtitle:
+          "RINDAY convierte tus movimientos diarios en una vista clara para decidir mejor este mes.",
+        points: [
+          "Captura gastos al momento, incluso cuando estás sin internet.",
+          "Ordena ingresos, gastos, categorías y métodos de pago.",
+          "Entiende qué está pasando sin abrir hojas de cálculo.",
+        ],
+      },
+      {
+        badge: "Patrimonio",
+        title: "Una foto honesta de lo que estás construyendo",
+        subtitle:
+          "Activos, deudas y patrimonio neto conviven en una vista sobria, útil y fácil de revisar.",
+        points: [
+          "Registra casa, coche, ahorros, inversiones y otros activos.",
+          "Ten presentes tarjetas, créditos, hipoteca y compromisos.",
+          "Mira tu patrimonio con perspectiva, no solo con números sueltos.",
+        ],
+      },
+      {
+        badge: "Familia",
+        title: "Una misma visión para decidir en familia",
+        subtitle:
+          "Comparte gastos, metas y decisiones importantes sin perder privacidad ni mezclar lo personal.",
+        points: [
+          "Invita a quienes toman decisiones contigo.",
+          "Ve aportaciones y movimientos familiares con contexto.",
+          "Convierte las metas compartidas en algo visible y alcanzable.",
+        ],
+      },
+    ],
+    preview: {
+      monthSummary: "Resumen del mes",
+      availableBalance: "Balance disponible estimado",
+      incomes: "Ingresos",
+      expenses: "Gastos",
+      signals: "Señales",
+      netWorthEstimated: "Patrimonio neto estimado",
+      assets: "Activos",
+      debts: "Deudas",
+      visibleFamilySpend: "Gasto familiar visible",
+      homeGoal: "Meta casa: avance claro para todos",
+      sharedDecisions: "Decisiones compartidas, cuentas personales intactas",
+    },
+  },
+};

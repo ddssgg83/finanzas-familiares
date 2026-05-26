@@ -7,12 +7,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronDown, LogOut, RotateCw } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
+import { LanguageToggle } from "./LanguageToggle";
 import { SyncBadge } from "./SyncBadge";
 import { MobileBottomNav } from "./MobileBottomNav";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useSyncCenter } from "@/lib/syncCenter";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 type AppHeaderProps = {
   title: string;
@@ -26,13 +28,13 @@ type AppHeaderProps = {
 
 const NAV_ITEMS: {
   key: NonNullable<AppHeaderProps["activeTab"]>;
-  label: string;
+  labelKey: "home" | "movements" | "netWorth" | "family";
   href: string;
 }[] = [
-  { key: "dashboard", label: "Inicio", href: "/" },
-  { key: "gastos", label: "Movimientos", href: "/gastos" },
-  { key: "patrimonio", label: "Patrimonio", href: "/patrimonio" },
-  { key: "familia", label: "Familia", href: "/familia" },
+  { key: "dashboard", labelKey: "home", href: "/" },
+  { key: "gastos", labelKey: "movements", href: "/gastos" },
+  { key: "patrimonio", labelKey: "netWorth", href: "/patrimonio" },
+  { key: "familia", labelKey: "family", href: "/familia" },
 ];
 
 function toDisplayName(userName?: string | null, userEmail?: string | null) {
@@ -70,6 +72,7 @@ export function AppHeader({
   const pathname = usePathname() || "/";
   const derivedTab = pathToTab(pathname);
   const currentTab = activeTab ?? derivedTab;
+  const { dictionary } = useI18n();
 
   const { state: syncState, summary: syncSummary, syncNow } = useSyncCenter();
   const isOnline = syncState.isOnline;
@@ -153,7 +156,7 @@ export function AppHeader({
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="eyebrow">RINDAY</span>
                   <Badge variant="secondary" className="uppercase tracking-[0.14em]">
-                    Beta privada
+                    {dictionary.common.betaPrivate}
                   </Badge>
                 </div>
                 <div>
@@ -206,7 +209,7 @@ export function AppHeader({
                   <>
                     <button
                       type="button"
-                      aria-label="Cerrar menú de cuenta"
+                      aria-label={dictionary.common.closeAccountMenu}
                       className="fixed inset-0 z-40 bg-transparent"
                       onClick={closeAccountMenu}
                     />
@@ -234,15 +237,19 @@ export function AppHeader({
                             title="Reintentar sincronización"
                           >
                             <RotateCw className="mr-2 h-3.5 w-3.5" />
-                            Sincronizar ahora
+                            {dictionary.common.syncNow}
                           </button>
                         )}
 
                         {!isOfflineRoute && syncSummary.pendingTotal > 0 && !syncSummary.canSync && (
                           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
-                            Tienes cambios pendientes. Se sincronizarán cuando vuelvas a tener conexión y abras el módulo correspondiente.
+                            {dictionary.appHeader.pendingChanges}
                           </div>
                         )}
+
+                        <div className="w-full [&>div]:w-full [&_button]:flex-1">
+                          <LanguageToggle />
+                        </div>
 
                         <div
                           className="w-full [&>button]:w-full [&>button]:justify-center"
@@ -257,7 +264,7 @@ export function AppHeader({
                             className={cn(buttonVariants({ variant: "outline", size: "sm" }), "justify-start")}
                           >
                             <LogOut className="mr-2 h-3.5 w-3.5" />
-                            Cerrar sesión
+                            {dictionary.common.logout}
                           </button>
                         )}
                       </div>
@@ -284,7 +291,7 @@ export function AppHeader({
                       : "text-slate-500 hover:bg-[hsl(var(--muted)/0.92)] hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-50"
                   )}
                 >
-                  {item.label}
+                  {dictionary.nav[item.labelKey]}
                 </Link>
               );
             })}

@@ -2,6 +2,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
+import { I18nProvider } from "@/lib/i18n/I18nProvider";
 
 export const viewport: Viewport = {
   themeColor: "#0E74D9",
@@ -42,7 +43,7 @@ export default function RootLayout({
     <html lang="es" suppressHydrationWarning>
       <body className="app-shell">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          {children}
+          <I18nProvider>{children}</I18nProvider>
         </ThemeProvider>
       </body>
     </html>
