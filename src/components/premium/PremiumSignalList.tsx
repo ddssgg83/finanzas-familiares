@@ -4,6 +4,7 @@ import { CheckCircle2, CircleAlert, Info, ShieldAlert } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { FinancialSignal } from "@/lib/premium/financialSignals";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 type Props = {
   signals: FinancialSignal[];
@@ -29,11 +30,13 @@ const severityMeta = {
 };
 
 export function PremiumSignalList({ signals }: Props) {
+  const { dictionary } = useI18n();
+
   return (
     <Card className="h-full">
       <CardHeader>
-        <CardTitle>Señales inteligentes</CardTitle>
-        <CardDescription>Lecturas locales, sin IA y sin esperar red externa.</CardDescription>
+        <CardTitle>{dictionary.premium.signals.title}</CardTitle>
+        <CardDescription>{dictionary.premium.signals.description}</CardDescription>
       </CardHeader>
       <CardContent>
         <ul className="space-y-3">

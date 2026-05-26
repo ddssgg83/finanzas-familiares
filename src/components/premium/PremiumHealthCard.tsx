@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { PremiumHealthModel } from "@/lib/premium/dashboardInsights";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 type Props = {
   health: PremiumHealthModel;
@@ -38,6 +39,7 @@ const toneClasses = {
 };
 
 export function PremiumHealthCard({ health }: Props) {
+  const { dictionary } = useI18n();
   const tone = toneClasses[health.tone];
   const Icon = tone.icon;
   const scoreLabel = health.score > 0 ? `${health.score}/100` : "--";
@@ -47,8 +49,8 @@ export function PremiumHealthCard({ health }: Props) {
       <CardHeader className="gap-3">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <CardTitle>Salud financiera</CardTitle>
-            <CardDescription>Lectura ejecutiva del mes con tus datos actuales.</CardDescription>
+            <CardTitle>{dictionary.premium.health.title}</CardTitle>
+            <CardDescription>{dictionary.premium.health.description}</CardDescription>
           </div>
           <Badge variant={tone.badge}>{health.label}</Badge>
         </div>
@@ -62,7 +64,7 @@ export function PremiumHealthCard({ health }: Props) {
             <div className="flex items-end justify-between gap-3">
               <div>
                 <p className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-                  Score premium
+                  {dictionary.premium.health.score}
                 </p>
                 <p className="mt-1 text-3xl font-semibold tracking-[-0.05em] text-slate-950 dark:text-slate-50">
                   {scoreLabel}

@@ -4,6 +4,7 @@ import type {
   PremiumNetWorthInput,
   PremiumSummaryInput,
 } from "@/lib/premium/dashboardInsights";
+import type { Locale } from "@/lib/i18n/config";
 
 export type FinancialSignalSeverity = "info" | "warning" | "critical" | "good";
 
@@ -34,14 +35,85 @@ export type FinancialSignalsInput = {
   loading?: boolean;
   dataError?: string | null;
   now?: Date;
+  locale?: Locale;
 };
 
-function formatMoney(value: number) {
-  return value.toLocaleString("es-MX", {
+function formatMoney(value: number, locale: Locale = "es-MX") {
+  return value.toLocaleString(locale, {
     style: "currency",
     currency: "MXN",
     maximumFractionDigits: 0,
   });
+}
+
+function copy(locale: Locale = "es-MX") {
+  const en = locale === "en-US";
+  return {
+    projection: {
+      noData: en ? "Not enough data" : "Sin datos suficientes",
+      stable: en ? "Stable close" : "Cierre estable",
+      pressured: en ? "Pressured close" : "Cierre presionado",
+      tight: en ? "Tight margin" : "Margen apretado",
+      noSpend: en ? "No projected spend" : "Sin gasto proyectado",
+    },
+    signals: {
+      loadingTitle: en ? "Read in progress" : "Lectura en progreso",
+      loadingBody: en
+        ? "We are preparing your financial signals with the available data."
+        : "Estamos preparando tus señales financieras con los datos disponibles.",
+      dataErrorTitle: en ? "Incomplete data" : "Datos incompletos",
+      dataErrorBody: en
+        ? "Some numbers did not update. Use this read as a temporary reference."
+        : "Algunas cifras no se actualizaron. Usa esta lectura como referencia temporal.",
+      noSummaryTitle: en ? "Missing movements" : "Faltan movimientos",
+      noSummaryBody: en
+        ? "Register income and expenses to activate more precise signals."
+        : "Registra ingresos y gastos para activar señales más precisas.",
+      missingIncomeTitle: en ? "Income not captured" : "Ingresos sin capturar",
+      missingIncomeBody: en
+        ? "There are expenses registered, but income is missing. The balance may look more negative than reality."
+        : "Hay gastos registrados, pero faltan ingresos. El balance puede verse más negativo de lo real.",
+      negativeTitle: en ? "Negative monthly flow" : "Flujo mensual negativo",
+      negativeBody: (value: string) =>
+        en
+          ? `The month is ${value} down. Review variable expenses before close.`
+          : `El mes va ${value} abajo. Revisa gastos variables antes del cierre.`,
+      surplusTitle: en ? "Available surplus" : "Excedente disponible",
+      surplusBody: (value: string) =>
+        en
+          ? `There is ${value} of margin. Consider setting it aside before it gets diluted.`
+          : `Hay ${value} de margen. Considera separarlo antes de que se diluya.`,
+      tightMarginTitle: en ? "Tight margin" : "Margen ajustado",
+      tightMarginBody: (percent: string) =>
+        en
+          ? `Expenses represent ${percent}% of this month’s income.`
+          : `Los gastos representan ${percent}% de los ingresos del mes.`,
+      projectionRiskTitle: en ? "Risk of a negative close" : "Riesgo de cierre negativo",
+      projectionRiskBody: (value: string) =>
+        en
+          ? `At the current pace, the month could close at ${value}.`
+          : `Al ritmo actual, el mes podría cerrar en ${value}.`,
+      debtPressureTitle: en ? "High debt weight" : "Deuda con peso alto",
+      debtPressureBody: en
+        ? "Debts are already above 70% of registered assets."
+        : "Las deudas ya pesan más del 70% de los activos registrados.",
+      debtOverAssetsTitle: en ? "Debts over assets" : "Deudas sobre activos",
+      debtOverAssetsBody: en
+        ? "Your debts are above registered assets. Prioritize organizing balances."
+        : "Tus deudas superan los activos registrados. Prioriza ordenar saldos.",
+      noGoalsTitle: en ? "No active goal" : "Sin meta activa",
+      noGoalsFamilyBody: en
+        ? "Create a family goal to turn savings into a shared decision."
+        : "Crea una meta familiar para convertir el ahorro en una decisión compartida.",
+      noGoalsPersonalBody: en
+        ? "A simple goal helps give surplus direction."
+        : "Una meta simple ayuda a dar dirección al excedente.",
+      allClearTitle: en ? "No urgent signals" : "Sin señales urgentes",
+      allClearBody: en
+        ? "We do not detect strong alerts with the current data."
+        : "No detectamos alertas fuertes con los datos actuales.",
+    },
+  };
 }
 
 function getMonthTiming(now = new Date()) {
@@ -53,6 +125,8 @@ function getMonthTiming(now = new Date()) {
 
 export function buildMonthlyProjection(input: FinancialSignalsInput): MonthlyProjection {
   const { summary, now } = input;
+  const locale = input.locale ?? "es-MX";
+  const t = copy(locale).projection;
   const { daysElapsed, daysInMonth } = getMonthTiming(now);
 
   if (!summary) {
@@ -63,7 +137,7 @@ export function buildMonthlyProjection(input: FinancialSignalsInput): MonthlyPro
       daysElapsed,
       daysInMonth,
       confidence: "low",
-      label: "Sin datos suficientes",
+      label: t.noData,
       tone: "neutral",
     };
   }
@@ -75,17 +149,17 @@ export function buildMonthlyProjection(input: FinancialSignalsInput): MonthlyPro
   const projectedBalance = incomes - projectedExpenses;
   const confidence = daysElapsed >= 10 ? "medium" : "low";
 
-  let label = "Cierre estable";
+  let label = t.stable;
   let tone: MonthlyProjection["tone"] = "good";
 
   if (projectedBalance < 0) {
-    label = "Cierre presionado";
+    label = t.pressured;
     tone = "critical";
   } else if (incomes > 0 && projectedExpenses / incomes > 0.9) {
-    label = "Margen apretado";
+    label = t.tight;
     tone = "warning";
   } else if (expenses <= 0) {
-    label = "Sin gasto proyectado";
+    label = t.noSpend;
     tone = "neutral";
   }
 
@@ -103,6 +177,8 @@ export function buildMonthlyProjection(input: FinancialSignalsInput): MonthlyPro
 
 export function buildFinancialSignals(input: FinancialSignalsInput): FinancialSignal[] {
   const { summary, netWorth, goals, family, loading, dataError } = input;
+  const locale = input.locale ?? "es-MX";
+  const t = copy(locale).signals;
   const projection = buildMonthlyProjection(input);
   const signals: FinancialSignal[] = [];
 
@@ -110,8 +186,8 @@ export function buildFinancialSignals(input: FinancialSignalsInput): FinancialSi
     return [
       {
         id: "loading",
-        title: "Lectura en progreso",
-        body: "Estamos preparando tus señales financieras con los datos disponibles.",
+        title: t.loadingTitle,
+        body: t.loadingBody,
         severity: "info",
       },
     ];
@@ -120,8 +196,8 @@ export function buildFinancialSignals(input: FinancialSignalsInput): FinancialSi
   if (dataError) {
     signals.push({
       id: "data-error",
-      title: "Datos incompletos",
-      body: "Algunas cifras no se actualizaron. Usa esta lectura como referencia temporal.",
+      title: t.dataErrorTitle,
+      body: t.dataErrorBody,
       severity: "warning",
     });
   }
@@ -129,8 +205,8 @@ export function buildFinancialSignals(input: FinancialSignalsInput): FinancialSi
   if (!summary) {
     signals.push({
       id: "no-summary",
-      title: "Faltan movimientos",
-      body: "Registra ingresos y gastos para activar señales más precisas.",
+      title: t.noSummaryTitle,
+      body: t.noSummaryBody,
       severity: "info",
     });
   } else {
@@ -142,8 +218,8 @@ export function buildFinancialSignals(input: FinancialSignalsInput): FinancialSi
     if (incomes <= 0 && expenses > 0) {
       signals.push({
         id: "missing-income",
-        title: "Ingresos sin capturar",
-        body: "Hay gastos registrados, pero faltan ingresos. El balance puede verse más negativo de lo real.",
+        title: t.missingIncomeTitle,
+        body: t.missingIncomeBody,
         severity: "warning",
       });
     }
@@ -151,26 +227,26 @@ export function buildFinancialSignals(input: FinancialSignalsInput): FinancialSi
     if (balance < 0) {
       signals.push({
         id: "negative-balance",
-        title: "Flujo mensual negativo",
-        body: `El mes va ${formatMoney(Math.abs(balance))} abajo. Revisa gastos variables antes del cierre.`,
+        title: t.negativeTitle,
+        body: t.negativeBody(formatMoney(Math.abs(balance), locale)),
         severity: "critical",
-        metric: formatMoney(balance),
+        metric: formatMoney(balance, locale),
       });
     } else if (balance > 0) {
       signals.push({
         id: "positive-balance",
-        title: "Excedente disponible",
-        body: `Hay ${formatMoney(balance)} de margen. Considera separarlo antes de que se diluya.`,
+        title: t.surplusTitle,
+        body: t.surplusBody(formatMoney(balance, locale)),
         severity: "good",
-        metric: formatMoney(balance),
+        metric: formatMoney(balance, locale),
       });
     }
 
     if (incomes > 0 && expenseRatio > 0.9) {
       signals.push({
         id: "tight-margin",
-        title: "Margen ajustado",
-        body: `Los gastos representan ${(expenseRatio * 100).toFixed(0)}% de los ingresos del mes.`,
+        title: t.tightMarginTitle,
+        body: t.tightMarginBody((expenseRatio * 100).toFixed(0)),
         severity: "warning",
       });
     }
@@ -178,8 +254,8 @@ export function buildFinancialSignals(input: FinancialSignalsInput): FinancialSi
     if (projection.projectedBalance < 0 && balance >= 0) {
       signals.push({
         id: "projection-risk",
-        title: "Riesgo de cierre negativo",
-        body: `Al ritmo actual, el mes podría cerrar en ${formatMoney(projection.projectedBalance)}.`,
+        title: t.projectionRiskTitle,
+        body: t.projectionRiskBody(formatMoney(projection.projectedBalance, locale)),
         severity: "warning",
       });
     }
@@ -191,16 +267,16 @@ export function buildFinancialSignals(input: FinancialSignalsInput): FinancialSi
     if (assets > 0 && debts / assets > 0.7) {
       signals.push({
         id: "debt-pressure",
-        title: "Deuda con peso alto",
-        body: "Las deudas ya pesan más del 70% de los activos registrados.",
+        title: t.debtPressureTitle,
+        body: t.debtPressureBody,
         severity: "warning",
       });
     }
     if (debts > assets && debts > 0) {
       signals.push({
         id: "debts-over-assets",
-        title: "Deudas sobre activos",
-        body: "Tus deudas superan los activos registrados. Prioriza ordenar saldos.",
+        title: t.debtOverAssetsTitle,
+        body: t.debtOverAssetsBody,
         severity: "critical",
       });
     }
@@ -209,10 +285,8 @@ export function buildFinancialSignals(input: FinancialSignalsInput): FinancialSi
   if (goals.length === 0) {
     signals.push({
       id: "no-goals",
-      title: "Sin meta activa",
-      body: family?.familyId
-        ? "Crea una meta familiar para convertir el ahorro en una decisión compartida."
-        : "Una meta simple ayuda a dar dirección al excedente.",
+      title: t.noGoalsTitle,
+      body: family?.familyId ? t.noGoalsFamilyBody : t.noGoalsPersonalBody,
       severity: "info",
     });
   }
@@ -220,8 +294,8 @@ export function buildFinancialSignals(input: FinancialSignalsInput): FinancialSi
   if (signals.length === 0) {
     signals.push({
       id: "all-clear",
-      title: "Sin señales urgentes",
-      body: "No detectamos alertas fuertes con los datos actuales.",
+      title: t.allClearTitle,
+      body: t.allClearBody,
       severity: "good",
     });
   }

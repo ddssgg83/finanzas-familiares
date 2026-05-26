@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { PremiumDashboardModel } from "@/lib/premium/dashboardInsights";
+import { useI18n } from "@/lib/i18n/useI18n";
 import type {
   PremiumCoachAction,
   PremiumCoachContext,
@@ -19,12 +20,11 @@ type Props = {
 
 const actions: Array<{
   action: PremiumCoachAction;
-  label: string;
 }> = [
-  { action: "explain_month", label: "Explícame este mes" },
-  { action: "three_actions", label: "Dame 3 acciones" },
-  { action: "risk_summary", label: "Resume mis riesgos" },
-  { action: "family_message", label: "Mensaje para mi familia" },
+  { action: "explain_month" },
+  { action: "three_actions" },
+  { action: "risk_summary" },
+  { action: "family_message" },
 ];
 
 function getOnline() {
@@ -69,6 +69,7 @@ function buildCoachContext(model: PremiumDashboardModel): PremiumCoachContext {
 }
 
 export function PremiumCoachPanel({ model }: Props) {
+  const { dictionary } = useI18n();
   const [online, setOnline] = useState(getOnline);
   const [loadingAction, setLoadingAction] = useState<PremiumCoachAction | null>(null);
   const [result, setResult] = useState<PremiumCoachSuccessResponse | null>(null);
@@ -80,7 +81,7 @@ export function PremiumCoachPanel({ model }: Props) {
   const runCoach = async (action: PremiumCoachAction) => {
     setOnline(getOnline());
     if (!getOnline()) {
-      setError("La explicación con IA requiere internet. Tus señales locales siguen disponibles.");
+      setError(dictionary.premium.coach.offline);
       return;
     }
 
@@ -91,7 +92,7 @@ export function PremiumCoachPanel({ model }: Props) {
       const { data } = await supabase.auth.getSession();
       const token = data.session?.access_token;
       if (!token) {
-        setError("Tu sesión expiró. Vuelve a iniciar sesión para usar el copiloto.");
+        setError(dictionary.premium.coach.expired);
         return;
       }
 
@@ -106,12 +107,12 @@ export function PremiumCoachPanel({ model }: Props) {
 
       const json = await res.json().catch(() => ({}));
       if (!res.ok || json?.ok !== true) {
-        throw new Error(json?.error ?? "No pude generar la explicación ahora.");
+        throw new Error(json?.error ?? dictionary.premium.coach.genericError);
       }
 
       setResult(json as PremiumCoachSuccessResponse);
     } catch (err: any) {
-      setError(err?.message ?? "No pude generar la explicación ahora. Tus señales locales siguen disponibles.");
+      setError(err?.message ?? dictionary.premium.coach.genericError);
     } finally {
       setLoadingAction(null);
     }
@@ -122,10 +123,10 @@ export function PremiumCoachPanel({ model }: Props) {
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <CardTitle>Copiloto financiero</CardTitle>
-            <CardDescription>Explica tus señales locales con una lectura guiada y breve.</CardDescription>
+            <CardTitle>{dictionary.premium.coach.title}</CardTitle>
+            <CardDescription>{dictionary.premium.coach.description}</CardDescription>
           </div>
-          <Badge variant="secondary">IA guiada</Badge>
+          <Badge variant="secondary">{dictionary.premium.coach.badge}</Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -136,10 +137,10 @@ export function PremiumCoachPanel({ model }: Props) {
             </div>
             <div className="space-y-1">
               <p className="text-sm font-semibold text-slate-950 dark:text-slate-50">
-                Sin chat libre, solo contexto útil
+                {dictionary.premium.coach.privacyTitle}
               </p>
               <p className="text-xs leading-5 text-slate-600 dark:text-slate-300">
-                Usa señales agregadas. No enviamos movimientos, notas, emails ni identificadores.
+                {dictionary.premium.coach.privacyBody}
               </p>
             </div>
           </div>
@@ -147,7 +148,7 @@ export function PremiumCoachPanel({ model }: Props) {
 
         {!online ? (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
-            La explicación con IA requiere internet. Tus señales locales siguen disponibles.
+            {dictionary.premium.coach.offline}
           </div>
         ) : null}
 
@@ -167,7 +168,7 @@ export function PremiumCoachPanel({ model }: Props) {
                 )}
               >
                 {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                {isLoading ? "Preparando…" : item.label}
+                {isLoading ? dictionary.premium.coach.preparing : dictionary.premium.coach.actions[item.action]}
               </button>
             );
           })}
@@ -202,7 +203,7 @@ export function PremiumCoachPanel({ model }: Props) {
               <div className="flex gap-2">
                 <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>
-                  <span className="font-semibold">Acción prioritaria:</span> {result.priorityAction}
+                  <span className="font-semibold">{dictionary.premium.coach.priorityAction}</span> {result.priorityAction}
                 </span>
               </div>
             </div>

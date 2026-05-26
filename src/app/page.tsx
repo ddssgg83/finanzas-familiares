@@ -96,7 +96,7 @@ export default function DashboardPage() {
   const [goalDeadline, setGoalDeadline] = useState("");
 
   const { familyCtx, familyLoading } = useFamilyContext(user);
-  const { dictionary } = useI18n();
+  const { dictionary, locale } = useI18n();
 
   useEffect(() => {
     let ignore = false;
@@ -131,7 +131,7 @@ export default function DashboardPage() {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     const monthKey = getMonthKey(monthStart);
-    const monthLabel = monthStart.toLocaleDateString("es-MX", {
+    const monthLabel = monthStart.toLocaleDateString(locale, {
       month: "long",
       year: "numeric",
     });
@@ -259,7 +259,7 @@ export default function DashboardPage() {
         console.warn("No se pudo cargar resumen mensual:", err);
         if (!cancelled) applySummaryFromCache();
         if (!isNetworkLikeError(err) && !cancelled) {
-          setDataError("No se pudieron cargar algunos datos de este mes.");
+          setDataError(dictionary.dashboard.errors.month);
         }
       }
 
@@ -300,7 +300,7 @@ export default function DashboardPage() {
         console.warn("No se pudo cargar patrimonio:", err);
         if (!cancelled) applyNetWorthFromCache();
         if (!isNetworkLikeError(err) && !cancelled) {
-          setDataError((prev) => prev ?? "No se pudieron cargar algunos datos de patrimonio.");
+          setDataError((prev) => prev ?? dictionary.dashboard.errors.netWorth);
         }
       } finally {
         if (!cancelled) {
@@ -314,27 +314,27 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [user, familyCtx?.familyId, familyLoading]);
+  }, [user, familyCtx?.familyId, familyLoading, locale, dictionary.dashboard.errors.month, dictionary.dashboard.errors.netWorth]);
 
   const balanceTag = useMemo(() => {
-    if (!summary) return { label: "Sin datos del mes", variant: "secondary" as const };
-    if (summary.balance > 0) return { label: "Mes superavitario", variant: "success" as const };
-    if (summary.balance < 0) return { label: "Mes en rojo", variant: "destructive" as const };
-    return { label: "Mes equilibrado", variant: "secondary" as const };
-  }, [summary]);
+    if (!summary) return { label: dictionary.dashboard.balanceTags.noData, variant: "secondary" as const };
+    if (summary.balance > 0) return { label: dictionary.dashboard.balanceTags.surplus, variant: "success" as const };
+    if (summary.balance < 0) return { label: dictionary.dashboard.balanceTags.deficit, variant: "destructive" as const };
+    return { label: dictionary.dashboard.balanceTags.balanced, variant: "secondary" as const };
+  }, [dictionary.dashboard.balanceTags, summary]);
 
   const dashboardNarrative = useMemo(() => {
-    if (loading) return "Estamos armando tu vista financiera de este mes.";
+    if (loading) return dictionary.dashboard.narrative.loading;
     if (dataError) return dataError;
-    if (!summary) return "Aún no hay movimientos suficientes para este periodo.";
+    if (!summary) return dictionary.dashboard.narrative.noSummary;
     if (summary.balance > 0) {
-      return "Tu mes va sano. Es un buen momento para mandar una parte del excedente a ahorro o deuda.";
+      return dictionary.dashboard.narrative.positive;
     }
     if (summary.balance < 0) {
-      return "Hay presión en el flujo mensual. Conviene revisar categorías variables antes de cerrar el mes.";
+      return dictionary.dashboard.narrative.negative;
     }
-    return "Vas parejo este mes. Una pequeña mejora en gasto variable puede darte margen de ahorro.";
-  }, [loading, dataError, summary]);
+    return dictionary.dashboard.narrative.neutral;
+  }, [dictionary.dashboard.narrative, loading, dataError, summary]);
 
   const premiumModel = useMemo(
     () =>
@@ -351,8 +351,9 @@ export default function DashboardPage() {
           : null,
         loading,
         dataError,
+        locale,
       }),
-    [dataError, familyCtx, goals, loading, netWorth, summary]
+    [dataError, familyCtx, goals, loading, locale, netWorth, summary]
   );
 
   const handleAddGoal = () => {
@@ -419,8 +420,8 @@ export default function DashboardPage() {
   return (
     <main className="flex min-h-screen flex-col pb-16 md:pb-8">
       <AppHeader
-        title="Dashboard"
-        subtitle="Empieza aquí para ver lo que entra, lo que sale y cómo va tu patrimonio."
+        title={dictionary.dashboard.title}
+        subtitle={dictionary.dashboard.subtitle}
         activeTab="dashboard"
         userName={(user?.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user?.email ?? undefined}
@@ -432,14 +433,14 @@ export default function DashboardPage() {
           <div className="grid gap-5 md:gap-6 lg:grid-cols-[1.35fr,0.9fr] lg:items-end">
             <div className="space-y-4 md:space-y-5">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary">{summary?.monthLabel ?? "Resumen mensual"}</Badge>
+                <Badge variant="secondary">{summary?.monthLabel ?? dictionary.dashboard.monthFallback}</Badge>
                 <Badge variant={balanceTag.variant}>{balanceTag.label}</Badge>
               </div>
 
               <div className="space-y-3">
-                <p className="eyebrow">Resumen mensual</p>
+                <p className="eyebrow">{dictionary.dashboard.monthlySummary}</p>
                 <h2 className="max-w-3xl text-balance text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-slate-50 md:text-5xl md:tracking-[-0.05em]">
-                  Todo lo importante de tu dinero, en un solo vistazo.
+                  {dictionary.dashboard.heroTitle}
                 </h2>
                 <p className="max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300 md:text-base md:leading-7">
                   {dashboardNarrative}
@@ -448,10 +449,10 @@ export default function DashboardPage() {
 
               <div className="flex flex-wrap gap-3">
                 <Link href="/gastos" className={buttonVariants({ variant: "default", size: "lg" })}>
-                  Revisar movimientos
+                  {dictionary.dashboard.reviewMovements}
                 </Link>
                 <Link href="/familia/dashboard" className={buttonVariants({ variant: "outline", size: "lg" })}>
-                  Ver dashboard familiar
+                  {dictionary.dashboard.familyDashboard}
                 </Link>
               </div>
             </div>
@@ -459,24 +460,27 @@ export default function DashboardPage() {
             <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
               <HeroStat
                 icon={CircleDollarSign}
-                label="Ingresos"
+                label={dictionary.dashboard.incomes}
                 value={summary?.incomes ?? 0}
                 accent="success"
                 loading={loading}
+                locale={locale}
               />
               <HeroStat
                 icon={WalletCards}
-                label="Gastos"
+                label={dictionary.dashboard.expenses}
                 value={summary?.expenses ?? 0}
                 accent="danger"
                 loading={loading}
+                locale={locale}
               />
               <HeroStat
                 icon={Landmark}
-                label="Valor neto"
+                label={dictionary.dashboard.netWorth}
                 value={netWorth?.netWorth ?? 0}
                 accent="primary"
                 loading={loading}
+                locale={locale}
               />
             </div>
           </div>
@@ -487,12 +491,12 @@ export default function DashboardPage() {
         <Tabs defaultValue="overview" className="w-full">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <p className="eyebrow">Panorama financiero</p>
-              <h3 className="section-title">Tu resumen</h3>
+              <p className="eyebrow">{dictionary.dashboard.financialOverview}</p>
+              <h3 className="section-title">{dictionary.dashboard.yourSummary}</h3>
             </div>
             <TabsList>
-              <TabsTrigger value="overview">Vista general</TabsTrigger>
-              <TabsTrigger value="goals">Objetivos</TabsTrigger>
+              <TabsTrigger value="overview">{dictionary.dashboard.overview}</TabsTrigger>
+              <TabsTrigger value="goals">{dictionary.dashboard.goals}</TabsTrigger>
             </TabsList>
           </div>
 
@@ -502,11 +506,11 @@ export default function DashboardPage() {
                 <CardHeader>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="space-y-2">
-                      <CardTitle>Resumen del mes</CardTitle>
+                      <CardTitle>{dictionary.dashboard.monthSummaryTitle}</CardTitle>
                       <CardDescription>
                         {summary
-                          ? `Movimientos consolidados de ${summary.monthLabel}.`
-                          : "Estamos consultando tus movimientos recientes."}
+                          ? dictionary.dashboard.monthSummaryReady.replace("{month}", summary.monthLabel)
+                          : dictionary.dashboard.monthSummaryLoading}
                       </CardDescription>
                     </div>
                     <Badge variant={balanceTag.variant}>{balanceTag.label}</Badge>
@@ -514,13 +518,14 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent className="space-y-5">
                   <div className="grid gap-3 md:grid-cols-3">
-                    <MetricPanel label="Ingresos del mes" value={summary?.incomes ?? 0} tone="positive" loading={loading} />
-                    <MetricPanel label="Gastos del mes" value={summary?.expenses ?? 0} tone="negative" loading={loading} />
+                    <MetricPanel label={dictionary.dashboard.monthlyIncome} value={summary?.incomes ?? 0} tone="positive" loading={loading} locale={locale} />
+                    <MetricPanel label={dictionary.dashboard.monthlyExpenses} value={summary?.expenses ?? 0} tone="negative" loading={loading} locale={locale} />
                     <MetricPanel
-                      label="Balance del mes"
+                      label={dictionary.dashboard.monthlyBalance}
                       value={summary?.balance ?? 0}
                       tone={summary && summary.balance >= 0 ? "positive" : "negative"}
                       loading={loading}
+                      locale={locale}
                     />
                   </div>
 
@@ -528,16 +533,16 @@ export default function DashboardPage() {
                     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                       <div className="space-y-1">
                         <p className="text-sm font-semibold text-slate-950 dark:text-slate-50">
-                          Contexto rápido
+                          {dictionary.dashboard.quickContext}
                         </p>
                         <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
                           {dataError
                             ? dataError
-                            : "Si tu balance ya es positivo, separa un porcentaje fijo antes de que se diluya en gasto operativo."}
+                            : dictionary.dashboard.quickContextBody}
                         </p>
                       </div>
                       <Link href="/gastos" className={buttonVariants({ variant: "outline" })}>
-                        Ver gastos e ingresos
+                        {dictionary.dashboard.viewIncomeExpenses}
                       </Link>
                     </div>
                   </div>
@@ -547,15 +552,15 @@ export default function DashboardPage() {
               <div className="space-y-6">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Patrimonio personal</CardTitle>
-                    <CardDescription>Activos menos deudas con lectura compacta y accionable.</CardDescription>
+                    <CardTitle>{dictionary.dashboard.personalNetWorth}</CardTitle>
+                    <CardDescription>{dictionary.dashboard.personalNetWorthDescription}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <ValueRow label="Activos personales" value={netWorth?.assets ?? 0} loading={loading} />
-                    <ValueRow label="Deudas personales" value={netWorth?.debts ?? 0} loading={loading} />
-                    <ValueRow label="Valor neto" value={netWorth?.netWorth ?? 0} highlight loading={loading} />
+                    <ValueRow label={dictionary.dashboard.personalAssets} value={netWorth?.assets ?? 0} loading={loading} locale={locale} />
+                    <ValueRow label={dictionary.dashboard.personalDebts} value={netWorth?.debts ?? 0} loading={loading} locale={locale} />
+                    <ValueRow label={dictionary.dashboard.netWorth} value={netWorth?.netWorth ?? 0} highlight loading={loading} locale={locale} />
                     <Link href="/patrimonio" className={cn(buttonVariants({ variant: "outline" }), "w-full")}>
-                      Ver detalle patrimonial
+                      {dictionary.dashboard.viewNetWorthDetail}
                     </Link>
                   </CardContent>
                 </Card>
@@ -567,11 +572,10 @@ export default function DashboardPage() {
                     </div>
                     <div className="space-y-1">
                       <p className="text-sm font-semibold text-slate-950 dark:text-slate-50">
-                        Recomendación del sistema
+                        {dictionary.dashboard.systemRecommendation}
                       </p>
                       <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
-                        Usa el dashboard como lectura ejecutiva. El detalle operativo vive en movimientos,
-                        patrimonio y familia.
+                        {dictionary.dashboard.systemRecommendationBody}
                       </p>
                     </div>
                   </div>
@@ -584,30 +588,30 @@ export default function DashboardPage() {
             <div className="grid gap-6 xl:grid-cols-[0.92fr,1.08fr]">
               <Card>
                 <CardHeader>
-                  <CardTitle>Nuevo objetivo financiero</CardTitle>
+                  <CardTitle>{dictionary.dashboard.newGoal}</CardTitle>
                   <CardDescription>
-                    Una meta clara merece una superficie dedicada, limpia y de alta confianza.
+                    {dictionary.dashboard.newGoalDescription}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <Field label="Nombre del objetivo">
+                  <Field label={dictionary.dashboard.goalName}>
                     <Input
                       value={goalTitle}
                       onChange={(event) => setGoalTitle(event.target.value)}
-                      placeholder="Ej. Fondo de emergencia, liquidar tarjeta o vacaciones"
+                      placeholder={dictionary.dashboard.goalNamePlaceholder}
                     />
                   </Field>
 
                   <div className="grid gap-4 md:grid-cols-2">
-                    <Field label="Monto meta (MXN)">
+                    <Field label={dictionary.dashboard.goalAmount}>
                       <Input
                         value={goalTarget}
                         onChange={(event) => setGoalTarget(event.target.value)}
-                        placeholder="Ej. 25,000"
+                        placeholder={dictionary.dashboard.goalAmountPlaceholder}
                       />
                     </Field>
 
-                    <Field label="Fecha objetivo">
+                    <Field label={dictionary.dashboard.goalDate}>
                       <Input
                         type="date"
                         value={goalDeadline}
@@ -623,12 +627,11 @@ export default function DashboardPage() {
                     className="w-full"
                     disabled={!goalTitle.trim() || !goalTarget.trim()}
                   >
-                    Guardar objetivo rápido
+                    {dictionary.dashboard.saveQuickGoal}
                   </Button>
 
                   <p className="text-xs leading-6 text-slate-500 dark:text-slate-400">
-                    Esta captura rápida sigue siendo personal. El seguimiento automatizado de metas
-                    familiares se mantiene en el módulo de Familia.
+                    {dictionary.dashboard.quickGoalNote}
                   </p>
                 </CardContent>
               </Card>
@@ -637,13 +640,15 @@ export default function DashboardPage() {
                 <CardHeader>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <CardTitle>Tus objetivos</CardTitle>
+                      <CardTitle>{dictionary.dashboard.yourGoals}</CardTitle>
                       <CardDescription>
-                        Jerarquía clara entre vacío, progreso activo y próximas acciones.
+                        {dictionary.dashboard.goalsDescription}
                       </CardDescription>
                     </div>
                     <Badge variant={goals.length > 0 ? "success" : "secondary"}>
-                      {goals.length > 0 ? `${goals.length} activo(s)` : "Sin objetivos"}
+                      {goals.length > 0
+                        ? dictionary.dashboard.activeCount.replace("{count}", String(goals.length))
+                        : dictionary.dashboard.noGoalsBadge}
                     </Badge>
                   </div>
                 </CardHeader>
@@ -656,11 +661,10 @@ export default function DashboardPage() {
                         </div>
                         <div className="space-y-2">
                           <p className="text-base font-semibold text-slate-950 dark:text-slate-50">
-                            Tus metas aparecerán aquí
+                            {dictionary.dashboard.goalsEmptyTitle}
                           </p>
                           <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">
-                            Empieza con una meta simple y convierte este tablero en una herramienta de
-                            decisión, no solo de registro.
+                            {dictionary.dashboard.goalsEmptyBody}
                           </p>
                         </div>
                       </div>
@@ -678,16 +682,16 @@ export default function DashboardPage() {
                                 {goal.title}
                               </p>
                               <p className="text-sm text-slate-600 dark:text-slate-300">
-                                Meta de{" "}
+                                {dictionary.dashboard.goalTarget}{" "}
                                 <span className="font-semibold text-slate-900 dark:text-slate-100">
-                                  {formatCurrency(goal.targetAmount)}
+                                  {formatCurrency(goal.targetAmount, locale)}
                                 </span>
                                 {goal.deadline
-                                  ? ` · Para el ${new Date(goal.deadline).toLocaleDateString("es-MX")}`
-                                  : " · Sin fecha límite"}
+                                  ? ` · ${dictionary.dashboard.dueDate} ${new Date(goal.deadline).toLocaleDateString(locale)}`
+                                  : ` · ${dictionary.dashboard.noDeadline}`}
                               </p>
                             </div>
-                            <Badge variant="warning">En proceso</Badge>
+                            <Badge variant="warning">{dictionary.dashboard.inProgress}</Badge>
                           </div>
                         </li>
                       ))}
@@ -702,18 +706,18 @@ export default function DashboardPage() {
         <section className="hidden gap-4 md:grid lg:grid-cols-3">
           <SystemTile
             icon={ChartNoAxesCombined}
-            title="Jerarquía visual"
-            description="Lectura principal, cards secundarias y métricas con bordes y sombras más controladas."
+            title={dictionary.dashboard.visualHierarchy}
+            description={dictionary.dashboard.visualHierarchyBody}
           />
           <SystemTile
             icon={PiggyBank}
-            title="Spacing y ritmo"
-            description="Separaciones más amplias, radios consistentes y respiración visual para lectura ejecutiva."
+            title={dictionary.dashboard.spacingRhythm}
+            description={dictionary.dashboard.spacingRhythmBody}
           />
           <SystemTile
             icon={ArrowRight}
-            title="Acciones premium"
-            description="Botones más firmes, inputs más limpios y tabs con contraste claro entre contexto y selección."
+            title={dictionary.dashboard.premiumActions}
+            description={dictionary.dashboard.premiumActionsBody}
           />
         </section>
       </PageShell>
@@ -743,11 +747,13 @@ function MetricPanel({
   value,
   tone,
   loading,
+  locale,
 }: {
   label: string;
   value: number;
   tone: "positive" | "negative";
   loading?: boolean;
+  locale?: string;
 }) {
   const isPositive = tone === "positive";
 
@@ -765,7 +771,7 @@ function MetricPanel({
             isPositive ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"
           )}
         >
-          {formatCurrency(value)}
+          {formatCurrency(value, locale)}
         </p>
       )}
     </div>
@@ -777,11 +783,13 @@ function ValueRow({
   value,
   highlight,
   loading,
+  locale,
 }: {
   label: string;
   value: number;
   highlight?: boolean;
   loading?: boolean;
+  locale?: string;
 }) {
   return (
     <div className="flex items-center justify-between gap-4 rounded-[22px] border border-[hsl(var(--border)/0.76)] bg-[hsl(var(--muted)/0.45)] px-4 py-3">
@@ -795,7 +803,7 @@ function ValueRow({
             highlight && "text-[hsl(var(--primary))] dark:text-sky-300"
           )}
         >
-          {formatCurrency(value)}
+          {formatCurrency(value, locale)}
         </span>
       )}
     </div>
@@ -808,12 +816,14 @@ function HeroStat({
   value,
   accent,
   loading,
+  locale,
 }: {
   icon: ComponentType<{ className?: string }>;
   label: string;
   value: number;
   accent: "success" | "danger" | "primary";
   loading: boolean;
+  locale?: string;
 }) {
   const accentClass =
     accent === "success"
@@ -836,7 +846,7 @@ function HeroStat({
             <Skeleton className="mt-2 h-7 w-28 rounded-xl" />
           ) : (
             <p className="mt-1 text-xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-slate-50">
-              {formatCurrency(value)}
+              {formatCurrency(value, locale)}
             </p>
           )}
         </div>
@@ -869,8 +879,8 @@ function SystemTile({
   );
 }
 
-function formatCurrency(value: number) {
-  return value.toLocaleString("es-MX", {
+function formatCurrency(value: number, locale = "es-MX") {
+  return value.toLocaleString(locale, {
     style: "currency",
     currency: "MXN",
     maximumFractionDigits: 0,

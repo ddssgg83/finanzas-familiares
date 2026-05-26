@@ -4,6 +4,7 @@ import { CircleAlert, Info, ShieldAlert } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { PremiumRiskModel } from "@/lib/premium/dashboardInsights";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 type Props = {
   risks: PremiumRiskModel[];
@@ -25,11 +26,13 @@ const severityMeta = {
 };
 
 export function PremiumRiskList({ risks }: Props) {
+  const { dictionary } = useI18n();
+
   return (
     <Card className="h-full">
       <CardHeader>
-        <CardTitle>Riesgos detectados</CardTitle>
-        <CardDescription>Señales cortas para revisar antes de cerrar el mes.</CardDescription>
+        <CardTitle>{dictionary.premium.risks.title}</CardTitle>
+        <CardDescription>{dictionary.premium.risks.description}</CardDescription>
       </CardHeader>
       <CardContent>
         <ul className="space-y-3">

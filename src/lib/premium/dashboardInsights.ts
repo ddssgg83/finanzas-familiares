@@ -4,6 +4,7 @@ import {
   type FinancialSignal,
   type MonthlyProjection,
 } from "@/lib/premium/financialSignals";
+import type { Locale } from "@/lib/i18n/config";
 
 export type PremiumTone = "good" | "warning" | "critical" | "neutral";
 
@@ -41,6 +42,7 @@ export type PremiumDashboardInput = {
   family: PremiumFamilyInput;
   loading?: boolean;
   dataError?: string | null;
+  locale?: Locale;
 };
 
 export type PremiumHealthModel = {
@@ -83,12 +85,167 @@ function clampScore(score: number) {
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
-function money(value: number) {
-  return value.toLocaleString("es-MX", {
+function money(value: number, locale: Locale = "es-MX") {
+  return value.toLocaleString(locale, {
     style: "currency",
     currency: "MXN",
     maximumFractionDigits: 0,
   });
+}
+
+function copy(locale: Locale = "es-MX") {
+  const en = locale === "en-US";
+  return {
+    score: {
+      loading: en ? "Calculating" : "Calculando",
+      good: en ? "Good pace" : "Buen ritmo",
+      warning: en ? "Attention" : "Atención",
+      critical: en ? "Priority" : "Prioridad",
+      empty: en ? "Not enough data" : "Sin datos suficientes",
+    },
+    loadingFactor: en ? "We are reading your monthly summary." : "Estamos leyendo tu resumen del mes.",
+    loadingActionTitle: en ? "Review the board" : "Revisar el tablero",
+    loadingActionBody: en
+      ? "Once your data loads, RINDAY will prioritize one concrete action for this month."
+      : "En cuanto carguen tus datos, RINDAY priorizará una acción concreta para este mes.",
+    loadingRiskTitle: en ? "Data loading" : "Datos en carga",
+    loadingRiskBody: en
+      ? "Alerts will update automatically when the read is complete."
+      : "Las alertas se actualizarán automáticamente al terminar la lectura.",
+    factors: {
+      dataError: en ? "Some data could not be updated." : "Hay datos que no se pudieron actualizar.",
+      noSummary: en
+        ? "More movements are needed to calculate financial health."
+        : "Aún faltan movimientos para calcular tu salud financiera.",
+      noActivity: en
+        ? "There is no income or expense registered this month."
+        : "No hay ingresos ni gastos registrados este mes.",
+      missingIncome: en
+        ? "Register income to get a complete read."
+        : "Registra ingresos para tener una lectura completa.",
+      lowExpenseRatio: en
+        ? "Your expenses are below 65% of income."
+        : "Tus gastos están por debajo del 65% de tus ingresos.",
+      manageableSpend: en
+        ? "Your spending is within a manageable range."
+        : "Tu gasto está dentro de un rango manejable.",
+      tightMargin: en ? "Your monthly margin is very tight." : "Tu margen mensual está muy justo.",
+      expensesOverIncome: en
+        ? "This month, expenses are above income."
+        : "Este mes los gastos superan los ingresos.",
+      surplus: (value: string) =>
+        en
+          ? `You have ${value} available before month close.`
+          : `Tienes ${value} disponibles antes de cerrar el mes.`,
+      completeNetWorth: en
+        ? "Add assets or debts to complete your net worth."
+        : "Agrega activos o deudas para completar tu patrimonio.",
+      noDebts: en
+        ? "There are no debts registered in your net worth."
+        : "No hay deudas registradas en tu patrimonio.",
+      healthyDebt: en
+        ? "Debt stays below 35% of registered assets."
+        : "Tu deuda se mantiene por debajo del 35% de tus activos.",
+      debtsOverAssets: en
+        ? "Your debts are above registered assets."
+        : "Tus deudas superan tus activos registrados.",
+      watchDebt: en ? "Keep an eye on debt weight." : "Conviene vigilar el peso de tus deudas.",
+      hasGoals: en
+        ? "You already have visible financial goals."
+        : "Ya tienes objetivos financieros visibles.",
+      noGoals: en
+        ? "A clear goal would help focus savings."
+        : "Una meta clara ayudaría a enfocar el ahorro.",
+    },
+    actions: {
+      firstMovementTitle: en ? "Capture your first movement" : "Captura tu primer movimiento",
+      firstMovementBody: en
+        ? "Register income or an expense to activate a more precise read."
+        : "Registra un ingreso o gasto para activar una lectura más precisa.",
+      goMovements: en ? "Go to movements" : "Ir a movimientos",
+      completeIncomeTitle: en ? "Complete your income" : "Completa tus ingresos",
+      completeIncomeBody: en
+        ? "There are expenses registered, but income is missing. That distorts the monthly balance."
+        : "Hay gastos registrados, pero faltan ingresos. Eso distorsiona tu balance del mes.",
+      registerIncome: en ? "Register income" : "Registrar ingreso",
+      reducePressureTitle: en ? "Reduce monthly pressure" : "Reduce presión del mes",
+      reducePressureBody: en
+        ? "Your spending is above income. Review variable movements before closing the period."
+        : "Tu gasto supera tus ingresos. Revisa movimientos variables antes de cerrar el periodo.",
+      reviewExpenses: en ? "Review expenses" : "Revisar gastos",
+      prioritizeDebtTitle: en ? "Prioritize debt" : "Prioriza deuda",
+      prioritizeDebtBody: en
+        ? "Your debts weigh more than registered assets. The next step is organizing balances."
+        : "Tus deudas pesan más que tus activos registrados. El siguiente avance está en ordenar saldos.",
+      viewNetWorth: en ? "View net worth" : "Ver patrimonio",
+      defineGoalTitle: en ? "Define a goal" : "Define una meta",
+      defineFamilyGoalBody: en
+        ? "Create a family goal to turn surplus into a shared decision."
+        : "Crea una meta familiar para convertir el excedente en una decisión compartida.",
+      definePersonalGoalBody: en
+        ? "Create a simple goal to give your savings direction."
+        : "Crea una meta simple para darle dirección a tu ahorro.",
+      createGoal: en ? "Create goal" : "Crear meta",
+      configureFamily: en ? "Set up family" : "Configurar familia",
+      protectSurplusTitle: en ? "Protect the surplus" : "Protege el excedente",
+      protectSurplusBody: en
+        ? "Your month has margin. Set part of it aside before it gets diluted into operating spend."
+        : "Tu mes va con margen. Separa una parte antes de que se diluya en gasto operativo.",
+      viewGoals: en ? "View goals" : "Ver metas",
+    },
+    risks: {
+      dataErrorTitle: en ? "Incomplete data" : "Datos incompletos",
+      dataErrorBody: en
+        ? "Some reads did not update. Try again with a stable connection."
+        : "Algunas lecturas no se actualizaron. Intenta de nuevo con conexión estable.",
+      noMonthlyReadTitle: en ? "No monthly read" : "Sin lectura mensual",
+      noMonthlyReadBody: en
+        ? "There are not enough movements yet to detect trends."
+        : "Aún no hay movimientos suficientes para detectar tendencias.",
+      missingIncomeTitle: en ? "Missing income" : "Ingresos faltantes",
+      missingIncomeBody: en
+        ? "There are expenses without registered income, so the balance may look worse than reality."
+        : "Hay gastos sin ingresos registrados, así que el balance puede verse peor de lo real.",
+      negativeFlowTitle: en ? "Negative cash flow" : "Flujo negativo",
+      negativeFlowBody: (value: string) =>
+        en
+          ? `The month is ${value} down. Review variable expenses.`
+          : `El mes va ${value} abajo. Conviene revisar gastos variables.`,
+      lowMarginTitle: en ? "Reduced margin" : "Margen reducido",
+      lowMarginBody: en
+        ? "More than 90% of income is committed to this month’s expenses."
+        : "Más del 90% del ingreso está comprometido en gastos del mes.",
+      debtOverAssetsTitle: en ? "Debt over assets" : "Deuda sobre activos",
+      debtOverAssetsBody: en
+        ? "Your debts are above registered assets. Review balances and priorities."
+        : "Tus deudas superan los activos registrados. Revisa saldos y prioridades.",
+      noGoalTitle: en ? "No active goal" : "Sin meta activa",
+      noGoalBody: en
+        ? "A visible goal helps turn savings into a concrete decision."
+        : "Una meta visible ayuda a convertir el ahorro en una decisión concreta.",
+      noStrongRisksTitle: en ? "No strong risks" : "Sin riesgos fuertes",
+      noStrongRisksBody: en
+        ? "We do not detect important alerts with the current data."
+        : "No detectamos alertas importantes con los datos actuales.",
+    },
+    family: {
+      availableTitle: en ? "Family mode available" : "Modo familiar disponible",
+      availableBody: en
+        ? "Create or join your family to read goals, expenses, and shared decisions in one board."
+        : "Crea o une tu familia para leer metas, gastos y decisiones compartidas en un mismo tablero.",
+      goFamily: en ? "Go to Family" : "Ir a Familia",
+      activeFamily: en ? "Active family" : "Familia activa",
+      familyPrefix: en ? "Family" : "Familia",
+      membersBody: (members: number) =>
+        en
+          ? `${members} active members to review decisions and goals together.`
+          : `${members} miembros activos para revisar decisiones y metas en conjunto.`,
+      readyBody: en
+        ? "Your family space is ready. Invite members to collaborate."
+        : "Tu espacio familiar ya está listo. Invita miembros para colaborar.",
+      viewFamily: en ? "View family" : "Ver familia",
+    },
+  };
 }
 
 function scoreTone(score: number): PremiumTone {
@@ -98,16 +255,19 @@ function scoreTone(score: number): PremiumTone {
   return "neutral";
 }
 
-function scoreLabel(score: number, loading?: boolean) {
-  if (loading) return "Calculando";
-  if (score >= 78) return "Buen ritmo";
-  if (score >= 52) return "Atención";
-  if (score > 0) return "Prioridad";
-  return "Sin datos suficientes";
+function scoreLabel(score: number, loading?: boolean, locale?: Locale) {
+  const t = copy(locale).score;
+  if (loading) return t.loading;
+  if (score >= 78) return t.good;
+  if (score >= 52) return t.warning;
+  if (score > 0) return t.critical;
+  return t.empty;
 }
 
 export function buildPremiumDashboardModel(input: PremiumDashboardInput): PremiumDashboardModel {
   const { summary, netWorth, goals, family, loading, dataError } = input;
+  const locale = input.locale ?? "es-MX";
+  const t = copy(locale);
   const factors: string[] = [];
   let score = 50;
 
@@ -117,22 +277,22 @@ export function buildPremiumDashboardModel(input: PremiumDashboardInput): Premiu
     return {
       health: {
         score: 0,
-        label: "Calculando",
+        label: t.score.loading,
         tone: "neutral",
-        factors: ["Estamos leyendo tu resumen del mes."],
+        factors: [t.loadingFactor],
       },
       nextAction: {
-        title: "Revisar el tablero",
-        body: "En cuanto carguen tus datos, RINDAY priorizará una acción concreta para este mes.",
+        title: t.loadingActionTitle,
+        body: t.loadingActionBody,
       },
       risks: [
         {
-          title: "Datos en carga",
-          body: "Las alertas se actualizarán automáticamente al terminar la lectura.",
+          title: t.loadingRiskTitle,
+          body: t.loadingRiskBody,
           severity: "info",
         },
       ],
-      familySummary: buildFamilySummary(family),
+      familySummary: buildFamilySummary(family, locale),
       signals,
       projection,
     };
@@ -140,12 +300,12 @@ export function buildPremiumDashboardModel(input: PremiumDashboardInput): Premiu
 
   if (dataError) {
     score -= 10;
-    factors.push("Hay datos que no se pudieron actualizar.");
+    factors.push(t.factors.dataError);
   }
 
   if (!summary) {
     score = 0;
-    factors.push("Aún faltan movimientos para calcular tu salud financiera.");
+    factors.push(t.factors.noSummary);
   } else {
     const income = Math.max(0, Number(summary.incomes) || 0);
     const expenses = Math.max(0, Number(summary.expenses) || 0);
@@ -154,27 +314,27 @@ export function buildPremiumDashboardModel(input: PremiumDashboardInput): Premiu
 
     if (income <= 0 && expenses <= 0) {
       score = 18;
-      factors.push("No hay ingresos ni gastos registrados este mes.");
+      factors.push(t.factors.noActivity);
     } else if (income <= 0) {
       score -= 28;
-      factors.push("Registra ingresos para tener una lectura completa.");
+      factors.push(t.factors.missingIncome);
     } else if (expenseRatio <= 0.65) {
       score += 18;
-      factors.push("Tus gastos están por debajo del 65% de tus ingresos.");
+      factors.push(t.factors.lowExpenseRatio);
     } else if (expenseRatio <= 0.9) {
       score += 8;
-      factors.push("Tu gasto está dentro de un rango manejable.");
+      factors.push(t.factors.manageableSpend);
     } else if (expenseRatio <= 1) {
       score -= 5;
-      factors.push("Tu margen mensual está muy justo.");
+      factors.push(t.factors.tightMargin);
     } else {
       score -= 24;
-      factors.push("Este mes los gastos superan los ingresos.");
+      factors.push(t.factors.expensesOverIncome);
     }
 
     if (balance > 0) {
       score += 8;
-      factors.push(`Tienes ${money(balance)} disponibles antes de cerrar el mes.`);
+      factors.push(t.factors.surplus(money(balance, locale)));
     }
   }
 
@@ -184,28 +344,28 @@ export function buildPremiumDashboardModel(input: PremiumDashboardInput): Premiu
 
     if (assets <= 0 && debts <= 0) {
       score -= 4;
-      factors.push("Agrega activos o deudas para completar tu patrimonio.");
+      factors.push(t.factors.completeNetWorth);
     } else if (debts <= 0) {
       score += 8;
-      factors.push("No hay deudas registradas en tu patrimonio.");
+      factors.push(t.factors.noDebts);
     } else if (assets > 0 && debts / assets <= 0.35) {
       score += 8;
-      factors.push("Tu deuda se mantiene por debajo del 35% de tus activos.");
+      factors.push(t.factors.healthyDebt);
     } else if (assets > 0 && debts > assets) {
       score -= 18;
-      factors.push("Tus deudas superan tus activos registrados.");
+      factors.push(t.factors.debtsOverAssets);
     } else {
       score -= 4;
-      factors.push("Conviene vigilar el peso de tus deudas.");
+      factors.push(t.factors.watchDebt);
     }
   }
 
   if (goals.length > 0) {
     score += 5;
-    factors.push("Ya tienes objetivos financieros visibles.");
+    factors.push(t.factors.hasGoals);
   } else {
     score -= 5;
-    factors.push("Una meta clara ayudaría a enfocar el ahorro.");
+    factors.push(t.factors.noGoals);
   }
 
   const finalScore = clampScore(score);
@@ -215,13 +375,13 @@ export function buildPremiumDashboardModel(input: PremiumDashboardInput): Premiu
   return {
     health: {
       score: finalScore,
-      label: scoreLabel(finalScore, loading),
+      label: scoreLabel(finalScore, loading, locale),
       tone: scoreTone(finalScore),
       factors: factors.slice(0, 3),
     },
-    nextAction: buildNextAction(summary, netWorth, goals, family),
-    risks: buildRisks(summary, netWorth, goals, dataError),
-    familySummary: buildFamilySummary(family),
+    nextAction: buildNextAction(summary, netWorth, goals, family, locale),
+    risks: buildRisks(summary, netWorth, goals, dataError, locale),
+    familySummary: buildFamilySummary(family, locale),
     signals,
     projection,
   };
@@ -231,60 +391,60 @@ function buildNextAction(
   summary: PremiumSummaryInput,
   netWorth: PremiumNetWorthInput,
   goals: PremiumGoalInput[],
-  family: PremiumFamilyInput
+  family: PremiumFamilyInput,
+  locale: Locale = "es-MX"
 ): PremiumActionModel {
+  const t = copy(locale).actions;
   if (!summary) {
     return {
-      title: "Captura tu primer movimiento",
-      body: "Registra un ingreso o gasto para activar una lectura más precisa.",
+      title: t.firstMovementTitle,
+      body: t.firstMovementBody,
       href: "/gastos",
-      actionLabel: "Ir a movimientos",
+      actionLabel: t.goMovements,
     };
   }
 
   if (summary.incomes <= 0 && summary.expenses > 0) {
     return {
-      title: "Completa tus ingresos",
-      body: "Hay gastos registrados, pero faltan ingresos. Eso distorsiona tu balance del mes.",
+      title: t.completeIncomeTitle,
+      body: t.completeIncomeBody,
       href: "/gastos",
-      actionLabel: "Registrar ingreso",
+      actionLabel: t.registerIncome,
     };
   }
 
   if (summary.balance < 0) {
     return {
-      title: "Reduce presión del mes",
-      body: "Tu gasto supera tus ingresos. Revisa movimientos variables antes de cerrar el periodo.",
+      title: t.reducePressureTitle,
+      body: t.reducePressureBody,
       href: "/gastos",
-      actionLabel: "Revisar gastos",
+      actionLabel: t.reviewExpenses,
     };
   }
 
   if (netWorth && netWorth.debts > Math.max(0, netWorth.assets)) {
     return {
-      title: "Prioriza deuda",
-      body: "Tus deudas pesan más que tus activos registrados. El siguiente avance está en ordenar saldos.",
+      title: t.prioritizeDebtTitle,
+      body: t.prioritizeDebtBody,
       href: "/patrimonio",
-      actionLabel: "Ver patrimonio",
+      actionLabel: t.viewNetWorth,
     };
   }
 
   if (goals.length === 0) {
     return {
-      title: "Define una meta",
-      body: family?.familyId
-        ? "Crea una meta familiar para convertir el excedente en una decisión compartida."
-        : "Crea una meta simple para darle dirección a tu ahorro.",
+      title: t.defineGoalTitle,
+      body: family?.familyId ? t.defineFamilyGoalBody : t.definePersonalGoalBody,
       href: family?.familyId ? "/familia/objetivos/nuevo" : "/familia",
-      actionLabel: family?.familyId ? "Crear meta" : "Configurar familia",
+      actionLabel: family?.familyId ? t.createGoal : t.configureFamily,
     };
   }
 
   return {
-    title: "Protege el excedente",
-    body: "Tu mes va con margen. Separa una parte antes de que se diluya en gasto operativo.",
+    title: t.protectSurplusTitle,
+    body: t.protectSurplusBody,
     href: "/familia/objetivos",
-    actionLabel: "Ver metas",
+    actionLabel: t.viewGoals,
   };
 }
 
@@ -292,45 +452,47 @@ function buildRisks(
   summary: PremiumSummaryInput,
   netWorth: PremiumNetWorthInput,
   goals: PremiumGoalInput[],
-  dataError?: string | null
+  dataError?: string | null,
+  locale: Locale = "es-MX"
 ): PremiumRiskModel[] {
   const risks: PremiumRiskModel[] = [];
+  const t = copy(locale).risks;
 
   if (dataError) {
     risks.push({
-      title: "Datos incompletos",
-      body: "Algunas lecturas no se actualizaron. Intenta de nuevo con conexión estable.",
+      title: t.dataErrorTitle,
+      body: t.dataErrorBody,
       severity: "warning",
     });
   }
 
   if (!summary) {
     risks.push({
-      title: "Sin lectura mensual",
-      body: "Aún no hay movimientos suficientes para detectar tendencias.",
+      title: t.noMonthlyReadTitle,
+      body: t.noMonthlyReadBody,
       severity: "info",
     });
   } else {
     if (summary.incomes <= 0 && summary.expenses > 0) {
       risks.push({
-        title: "Ingresos faltantes",
-        body: "Hay gastos sin ingresos registrados, así que el balance puede verse peor de lo real.",
+        title: t.missingIncomeTitle,
+        body: t.missingIncomeBody,
         severity: "warning",
       });
     }
 
     if (summary.balance < 0) {
       risks.push({
-        title: "Flujo negativo",
-        body: `El mes va ${money(Math.abs(summary.balance))} abajo. Conviene revisar gastos variables.`,
+        title: t.negativeFlowTitle,
+        body: t.negativeFlowBody(money(Math.abs(summary.balance), locale)),
         severity: "critical",
       });
     }
 
     if (summary.incomes > 0 && summary.expenses / summary.incomes > 0.9) {
       risks.push({
-        title: "Margen reducido",
-        body: "Más del 90% del ingreso está comprometido en gastos del mes.",
+        title: t.lowMarginTitle,
+        body: t.lowMarginBody,
         severity: "warning",
       });
     }
@@ -338,24 +500,24 @@ function buildRisks(
 
   if (netWorth && netWorth.debts > Math.max(0, netWorth.assets)) {
     risks.push({
-      title: "Deuda sobre activos",
-      body: "Tus deudas superan los activos registrados. Revisa saldos y prioridades.",
+      title: t.debtOverAssetsTitle,
+      body: t.debtOverAssetsBody,
       severity: "critical",
     });
   }
 
   if (goals.length === 0) {
     risks.push({
-      title: "Sin meta activa",
-      body: "Una meta visible ayuda a convertir el ahorro en una decisión concreta.",
+      title: t.noGoalTitle,
+      body: t.noGoalBody,
       severity: "info",
     });
   }
 
   if (risks.length === 0) {
     risks.push({
-      title: "Sin riesgos fuertes",
-      body: "No detectamos alertas importantes con los datos actuales.",
+      title: t.noStrongRisksTitle,
+      body: t.noStrongRisksBody,
       severity: "info",
     });
   }
@@ -363,24 +525,22 @@ function buildRisks(
   return risks.slice(0, 3);
 }
 
-function buildFamilySummary(family: PremiumFamilyInput): PremiumFamilySummaryModel {
+function buildFamilySummary(family: PremiumFamilyInput, locale: Locale = "es-MX"): PremiumFamilySummaryModel {
+  const t = copy(locale).family;
   if (!family?.familyId) {
     return {
-      title: "Modo familiar disponible",
-      body: "Crea o une tu familia para leer metas, gastos y decisiones compartidas en un mismo tablero.",
+      title: t.availableTitle,
+      body: t.availableBody,
       href: "/familia",
-      actionLabel: "Ir a Familia",
+      actionLabel: t.goFamily,
     };
   }
 
   const members = Number(family.activeMembers ?? 0);
   return {
-    title: family.familyName ? `Familia ${family.familyName}` : "Familia activa",
-    body:
-      members > 1
-        ? `${members} miembros activos para revisar decisiones y metas en conjunto.`
-        : "Tu espacio familiar ya está listo. Invita miembros para colaborar.",
+    title: family.familyName ? `${t.familyPrefix} ${family.familyName}` : t.activeFamily,
+    body: members > 1 ? t.membersBody(members) : t.readyBody,
     href: "/familia/dashboard",
-    actionLabel: "Ver familia",
+    actionLabel: t.viewFamily,
   };
 }

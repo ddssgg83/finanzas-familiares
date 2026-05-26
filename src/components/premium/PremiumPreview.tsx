@@ -9,34 +9,37 @@ import { PremiumProjectionCard } from "@/components/premium/PremiumProjectionCar
 import { PremiumRiskList } from "@/components/premium/PremiumRiskList";
 import { PremiumSignalList } from "@/components/premium/PremiumSignalList";
 import type { PremiumDashboardModel } from "@/lib/premium/dashboardInsights";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 type Props = {
   model: PremiumDashboardModel;
 };
 
 export function PremiumPreview({ model }: Props) {
+  const { dictionary } = useI18n();
+
   return (
     <section className="space-y-3 md:space-y-4">
       <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between md:gap-3">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">Vista premium</Badge>
-            <span className="text-xs text-slate-500 dark:text-slate-400">Calculado con tus datos actuales</span>
+            <Badge variant="secondary">{dictionary.premium.preview.badge}</Badge>
+            <span className="text-xs text-slate-500 dark:text-slate-400">{dictionary.premium.preview.calculated}</span>
           </div>
           <div>
-            <p className="eyebrow">Insights financieros</p>
-            <h2 className="section-title">Decisiones claras para este mes</h2>
+            <p className="eyebrow">{dictionary.premium.preview.eyebrow}</p>
+            <h2 className="section-title">{dictionary.premium.preview.title}</h2>
           </div>
         </div>
         <p className="max-w-xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-          Lecturas calculadas con tus movimientos, patrimonio y contexto familiar actual.
+          {dictionary.premium.preview.body}
         </p>
       </div>
 
       <div className="grid gap-3 md:gap-4 xl:grid-cols-[1.05fr,0.95fr]">
         <PremiumHealthCard health={model.health} />
         <PremiumInsightCard
-          eyebrow="Siguiente acción"
+          eyebrow={dictionary.premium.preview.nextAction}
           title={model.nextAction.title}
           body={model.nextAction.body}
           href={model.nextAction.href}
@@ -49,7 +52,7 @@ export function PremiumPreview({ model }: Props) {
       <div className="grid gap-3 md:gap-4 lg:grid-cols-[1fr,0.86fr]">
         <PremiumRiskList risks={model.risks} />
         <PremiumInsightCard
-          eyebrow="Familia"
+          eyebrow={dictionary.premium.preview.family}
           title={model.familySummary.title}
           body={model.familySummary.body}
           href={model.familySummary.href}
