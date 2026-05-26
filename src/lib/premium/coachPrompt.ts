@@ -3,40 +3,58 @@ import type {
   PremiumCoachContext,
   PremiumCoachSuccessResponse,
 } from "@/lib/premium/coachTypes";
+import type { Locale } from "@/lib/i18n/config";
 
 const MAX_TEXT = 180;
 
-export const PREMIUM_COACH_SYSTEM_PROMPT = `
-Eres el Copiloto financiero familiar de RINDAY.
+export function buildCoachSystemPrompt(locale: Locale = "es-MX") {
+  const english = locale === "en-US";
 
-Tu trabajo es explicar señales financieras YA calculadas por la app y convertirlas en acciones simples.
-No inventes datos. Usa solo el contexto recibido.
-No pidas información adicional.
-No des asesoría legal, fiscal, crediticia formal ni recomendaciones de inversión específica.
-No menciones que eres un modelo de IA.
-Habla en español claro, cálido y directo.
-Mantén tono profesional, familiar y tranquilizador.
-Responde en JSON válido con:
+  return `
+You are RINDAY's family financial copilot.
+
+Your job is to explain financial signals ALREADY calculated by the app and turn them into simple actions.
+Do not invent data. Use only the received context.
+Do not ask for additional information.
+Do not provide formal legal, tax, credit, or specific investment advice.
+Do not mention that you are an AI model.
+Use a calm, premium, human, direct tone for families.
+Respond ${english ? "in natural, premium English" : "en español natural, premium y claro"}.
+Respond as valid JSON with:
 {
   "title": string,
   "bullets": string[],
   "priorityAction": string
 }
 
-Reglas:
-- Máximo 4 bullets.
-- Cada bullet máximo 22 palabras.
-- priorityAction máximo 24 palabras.
-- Si los datos son insuficientes, dilo claramente y recomienda qué capturar.
-- No uses markdown.
+Rules:
+- Maximum 4 bullets.
+- Each bullet maximum 22 words.
+- priorityAction maximum 24 words.
+- If data is insufficient, say it clearly and recommend what to capture.
+- No markdown.
 `.trim();
+}
 
-export const ACTION_PROMPTS: Record<PremiumCoachAction, string> = {
-  explain_month: "Explica este mes financiero en lenguaje simple para una familia. Prioriza claridad y calma.",
-  three_actions: "Propón 3 acciones concretas para esta semana basadas en las señales recibidas.",
-  risk_summary: "Resume los riesgos principales y di cuál vigilar primero. Evita alarmismo.",
-  family_message: "Redacta un mensaje breve y amable para compartir con la familia sobre este estado financiero.",
-};
+export const PREMIUM_COACH_SYSTEM_PROMPT = buildCoachSystemPrompt("es-MX");
+
+function actionPrompts(locale: Locale = "es-MX"): Record<PremiumCoachAction, string> {
+  if (locale === "en-US") {
+    return {
+      explain_month: "Explain this financial month in simple language for a family. Prioritize clarity and calm.",
+      three_actions: "Suggest 3 concrete actions for this week based on the received signals.",
+      risk_summary: "Summarize the main risks and say which one to watch first. Avoid alarmism.",
+      family_message: "Write a brief, kind message to share with the family about this financial status.",
+    };
+  }
+
+  return {
+    explain_month: "Explica este mes financiero en lenguaje simple para una familia. Prioriza claridad y calma.",
+    three_actions: "Propón 3 acciones concretas para esta semana basadas en las señales recibidas.",
+    risk_summary: "Resume los riesgos principales y di cuál vigilar primero. Evita alarmismo.",
+    family_message: "Redacta un mensaje breve y amable para compartir con la familia sobre este estado financiero.",
+  };
+}
 
 function cleanText(value: unknown, max = MAX_TEXT) {
   const clean = String(value ?? "")
@@ -96,10 +114,12 @@ export function sanitizeCoachContext(context: PremiumCoachContext): PremiumCoach
   };
 }
 
-export function buildCoachUserPrompt(action: PremiumCoachAction, context: PremiumCoachContext) {
+export function buildCoachUserPrompt(action: PremiumCoachAction, context: PremiumCoachContext, locale: Locale = "es-MX") {
   return JSON.stringify(
     {
-      task: ACTION_PROMPTS[action],
+      locale,
+      language: locale === "en-US" ? "English" : "Spanish",
+      task: actionPrompts(locale)[action],
       context: sanitizeCoachContext(context),
     },
     null,
@@ -112,25 +132,34 @@ function asStringArray(value: unknown) {
   return value.map((item) => cleanText(item, 140)).filter(Boolean).slice(0, 4);
 }
 
-export function normalizeCoachResponse(raw: unknown): PremiumCoachSuccessResponse {
+export function normalizeCoachResponse(raw: unknown, locale: Locale = "es-MX"): PremiumCoachSuccessResponse {
   const data = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const bullets = asStringArray(data.bullets);
+  const fallbackTitle = locale === "en-US" ? "Financial read" : "Lectura financiera";
+  const fallbackBullet =
+    locale === "en-US"
+      ? "I could not generate a complete read, but your local signals are still available."
+      : "No pude generar una lectura completa, pero tus señales locales siguen disponibles.";
+  const fallbackAction =
+    locale === "en-US"
+      ? "Review your local signals and choose one small action for this week."
+      : "Revisa las señales locales y elige una acción pequeña para esta semana.";
 
   return {
     ok: true,
-    title: cleanText(data.title, 90) || "Lectura financiera",
+    title: cleanText(data.title, 90) || fallbackTitle,
     bullets: bullets.length
       ? bullets
-      : ["No pude generar una lectura completa, pero tus señales locales siguen disponibles."],
+      : [fallbackBullet],
     priorityAction:
       cleanText(data.priorityAction, 140) ||
-      "Revisa las señales locales y elige una acción pequeña para esta semana.",
+      fallbackAction,
   };
 }
 
-export function parseCoachJson(content: string): PremiumCoachSuccessResponse {
+export function parseCoachJson(content: string, locale: Locale = "es-MX"): PremiumCoachSuccessResponse {
   try {
-    return normalizeCoachResponse(JSON.parse(content));
+    return normalizeCoachResponse(JSON.parse(content), locale);
   } catch {
     const fallbackBullets = content
       .split(/\n+/)
@@ -138,13 +167,23 @@ export function parseCoachJson(content: string): PremiumCoachSuccessResponse {
       .filter(Boolean)
       .slice(0, 4);
 
+    const fallbackTitle = locale === "en-US" ? "Financial read" : "Lectura financiera";
+    const fallbackBullet =
+      locale === "en-US"
+        ? "I could not generate a complete read, but your local signals are still available."
+        : "No pude generar una lectura completa, pero tus señales locales siguen disponibles.";
+    const fallbackAction =
+      locale === "en-US"
+        ? "Choose one local signal and turn it into a concrete action this week."
+        : "Elige una señal local y conviértela en una acción concreta esta semana.";
+
     return {
       ok: true,
-      title: "Lectura financiera",
+      title: fallbackTitle,
       bullets: fallbackBullets.length
         ? fallbackBullets.map((line) => cleanText(line, 140))
-        : ["No pude generar una lectura completa, pero tus señales locales siguen disponibles."],
-      priorityAction: "Elige una señal local y conviértela en una acción concreta esta semana.",
+        : [fallbackBullet],
+      priorityAction: fallbackAction,
     };
   }
 }

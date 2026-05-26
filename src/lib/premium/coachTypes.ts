@@ -1,3 +1,5 @@
+import type { Locale } from "@/lib/i18n/config";
+
 export type PremiumCoachAction =
   | "explain_month"
   | "three_actions"
@@ -41,6 +43,7 @@ export type PremiumCoachContext = {
 export type PremiumCoachRequest = {
   action: PremiumCoachAction;
   context: PremiumCoachContext;
+  locale?: Locale;
 };
 
 export type PremiumCoachSuccessResponse = {

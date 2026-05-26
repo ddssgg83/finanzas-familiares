@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 import {
+  buildCoachSystemPrompt,
   buildCoachUserPrompt,
   parseCoachJson,
-  PREMIUM_COACH_SYSTEM_PROMPT,
   sanitizeCoachContext,
 } from "@/lib/premium/coachPrompt";
 import {
@@ -12,6 +12,7 @@ import {
   type PremiumCoachAction,
   type PremiumCoachRequest,
 } from "@/lib/premium/coachTypes";
+import { isLocale, type Locale } from "@/lib/i18n/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,23 +51,45 @@ function approximateTokens(text: string) {
   return Math.ceil(text.length / 4);
 }
 
+function errorMessage(locale: Locale, key: "auth" | "action" | "context" | "missingKey" | "generic") {
+  const en = locale === "en-US";
+  const messages = {
+    auth: en ? "Sign in to use the copilot." : "Necesitas iniciar sesión para usar el copiloto.",
+    action: en ? "Invalid copilot action." : "Acción de copiloto no válida.",
+    context: en
+      ? "Financial context is missing for this read."
+      : "Falta contexto financiero para generar la lectura.",
+    missingKey: en
+      ? "The copilot is not configured yet."
+      : "El copiloto no está configurado todavía.",
+    generic: en
+      ? "I could not generate the explanation right now. Your local signals are still available."
+      : "No pude generar la explicación ahora. Tus señales locales siguen disponibles.",
+  };
+  return messages[key];
+}
+
 export async function POST(req: Request) {
   const startedAt = Date.now();
   let actionForLog = "unknown";
+  let localeForLog: Locale = "es-MX";
 
   try {
+    const body = (await req.json().catch(() => ({}))) as Partial<PremiumCoachRequest>;
+    const locale: Locale = isLocale(body.locale) ? body.locale : "es-MX";
+    localeForLog = locale;
+
     const { user, error: authError } = await getAuthenticatedUser(req);
     if (authError || !user) {
       return NextResponse.json(
-        { ok: false, error: "Necesitas iniciar sesión para usar el copiloto." },
+        { ok: false, error: errorMessage(locale, "auth") },
         { status: 401 }
       );
     }
 
-    const body = (await req.json().catch(() => ({}))) as Partial<PremiumCoachRequest>;
     if (!isCoachAction(body.action)) {
       return NextResponse.json(
-        { ok: false, error: "Acción de copiloto no válida." },
+        { ok: false, error: errorMessage(locale, "action") },
         { status: 400 }
       );
     }
@@ -74,7 +97,7 @@ export async function POST(req: Request) {
 
     if (!body.context || typeof body.context !== "object") {
       return NextResponse.json(
-        { ok: false, error: "Falta contexto financiero para generar la lectura." },
+        { ok: false, error: errorMessage(locale, "context") },
         { status: 400 }
       );
     }
@@ -83,14 +106,15 @@ export async function POST(req: Request) {
     if (!apiKey) {
       console.error("[premium-coach] missing OPENAI_API_KEY");
       return NextResponse.json(
-        { ok: false, error: "El copiloto no está configurado todavía." },
+        { ok: false, error: errorMessage(locale, "missingKey") },
         { status: 500 }
       );
     }
 
     const context = sanitizeCoachContext(body.context);
-    const userPrompt = buildCoachUserPrompt(body.action, context);
-    const approxTokens = approximateTokens(PREMIUM_COACH_SYSTEM_PROMPT + userPrompt);
+    const systemPrompt = buildCoachSystemPrompt(locale);
+    const userPrompt = buildCoachUserPrompt(body.action, context, locale);
+    const approxTokens = approximateTokens(systemPrompt + userPrompt);
     const client = new OpenAI({ apiKey });
 
     const completion = await client.chat.completions.create({
@@ -99,16 +123,17 @@ export async function POST(req: Request) {
       max_tokens: 420,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: PREMIUM_COACH_SYSTEM_PROMPT },
+        { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
     });
 
     const content = completion.choices[0]?.message?.content ?? "";
-    const response = parseCoachJson(content);
+    const response = parseCoachJson(content, locale);
 
     console.info("[premium-coach]", {
       action: actionForLog,
+      locale: localeForLog,
       durationMs: Date.now() - startedAt,
       approxPromptTokens: approxTokens,
     });
@@ -117,6 +142,7 @@ export async function POST(req: Request) {
   } catch (err) {
     console.error("[premium-coach] error", {
       action: actionForLog,
+      locale: localeForLog,
       durationMs: Date.now() - startedAt,
       message: err instanceof Error ? err.message : "unknown",
     });
@@ -124,7 +150,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         ok: false,
-        error: "No pude generar la explicación ahora. Tus señales locales siguen disponibles.",
+        error: errorMessage(localeForLog, "generic"),
       },
       { status: 500 }
     );

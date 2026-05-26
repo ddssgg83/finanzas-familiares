@@ -69,7 +69,7 @@ function buildCoachContext(model: PremiumDashboardModel): PremiumCoachContext {
 }
 
 export function PremiumCoachPanel({ model }: Props) {
-  const { dictionary } = useI18n();
+  const { dictionary, locale } = useI18n();
   const [online, setOnline] = useState(getOnline);
   const [loadingAction, setLoadingAction] = useState<PremiumCoachAction | null>(null);
   const [result, setResult] = useState<PremiumCoachSuccessResponse | null>(null);
@@ -102,7 +102,7 @@ export function PremiumCoachPanel({ model }: Props) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ action, context }),
+        body: JSON.stringify({ action, context, locale }),
       });
 
       const json = await res.json().catch(() => ({}));

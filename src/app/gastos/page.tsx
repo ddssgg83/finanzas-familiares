@@ -20,6 +20,7 @@ import { formatMoney as fmtMoney, formatDateDisplay, toNumberSafe } from "@/lib/
 import { useFamilyContext } from "@/hooks/useFamilyContext";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { generateMonthlyPdfReport } from "@/lib/premium/monthlyPdfReport";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 import {
   Button,
@@ -283,6 +284,7 @@ export default function GastosPage() {
   const { familyCtx, familyLoading, familyError, isFamilyOwner } = useFamilyContext(user);
   const canUseFamilyScope = Boolean(familyCtx && isFamilyOwner);
   const [viewScope, setViewScope] = useState<"mine" | "family">("mine");
+  const { dictionary, locale } = useI18n();
 
   // miembros para labels bonitos
   const [membersByUserId, setMembersByUserId] = useState<
@@ -1195,9 +1197,9 @@ if (!key) return;
   const monthLabel = useMemo(() => {
     const [y, m] = month.split("-");
     const date = new Date(Number(y), Number(m) - 1, 1);
-    const raw = date.toLocaleDateString("es-MX", { year: "numeric", month: "long" });
+    const raw = date.toLocaleDateString(locale, { year: "numeric", month: "long" });
     return raw.charAt(0).toUpperCase() + raw.slice(1);
-  }, [month]);
+  }, [locale, month]);
 
   // =========================================================
   // Export CSV/PDF
@@ -1243,7 +1245,7 @@ if (!key) return;
 
   const handleExportPdf = () => {
     if (!filteredTransactions.length) {
-      alert("No hay movimientos visibles en este mes para generar el reporte PDF.");
+      alert(dictionary.pdf.empty);
       return;
     }
 
@@ -1254,12 +1256,13 @@ if (!key) return;
         transactions: filteredTransactions,
         month,
         monthLabel,
-        scopeLabel: isFamilyReport ? "Reporte familiar" : "Reporte personal",
+        scopeLabel: isFamilyReport ? dictionary.pdf.familyScope : dictionary.pdf.personalScope,
         familyName: isFamilyReport ? familyCtx?.familyName ?? null : null,
+        locale,
       });
     } catch (err: any) {
       console.error("Error generando reporte PDF:", err);
-      alert(err?.message ?? "No se pudo generar el reporte PDF. Intenta de nuevo.");
+      alert(err?.message ?? dictionary.pdf.error);
     } finally {
       setGeneratingPdf(false);
     }
@@ -1794,7 +1797,7 @@ if (!key) return;
                     disabled={generatingPdf}
                     className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
                   >
-                    {generatingPdf ? "Generando PDF…" : "Reporte PDF"}
+                    {generatingPdf ? dictionary.pdf.generating : dictionary.pdf.button}
                   </button>
                 </div>
               </div>

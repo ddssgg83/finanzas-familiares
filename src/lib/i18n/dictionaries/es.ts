@@ -165,6 +165,14 @@ export const es = {
       },
     },
   },
+  pdf: {
+    button: "Reporte PDF",
+    generating: "Generando PDF…",
+    empty: "No hay movimientos visibles en este mes para generar el reporte PDF.",
+    error: "No se pudo generar el reporte PDF. Intenta de nuevo.",
+    personalScope: "Reporte personal",
+    familyScope: "Reporte familiar",
+  },
   onboarding: {
     betaLine: "Beta privada para familias que quieren claridad",
     enterNow: "Entrar ahora",

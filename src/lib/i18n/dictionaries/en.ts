@@ -163,6 +163,14 @@ export const en = {
       },
     },
   },
+  pdf: {
+    button: "PDF report",
+    generating: "Generating PDF…",
+    empty: "There are no visible movements this month to generate the PDF report.",
+    error: "The PDF report could not be generated. Try again.",
+    personalScope: "Personal report",
+    familyScope: "Family report",
+  },
   onboarding: {
     betaLine: "Private beta for families that want clarity",
     enterNow: "Enter now",
