@@ -115,6 +115,37 @@
   input::placeholder,
   textarea::placeholder {
     color: hsl(var(--muted-foreground));
+    -webkit-text-fill-color: hsl(var(--muted-foreground));
+  }
+
+  input,
+  textarea,
+  select {
+    color: hsl(var(--foreground));
+    caret-color: hsl(var(--foreground));
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea,
+  select {
+    -webkit-text-fill-color: currentColor;
+  }
+
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill,
+  textarea:-webkit-autofill:hover,
+  textarea:-webkit-autofill:focus,
+  select:-webkit-autofill,
+  select:-webkit-autofill:hover,
+  select:-webkit-autofill:focus {
+    border-color: hsl(var(--input));
+    box-shadow: 0 0 0 1000px hsl(var(--card)) inset;
+    -webkit-box-shadow: 0 0 0 1000px hsl(var(--card)) inset;
+    -webkit-text-fill-color: hsl(var(--foreground));
+    caret-color: hsl(var(--foreground));
+    transition: background-color 9999s ease-in-out 0s;
   }
 }
 

@@ -111,7 +111,10 @@ export default function NewFamilyGoalPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user) {
+      setError("Inicia sesión o crea una cuenta para guardar metas familiares.");
+      return;
+    }
 
     try {
       setSaving(true);
@@ -202,10 +205,10 @@ export default function NewFamilyGoalPage() {
             <p className="text-[11px] text-rose-600 dark:text-rose-400">{authError}</p>
           )}
           <Link
-            href="/"
+            href="/onboarding?mode=login&next=%2Ffamilia%2Fobjetivos%2Fnuevo"
             className="inline-flex w-fit rounded-full bg-sky-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-sky-600"
           >
-            Ir al inicio
+            Iniciar sesión
           </Link>
         </div>
       </div>

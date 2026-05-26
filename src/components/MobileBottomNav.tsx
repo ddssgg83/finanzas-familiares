@@ -8,11 +8,31 @@ import { cn } from "@/lib/utils";
 const NAV_ITEMS = [
   { href: "/", label: "Inicio", icon: Home, match: (path: string) => path === "/" },
   { href: "/gastos", label: "Movs", icon: WalletCards, match: (path: string) => path.startsWith("/gastos") },
-  { href: "/patrimonio", label: "Patrimonio", icon: Landmark, match: (path: string) => path.startsWith("/patrimonio") },
-  { href: "/familia", label: "Familia", icon: UsersRound, match: (path: string) => path.startsWith("/familia") },
+  {
+    href: "/patrimonio",
+    label: "Patrimonio",
+    icon: Landmark,
+    protected: true,
+    match: (path: string) => path.startsWith("/patrimonio"),
+  },
+  {
+    href: "/familia",
+    label: "Familia",
+    icon: UsersRound,
+    protected: true,
+    match: (path: string) => path.startsWith("/familia"),
+  },
 ];
 
-export function MobileBottomNav() {
+type MobileBottomNavProps = {
+  isAuthenticated?: boolean;
+};
+
+function authHref(next: string) {
+  return `/onboarding?mode=login&next=${encodeURIComponent(next)}`;
+}
+
+export function MobileBottomNav({ isAuthenticated = false }: MobileBottomNavProps) {
   const pathname = usePathname() || "/";
 
   return (
@@ -24,11 +44,12 @@ export function MobileBottomNav() {
         {NAV_ITEMS.map((item) => {
           const active = item.match(pathname);
           const Icon = item.icon;
+          const href = item.protected && !isAuthenticated ? authHref(item.href) : item.href;
 
           return (
             <Link
               key={item.href}
-              href={item.href}
+              href={href}
               aria-current={active ? "page" : undefined}
               className={cn(
                 "tap-feedback relative flex min-h-12 flex-col items-center justify-center gap-1 overflow-hidden rounded-[20px] px-2 py-2 text-[10px] font-semibold transition-all duration-200 motion-reduce:transition-none active:scale-[0.98]",

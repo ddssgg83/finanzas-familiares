@@ -141,6 +141,7 @@ export default function FamilyDashboardPage() {
   const isDark = theme === "dark";
 
   const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
   // ✅ fuente de verdad de familia
   const { familyCtx, familyLoading, familyError, isFamilyOwner } = useFamilyContext(user);
@@ -187,6 +188,8 @@ export default function FamilyDashboardPage() {
         if (!ignore) setUser(sessionUser);
       } catch {
         if (!ignore) setUser(null);
+      } finally {
+        if (!ignore) setAuthLoading(false);
       }
     }
 
@@ -196,6 +199,7 @@ export default function FamilyDashboardPage() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
+      setAuthLoading(false);
     });
 
     return () => {
@@ -211,10 +215,12 @@ export default function FamilyDashboardPage() {
     let ignore = false;
 
     const fetchData = async () => {
+      if (authLoading) return;
+
       if (!user) {
         if (!ignore) {
           setLoading(false);
-          setError("No se encontró el usuario. Inicia sesión de nuevo.");
+          setError(null);
         }
         return;
       }
@@ -241,7 +247,7 @@ export default function FamilyDashboardPage() {
                     id: user.id,
                     user_id: user.id,
                     full_name: user.email ?? "Tu cuenta",
-                    role: familyGroupId ? "owner" : "jefe",
+                  role: familyGroupId ? "owner" : "member",
                     status: "active",
                   },
                 ]
@@ -266,8 +272,8 @@ export default function FamilyDashboardPage() {
         if (familyGroupId) {
           const { data: mems, error: memErr } = await supabase
             .from("family_members")
-            .select("id,family_id,user_id,full_name,invited_email,role,status,created_at")
-            .eq("family_id", familyGroupId)
+            .select("id,family_id,family_group_id,user_id,full_name,invited_email,role,status,created_at")
+            .or(`family_group_id.eq.${familyGroupId},family_id.eq.${familyGroupId}`)
             .eq("status", "active")
             .order("created_at", { ascending: true });
 
@@ -301,7 +307,7 @@ export default function FamilyDashboardPage() {
               id: user.id,
               user_id: user.id,
               full_name: user.email ?? "Tu cuenta",
-              role: familyGroupId ? "owner" : "jefe",
+              role: familyGroupId ? "owner" : "member",
               status: "active",
             },
           ];
@@ -397,7 +403,7 @@ export default function FamilyDashboardPage() {
     return () => {
       ignore = true;
     };
-  }, [user, familyCtx?.familyId, familyLoading, isOffline]);
+  }, [user, authLoading, familyCtx?.familyId, familyLoading, isOffline]);
 
   // =========================================================
   // MAPS + KPIs
@@ -501,6 +507,41 @@ export default function FamilyDashboardPage() {
     if (!familyCtx?.familyId) return "Cuenta individual";
     return isFamilyOwner ? "Administrador familiar" : "Miembro";
   }, [familyCtx?.familyId, isFamilyOwner]);
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4 text-sm text-slate-600 dark:text-slate-300">
+        Cargando sesión…
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center px-4 text-center text-sm text-slate-600 dark:text-slate-300">
+        <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h1 className="text-base font-semibold text-slate-950 dark:text-slate-50">Dashboard familiar</h1>
+          <p className="mt-2 leading-6">
+            Inicia sesión para ver objetivos, aportaciones y avances de tu familia.
+          </p>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            <Link
+              href="/onboarding?mode=login&next=%2Ffamilia%2Fdashboard"
+              className="rounded-full bg-sky-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-600"
+            >
+              Iniciar sesión
+            </Link>
+            <Link
+              href="/onboarding?mode=signup&next=%2Ffamilia%2Fdashboard"
+              className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800"
+            >
+              Crear cuenta
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <main className="flex min-h-screen flex-col pb-16 md:pb-4">

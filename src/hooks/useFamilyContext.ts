@@ -44,7 +44,8 @@ function readFamilyCache(userId: string): FamilyContext | null {
 }
 
 type FamilyMembershipRow = {
-  family_id: string;
+  family_id: string | null;
+  family_group_id: string | null;
   status: string;
   user_id: string | null;
   invited_email: string | null;
@@ -119,7 +120,7 @@ export function useFamilyContext(user: User | null) {
       try {
         const { data: memberRows, error: memberError } = await supabase
           .from("family_members")
-          .select("family_id,status,user_id,invited_email,role")
+          .select("family_id,family_group_id,status,user_id,invited_email,role")
           .or(`user_id.eq.${userId},invited_email.eq.${email}`)
           .eq("status", "active")
           .limit(1);
@@ -135,11 +136,20 @@ export function useFamilyContext(user: User | null) {
         }
 
         const member = memberRows[0] as FamilyMembershipRow;
+        const canonicalFamilyId = member.family_group_id ?? member.family_id;
+
+        if (!canonicalFamilyId) {
+          if (!cancelled) {
+            setFamilyCtx(null);
+            writeFamilyCache(userId, null);
+          }
+          return;
+        }
 
         const { data: activeMembersRows, error: membersError } = await supabase
           .from("family_members")
           .select("user_id,role")
-          .eq("family_id", member.family_id)
+          .or(`family_group_id.eq.${canonicalFamilyId},family_id.eq.${canonicalFamilyId}`)
           .eq("status", "active");
 
         if (membersError) throw membersError;
@@ -150,7 +160,7 @@ export function useFamilyContext(user: User | null) {
         const { data: fam, error: famError } = await supabase
           .from("family_groups")
           .select("id,name,owner_user_id")
-          .eq("id", member.family_id)
+          .eq("id", canonicalFamilyId)
           .maybeSingle();
 
         if (famError) {
@@ -171,7 +181,7 @@ export function useFamilyContext(user: User | null) {
           userId;
 
         const nextCtx: FamilyContext = {
-          familyId: member.family_id,
+          familyId: canonicalFamilyId,
           familyName,
           ownerUserId,
           activeMembers: activeMembers.length,

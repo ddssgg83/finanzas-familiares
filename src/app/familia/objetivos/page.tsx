@@ -356,10 +356,10 @@ export default function FamilyGoalsPage() {
             <p className="text-[11px] text-rose-600 dark:text-rose-400">{authError}</p>
           )}
           <Link
-            href="/"
+            href="/onboarding?mode=login&next=%2Ffamilia%2Fobjetivos"
             className="inline-flex w-fit rounded-full bg-sky-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-sky-600"
           >
-            Ir al inicio
+            Iniciar sesión
           </Link>
         </div>
       </div>

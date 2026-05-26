@@ -373,6 +373,47 @@ export default function DashboardPage() {
     setGoalDeadline("");
   };
 
+  if (!loading && !user) {
+    return (
+      <main className="flex min-h-screen items-center justify-center px-4 py-10 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
+        <section className="surface-hero w-full max-w-xl rounded-[28px] px-5 py-6 md:px-8 md:py-8">
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary">Beta privada</Badge>
+            <span className="eyebrow">RINDAY</span>
+          </div>
+
+          <div className="mt-5 space-y-3">
+            <h1 className="text-balance text-3xl font-semibold tracking-[-0.05em] text-slate-950 dark:text-slate-50 md:text-4xl">
+              Entra a tu espacio financiero.
+            </h1>
+            <p className="max-w-lg text-sm leading-6 text-slate-600 dark:text-slate-300 md:text-base md:leading-7">
+              Inicia sesión o crea tu cuenta para ver tus movimientos, patrimonio y familia sin perder contexto.
+            </p>
+          </div>
+
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            <Link
+              href="/onboarding?mode=login&next=%2F"
+              className={cn(buttonVariants({ variant: "default", size: "lg" }), "w-full sm:w-auto")}
+            >
+              Iniciar sesión
+            </Link>
+            <Link
+              href="/onboarding?mode=signup&next=%2F"
+              className={cn(buttonVariants({ variant: "outline", size: "lg" }), "w-full sm:w-auto")}
+            >
+              Crear cuenta
+            </Link>
+          </div>
+
+          <p className="mt-5 text-xs leading-5 text-slate-500 dark:text-slate-400">
+            Si recibiste una invitación familiar, abre el enlace del correo y usa el mismo email invitado.
+          </p>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="flex min-h-screen flex-col pb-16 md:pb-8">
       <AppHeader

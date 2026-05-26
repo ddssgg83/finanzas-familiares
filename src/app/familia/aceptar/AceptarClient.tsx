@@ -464,8 +464,8 @@ export default function AceptarClient() {
                         </div>
                         <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
                           {authMode === "signup"
-                            ? "Completa tu cuenta y te agregamos a la familia al terminar."
-                            : "Entra con tu contraseña y te agregamos a la familia en el mismo paso."}
+                            ? "Si todavía no tienes cuenta, créala con el mismo correo de la invitación."
+                            : "Entra con el correo invitado y te agregamos a la familia en el mismo paso."}
                         </p>
                       </div>
 
@@ -507,6 +507,12 @@ export default function AceptarClient() {
                     </div>
 
                     <div className="mt-4 space-y-4">
+                      <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-100">
+                        Esta invitación está ligada a{" "}
+                        <span className="font-semibold">{invitedEmail ?? "el correo invitado"}</span>. Para aceptarla,
+                        crea una cuenta o inicia sesión usando ese mismo correo.
+                      </div>
+
                       <div>
                         <label className="mb-1 block text-[12px] font-semibold text-slate-700 dark:text-slate-200">
                           Correo invitado

@@ -1167,8 +1167,21 @@ export default function PatrimonioPage() {
 
   if (!user) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
-        Necesitas iniciar sesión para ver y editar tu patrimonio.
+      <div className="flex min-h-screen flex-col items-center justify-center px-4 text-center text-sm text-slate-600 dark:text-slate-300">
+        <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h1 className="text-base font-semibold text-slate-950 dark:text-slate-50">Patrimonio privado</h1>
+          <p className="mt-2 leading-6">
+            Inicia sesión para ver y editar tus activos, deudas y patrimonio familiar.
+          </p>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            <a href="/onboarding?mode=login&next=%2Fpatrimonio">
+              <Button>Iniciar sesión</Button>
+            </a>
+            <a href="/onboarding?mode=signup&next=%2Fpatrimonio">
+              <LinkButton tone="info">Crear cuenta</LinkButton>
+            </a>
+          </div>
+        </div>
         {authError && <p className="mt-2 text-xs text-rose-500">{authError}</p>}
       </div>
     );

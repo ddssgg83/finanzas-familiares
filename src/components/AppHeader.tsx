@@ -292,7 +292,7 @@ export function AppHeader({
           </nav>
         </div>
       </header>
-      <MobileBottomNav />
+      <MobileBottomNav isAuthenticated={Boolean(userId)} />
     </>
   );
 }
