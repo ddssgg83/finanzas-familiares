@@ -77,7 +77,7 @@ function prettyAuthError(msg?: string) {
 export default function OnboardingClient() {
   const router = useRouter();
   const sp = useSearchParams();
-  const { dictionary } = useI18n();
+  const { dictionary, locale } = useI18n();
 
   const modeParam = (sp.get("mode") ?? "").toLowerCase(); // login | signup
   const emailParam = (sp.get("email") ?? "").trim();
@@ -181,7 +181,7 @@ export default function OnboardingClient() {
       // (Supabase necesita exchangeCodeForSession)
       const base = SITE_URL || "https://rinday.app";
       const nextSafe = next || "/familia";
-      const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextSafe)}`;
+      const redirectTo = `${base}/auth/callback?next=${encodeURIComponent(nextSafe)}&locale=${encodeURIComponent(locale)}`;
 
       const { error } = await supabase.auth.signInWithOtp({
         email: cleanEmail,

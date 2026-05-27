@@ -5,6 +5,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
+import { es } from "@/lib/i18n/dictionaries/es";
+import { en } from "@/lib/i18n/dictionaries/en";
 
 export const runtime = "nodejs"; // necesario para nodemailer en Vercel
 export const dynamic = "force-dynamic";
@@ -30,14 +32,19 @@ function renderInviteEmailHTML(opts: {
   inviteUrl: string;
   inviteeEmail: string;
   message?: string | null;
+  locale?: string | null;
 }) {
-  const inviterName = escapeHtml(opts.inviterName || "Un miembro de tu familia");
+  const dictionary = getEmailDictionary(opts.locale);
+  const copy = dictionary.emails.invite;
+  const rawInviterName = opts.inviterName || copy.fallbackInviter;
+  const inviterName = escapeHtml(rawInviterName);
   const inviteeEmail = escapeHtml(opts.inviteeEmail);
   const inviteUrl = opts.inviteUrl;
   const customMsg = opts.message ? escapeHtml(opts.message) : "";
+  const lang = dictionary === en ? "en" : "es";
 
   return `<!DOCTYPE html>
-<html lang="es">
+<html lang="${lang}">
 <body style="margin:0;padding:0;background:#F8FAFC;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
     <tr>
@@ -51,18 +58,17 @@ function renderInviteEmailHTML(opts: {
 
           <tr>
             <td style="font-size:20px;font-weight:700;color:#0F172A;padding-bottom:10px;">
-              Te invitaron a unirte a RINDAY
+              ${escapeHtml(copy.title)}
             </td>
           </tr>
 
           <tr>
             <td style="font-size:15px;line-height:1.7;color:#334155;padding-bottom:16px;">
-              Hola,
+              ${escapeHtml(copy.greeting)}
               <br /><br />
-              <strong>${inviterName}</strong> te invitó a unirte a una familia en <strong>RINDAY</strong>
-              para gestionar finanzas en conjunto.
+              ${escapeHtml(copy.body("__INVITER__")).replace("__INVITER__", `<strong>${inviterName}</strong>`)}
               <br /><br />
-              Esta invitación fue enviada a: <strong>${inviteeEmail}</strong>
+              ${escapeHtml(copy.sentTo)} <strong>${inviteeEmail}</strong>
             </td>
           </tr>
 
@@ -70,7 +76,7 @@ function renderInviteEmailHTML(opts: {
             customMsg
               ? `<tr>
                    <td style="font-size:14px;line-height:1.7;color:#0F172A;background:#F1F5F9;border-radius:12px;padding:12px 14px;">
-                     <strong>Mensaje:</strong><br/>${customMsg}
+                     <strong>${escapeHtml(copy.message)}</strong><br/>${customMsg}
                    </td>
                  </tr>`
               : ""
@@ -78,7 +84,7 @@ function renderInviteEmailHTML(opts: {
 
           <tr>
             <td style="font-size:15px;line-height:1.7;color:#334155;padding-top:18px;padding-bottom:12px;">
-              Puedes aceptar tu invitación aquí:
+              ${escapeHtml(copy.ctaIntro)}
             </td>
           </tr>
 
@@ -88,18 +94,18 @@ function renderInviteEmailHTML(opts: {
                  style="display:inline-block;background:#0EA5E9;color:#FFFFFF;
                         padding:14px 22px;border-radius:12px;
                         text-decoration:none;font-weight:700;">
-                Aceptar invitación
+                ${escapeHtml(copy.cta)}
               </a>
             </td>
           </tr>
 
           <tr>
             <td style="font-size:13px;color:#64748B;line-height:1.6;">
-              Si no esperabas este correo, puedes ignorarlo con tranquilidad.
+              ${escapeHtml(copy.footer)}
               <br /><br />
-              Saludos,
+              ${escapeHtml(copy.signoff)}
               <br />
-              <strong>Equipo RINDAY</strong>
+              <strong>${escapeHtml(copy.team)}</strong>
             </td>
           </tr>
         </table>
@@ -108,6 +114,11 @@ function renderInviteEmailHTML(opts: {
   </table>
 </body>
 </html>`;
+}
+
+function getEmailDictionary(locale?: string | null) {
+  const normalized = String(locale ?? "").toLowerCase();
+  return normalized.startsWith("en") ? en : es;
 }
 
 function getBaseUrl() {
@@ -202,13 +213,15 @@ export async function POST(req: Request) {
 
     // 3) Body
     const body = await req.json().catch(() => ({}));
-    const { familyId, email, role, inviterName, message } = body as {
+    const { familyId, email, role, inviterName, message, locale } = body as {
       familyId: string;
       email: string;
       role?: "admin" | "member" | string;
       inviterName?: string;
       message?: string | null;
+      locale?: string | null;
     };
+    const emailDictionary = getEmailDictionary(locale);
 
     if (!familyId || !email) {
       return NextResponse.json(
@@ -368,12 +381,13 @@ export async function POST(req: Request) {
       await transporter.sendMail({
         from,
         to: inviteEmail,
-        subject: "Te invitaron a unirte a RINDAY",
+        subject: emailDictionary.emails.invite.subject,
         html: renderInviteEmailHTML({
           inviterName: niceInviter,
           inviteUrl,
           inviteeEmail: inviteEmail,
           message: message ?? null,
+          locale,
         }),
       });
 

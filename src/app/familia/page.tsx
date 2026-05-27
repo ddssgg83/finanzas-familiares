@@ -234,7 +234,7 @@ function friendlyFamilyError(message?: string | null) {
 // Página
 // =========================================================
 export default function FamiliaPage() {
-  const { dictionary } = useI18n();
+  const { dictionary, locale } = useI18n();
   const t = dictionary.family;
   const pageT = t.page;
 
@@ -559,6 +559,7 @@ export default function FamiliaPage() {
                 role: op.payload.role,
                 inviterName: user.email ?? t.familyAdmin,
                 message: op.payload.message ?? null,
+                locale,
               }),
             });
 
@@ -932,6 +933,7 @@ export default function FamiliaPage() {
           role: inviteForm.role === "admin" ? "admin" : "member",
           inviterName: user.email ?? t.member,
           message: inviteForm.message || null,
+          locale,
         }),
       });
 
