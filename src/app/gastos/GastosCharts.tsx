@@ -18,6 +18,7 @@ import {
   EmptyState,
   Section,
 } from "@/components/ui/kit";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 type CategoriaPoint = {
   category: string;
@@ -39,12 +40,15 @@ export default function GastosCharts({
   chartDataCategorias: CategoriaPoint[];
   chartDataLinea: LineaPoint[];
 }) {
+  const { dictionary } = useI18n();
+  const t = dictionary.expenses;
+
   return (
     <div className="mt-2 grid gap-4 md:grid-cols-2">
       <Card>
-        <Section title="Gastos por categoría">
+        <Section title={t.expensesByCategory}>
           {chartDataCategorias.length === 0 ? (
-            <EmptyState>Cuando registres gastos, esta gráfica revelará tus categorías principales.</EmptyState>
+            <EmptyState>{t.expensesByCategoryEmpty}</EmptyState>
           ) : (
             <ResponsiveContainer width="100%" height={260}>
               <BarChart
@@ -63,7 +67,7 @@ export default function GastosCharts({
                 <Legend />
                 <Bar
                   dataKey="total"
-                  name="Gasto"
+                  name={t.expense}
                   radius={4}
                   fill={isDark ? "#38bdf8" : "#0ea5e9"}
                 />
@@ -74,9 +78,9 @@ export default function GastosCharts({
       </Card>
 
       <Card>
-        <Section title="Ingresos vs Gastos por día">
+        <Section title={t.chartTrendTitle}>
           {chartDataLinea.length === 0 ? (
-            <EmptyState>La tendencia aparecerá cuando haya movimientos suficientes para comparar.</EmptyState>
+            <EmptyState>{t.chartTrendEmpty}</EmptyState>
           ) : (
             <ResponsiveContainer width="100%" height={260}>
               <LineChart data={chartDataLinea}>
@@ -91,7 +95,7 @@ export default function GastosCharts({
                 <Line
                   type="monotone"
                   dataKey="ingresos"
-                  name="Ingresos"
+                  name={t.income}
                   dot={false}
                   stroke={isDark ? "#22c55e" : "#16a34a"}
                   strokeWidth={2}
@@ -99,7 +103,7 @@ export default function GastosCharts({
                 <Line
                   type="monotone"
                   dataKey="gastos"
-                  name="Gastos"
+                  name={t.expense}
                   dot={false}
                   stroke={isDark ? "#fb7185" : "#ef4444"}
                   strokeWidth={2}

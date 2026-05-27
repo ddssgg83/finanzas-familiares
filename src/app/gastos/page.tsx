@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import nextDynamic from "next/dynamic";
 import type { User } from "@supabase/supabase-js";
 import { useTheme } from "next-themes";
@@ -16,7 +16,7 @@ import { PageShell } from "@/components/ui/PageShell";
 // ✅ Para ref (evita depender de si kit Input tiene forwardRef o no)
 import { Input as RefInput } from "@/components/ui/input";
 
-import { formatMoney as fmtMoney, formatDateDisplay, toNumberSafe } from "@/lib/format";
+import { formatDateDisplay, toNumberSafe } from "@/lib/format";
 import { useFamilyContext } from "@/hooks/useFamilyContext";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { generateMonthlyPdfReport } from "@/lib/premium/monthlyPdfReport";
@@ -285,6 +285,7 @@ export default function GastosPage() {
   const canUseFamilyScope = Boolean(familyCtx && isFamilyOwner);
   const [viewScope, setViewScope] = useState<"mine" | "family">("mine");
   const { dictionary, locale } = useI18n();
+  const t = dictionary.expenses;
 
   // miembros para labels bonitos
   const [membersByUserId, setMembersByUserId] = useState<
@@ -398,7 +399,15 @@ export default function GastosPage() {
   const draftTimer = useRef<number | null>(null);
   const editFormCardRef = useRef<HTMLElement | null>(null);
 
-  const formatMoney = (n: number) => fmtMoney(n, "MXN");
+  const formatMoney = useCallback(
+    (n: number) =>
+      (Number.isFinite(n) ? n : 0).toLocaleString(locale, {
+        style: "currency",
+        currency: "MXN",
+        minimumFractionDigits: 2,
+      }),
+    [locale]
+  );
 
   // =========================================================
   // AUTH
@@ -480,7 +489,7 @@ export default function GastosPage() {
         setAuthError(prettySupabaseAuthError(error.message));
         return;
       }
-      alert("Cuenta creada. Revisa tu correo si tienes verificación activada.");
+      alert(t.accountCreated);
       setAuthMode("login");
       setAuthPassword("");
     } catch (err: any) {
@@ -665,7 +674,7 @@ const offlineMapped: Tx[] = offline.map((t) => ({
 
         localStorage.setItem(cacheKey, JSON.stringify(data ?? []));
       } catch (err) {
-        if (!cancelled) setError("No se pudieron cargar los movimientos.");
+        if (!cancelled) setError(t.alerts.loadMovements);
 
         try {
           const cache = localStorage.getItem(cacheKey);
@@ -681,7 +690,7 @@ const offlineMapped: Tx[] = offline.map((t) => ({
     return () => {
       cancelled = true;
     };
-  }, [month, user, viewScope, canUseFamilyScope, familyCtx?.familyId, familyCtx?.activeMemberUserIds]);
+  }, [month, user, viewScope, canUseFamilyScope, familyCtx?.familyId, familyCtx?.activeMemberUserIds, t.alerts.loadMovements]);
 
   // =========================================================
   // Sync offline al volver internet
@@ -741,7 +750,7 @@ const offlineMapped: Tx[] = offline.map((t) => ({
   const handleSaveBudget = () => {
     const val = toNumberSafe(budgetInput);
     if (!Number.isFinite(val) || val <= 0) {
-      alert("Ingresa un presupuesto válido mayor a 0.");
+      alert(t.alerts.validBudget);
       return;
     }
     setBudget(val);
@@ -1155,44 +1164,44 @@ if (!key) return;
     const lines: string[] = [];
 
     if (!transactions.length) {
-      lines.push("Tu resumen aparecerá cuando registres los primeros movimientos del mes.");
+      lines.push(t.smart.empty);
       return lines;
     }
 
     if (totalIngresos === 0 && totalGastos > 0) {
-      lines.push("Este mes solo has registrado gastos, pero ningún ingreso. Revisa si falta capturar tu sueldo o ingresos principales.");
+      lines.push(t.smart.onlyExpenses);
     }
 
     if (totalIngresos > 0) {
       const ratio = (totalGastos / totalIngresos) * 100;
-      lines.push(`Has gastado aproximadamente el ${ratio.toFixed(1)}% de tus ingresos del mes.`);
+      lines.push(t.smart.ratio(ratio.toFixed(1)));
 
-      if (ratio > 90) lines.push("Estás muy cerca de gastar todo lo que ingresaste. Sería bueno frenar un poco los gastos en lo que resta del mes.");
-      else if (ratio > 70) lines.push("Tu nivel de gasto es elevado, pero aún tienes margen. Vale la pena revisar en qué se está yendo la mayor parte.");
-      else if (ratio < 50) lines.push("Vas muy bien. Estás gastando menos de la mitad de lo que ingresaste este mes.");
+      if (ratio > 90) lines.push(t.smart.highRatio);
+      else if (ratio > 70) lines.push(t.smart.mediumRatio);
+      else if (ratio < 50) lines.push(t.smart.lowRatio);
     }
 
     if (budget != null) {
       if (disponible != null && disponible < 0) {
-        lines.push(`Ya sobrepasaste tu presupuesto de ${formatMoney(budget)}. Estás por encima en ${formatMoney(Math.abs(disponible))}.`);
+        lines.push(t.smart.overBudget(formatMoney(budget), formatMoney(Math.abs(disponible))));
       } else if (disponible != null && disponible > 0) {
-        lines.push(`Todavía te quedan ${formatMoney(disponible)} disponibles dentro de tu presupuesto de este mes.`);
+        lines.push(t.smart.budgetLeft(formatMoney(disponible)));
       }
     }
 
     if (gastosPorCategoria.length > 0) {
       const top1 = gastosPorCategoria[0];
-      lines.push(`Tu categoría con más gasto este mes es "${top1.category}" con ${formatMoney(top1.total)} (${top1.percent.toFixed(1)}% del total).`);
+      lines.push(t.smart.topCategory(top1.category, formatMoney(top1.total), top1.percent.toFixed(1)));
       if (gastosPorCategoria.length > 1) {
         const top2 = gastosPorCategoria[1];
-        lines.push(`La segunda categoría con más peso es "${top2.category}" con ${formatMoney(top2.total)}.`);
+        lines.push(t.smart.secondCategory(top2.category, formatMoney(top2.total)));
       }
     }
 
-    lines.push(`Impacto estimado en tu patrimonio este mes: ${formatMoney(flujo)} (flujo neto del mes).`);
+    lines.push(t.smart.netWorthImpact(formatMoney(flujo)));
 
     return lines;
-  }, [transactions, totalIngresos, totalGastos, budget, disponible, gastosPorCategoria, flujo]);
+  }, [transactions, totalIngresos, totalGastos, budget, disponible, gastosPorCategoria, flujo, t.smart, formatMoney]);
 
   const monthLabel = useMemo(() => {
     const [y, m] = month.split("-");
@@ -1210,18 +1219,18 @@ if (!key) return;
     else if (exportType === "gastos") data = transactions.filter((t) => t.type === "gasto");
 
     if (!data.length) {
-      alert("No hay movimientos en este mes con ese filtro para exportar.");
+      alert(t.alerts.noCsvData);
       return;
     }
 
-    const header = ["Fecha", "Tipo", "Categoría", "Monto", "Método", "Notas", "Offline"];
-    const rows = data.map((t) => [t.date, t.type, t.category, t.amount, t.method, t.notes ?? "", t.localOnly ? "sí" : "no"]);
+    const header = t.csv.headers;
+    const rows = data.map((tx) => [tx.date, tx.type, tx.category, tx.amount, tx.method, tx.notes ?? "", tx.localOnly ? t.csv.yes : "no"]);
     const csvLines = [header.map(csvEscape).join(","), ...rows.map((r) => r.map(csvEscape).join(","))];
 
     if (exportIncludeCategorySummary && gastosPorCategoria.length > 0 && exportType !== "ingresos") {
       csvLines.push("");
-      csvLines.push("Resumen de gastos por categoría");
-      csvLines.push("Categoría,Total,Porcentaje");
+      csvLines.push(t.csv.categorySummary);
+      csvLines.push(t.csv.categorySummaryHeader);
       gastosPorCategoria.forEach((item) => {
         csvLines.push([csvEscape(item.category), csvEscape(item.total), csvEscape(`${item.percent.toFixed(1)}%`)].join(","));
       });
@@ -1231,7 +1240,7 @@ if (!key) return;
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const fileMonth = month.replace("-", "_");
-    const exportLabel = exportType === "todos" ? "todos" : exportType === "ingresos" ? "ingresos" : "gastos";
+    const exportLabel = exportType === "todos" ? t.csv.all : exportType === "ingresos" ? t.csv.income : t.csv.expenses;
     const fileName = `finanzas_${fileMonth}_${exportLabel}.csv`;
 
     const link = document.createElement("a");
@@ -1276,13 +1285,13 @@ if (!key) return;
     setError(null);
 
     if (!user) {
-      alert("Debes iniciar sesión para guardar movimientos.");
+      alert(t.alerts.saveLogin);
       return;
     }
 
     const amountNumber = toNumberSafe(form.amount);
-    if (!form.date) return alert("Selecciona una fecha.");
-    if (!Number.isFinite(amountNumber) || amountNumber <= 0) return alert("Ingresa un monto válido mayor a 0.");
+    if (!form.date) return alert(t.alerts.selectDate);
+    if (!Number.isFinite(amountNumber) || amountNumber <= 0) return alert(t.alerts.validAmount);
 
     const spenderLabel = form.spenderLabel || "Yo";
     const goalId = form.goalId || "";
@@ -1589,7 +1598,7 @@ if (!key) return;
 
   const handleToggleCardSharing = async (cardId: string, current: boolean | null | undefined) => {
     if (!user || !familyCtx) return;
-    if (!canUseFamilyScope) return alert("Sólo el administrador familiar puede cambiar si una tarjeta se comparte o no.");
+    if (!canUseFamilyScope) return alert(t.alerts.familyAdminOnly);
 
     const newValue = !current;
     const ownerId = familyCtx?.ownerUserId ?? user.id;
@@ -1600,7 +1609,7 @@ if (!key) return;
       setCards((prev) => prev.map((c) => (c.id === cardId ? { ...c, shared_with_family: newValue } : c)));
     } catch (err) {
       console.error("Error actualizando tarjeta compartida:", err);
-      alert("No se pudo actualizar si la tarjeta está compartida con la familia.");
+      alert(t.alerts.cardShare);
     }
   };
 
@@ -1617,7 +1626,7 @@ if (!key) return;
   if (authLoading) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
-        Cargando sesión…
+        {dictionary.common.loadingSession}
       </div>
     );
   }
@@ -1629,46 +1638,46 @@ if (!key) return;
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-lg font-semibold">RINDAY</h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Claridad financiera para tu familia.</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{t.brandSubtitle}</p>
             </div>
             <ThemeToggle />
           </div>
 
-          <h2 className="text-sm font-medium">{authMode === "login" ? "Inicia sesión" : "Crea tu cuenta"}</h2>
+          <h2 className="text-sm font-medium">{authMode === "login" ? dictionary.common.login : dictionary.common.signup}</h2>
 
           <form onSubmit={authMode === "login" ? handleSignIn : handleSignUp} className="space-y-3 text-sm">
             <div>
-              <Label>Correo electrónico</Label>
-              <UIInput type="email" required value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="tucorreo@ejemplo.com" />
+              <Label>{t.email}</Label>
+              <UIInput type="email" required value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder={t.emailPlaceholder} />
             </div>
 
             <div>
-              <Label>Contraseña</Label>
-              <UIInput type="password" required value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
+              <Label>{t.password}</Label>
+              <UIInput type="password" required value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder={t.passwordPlaceholder} />
             </div>
 
             {authError && <p className="text-xs text-rose-500">{authError}</p>}
 
-            <Button type="submit">{authMode === "login" ? "Entrar" : "Crear cuenta"}</Button>
+            <Button type="submit">{authMode === "login" ? t.enter : dictionary.common.signup}</Button>
           </form>
 
           <div className="text-center text-xs text-slate-600 dark:text-slate-300">
             {authMode === "login" ? (
               <>
-                ¿No tienes cuenta?{" "}
+                {t.noAccount}{" "}
                 <button className="text-sky-600 underline" onClick={() => { setAuthMode("signup"); setAuthError(null); }}>
-                  Crear una nueva
+                  {t.createNew}
                 </button>
                 <span className="mx-2 text-slate-300 dark:text-slate-700">·</span>
                 <a href="/auth/reset-password" className="text-sky-600 underline">
-                  Olvidé mi contraseña
+                  {t.forgotPassword}
                 </a>
               </>
             ) : (
               <>
-                ¿Ya tienes cuenta?{" "}
+                {t.alreadyAccount}{" "}
                 <button className="text-sky-600 underline" onClick={() => { setAuthMode("login"); setAuthError(null); }}>
-                  Inicia sesión
+                  {dictionary.common.login}
                 </button>
               </>
             )}
@@ -1684,8 +1693,8 @@ if (!key) return;
   return (
     <PageShell>
       <AppHeader
-        title="Gastos e ingresos"
-        subtitle="Aquí capturas todos los movimientos del día a día."
+        title={t.title}
+        subtitle={t.subtitle}
         activeTab="gastos"
         userName={(user.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user.email}
@@ -1696,8 +1705,8 @@ if (!key) return;
       {/* Controles mes + export + scope + conexión */}
       <Card>
         <Section
-          title="Mes"
-          subtitle="Elige el mes, exporta y alterna entre tu vista personal y familiar cuando aplique."
+          title={t.monthTitle}
+          subtitle={t.monthSubtitle}
           right={
             <div className="flex flex-col items-end gap-2">
               <div
@@ -1708,23 +1717,23 @@ if (!key) return;
                 }`}
               >
                 <span className={`h-2 w-2 rounded-full ${isOnline ? "bg-green-500" : "bg-yellow-500"}`} />
-                {isOnline ? "Conectado" : "Sin conexión (modo local)"}
+                {isOnline ? t.connectionOnline : t.connectionOffline}
               </div>
 
               {familyCtx && canUseFamilyScope ? (
                 <SegmentedControl<"mine" | "family">
                   value={viewScope}
                   onChange={(v) => setViewScope(v)}
-                  label="Vista"
-                  help="Familia suma movimientos de miembros activos."
+                  label={t.view}
+                  help={t.viewHelp}
                   options={[
-                    { value: "mine", label: "Solo yo" },
-                    { value: "family", label: "Familia" },
+                    { value: "mine", label: t.mine },
+                    { value: "family", label: t.family },
                   ]}
                 />
               ) : familyCtx ? (
                 <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
-                  Vista “Familia” solo para el administrador familiar.
+                  {t.familyAdminOnly}
                 </div>
               ) : null}
             </div>
@@ -1732,29 +1741,29 @@ if (!key) return;
         >
           <div className="grid gap-3 md:grid-cols-3 md:items-end">
             <div>
-              <Label>Mes</Label>
-              <UIInput type="month" value={month} onChange={(e) => setMonth(e.target.value)} aria-label={`Mes: ${monthLabel}`} />
+              <Label>{t.monthTitle}</Label>
+              <UIInput type="month" value={month} onChange={(e) => setMonth(e.target.value)} aria-label={`${t.monthTitle}: ${monthLabel}`} />
             </div>
 
             <div className="flex gap-2">
               <Button type="button" variant="secondary" onClick={() => setShowExportOptions((v) => !v)}>
-                {showExportOptions ? "Cerrar exportar" : "Exportar"}
+                {showExportOptions ? t.exportClose : t.export}
               </Button>
 
-              <Button type="button" onClick={() => (window.location.href = "/patrimonio")} title="Ir a Patrimonio">
-                Ver Patrimonio
+              <Button type="button" onClick={() => (window.location.href = "/patrimonio")} title={t.viewNetWorth}>
+                {t.viewNetWorth}
               </Button>
             </div>
 
             <div className="text-[11px] text-slate-500 dark:text-slate-400">
-              {familyLoading ? "Cargando familia…" : familyError ? familyError : familyCtx ? `Familia: ${familyCtx.familyName}` : "Sin familia vinculada"}
+              {familyLoading ? t.loadingFamily : familyError ? familyError : familyCtx ? `${t.familyPrefix}: ${familyCtx.familyName}` : t.noLinkedFamily}
             </div>
           </div>
 
           {showExportOptions && (
             <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-950">
               <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Exportar movimientos
+                {t.exportMovements}
               </div>
 
               <div className="space-y-2">
@@ -1770,7 +1779,7 @@ if (!key) return;
                           : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                       }`}
                     >
-                      {t === "todos" ? "Todos" : t === "ingresos" ? "Solo ingresos" : "Solo gastos"}
+                      {t === "todos" ? dictionary.expenses.all : t === "ingresos" ? dictionary.expenses.onlyIncome : dictionary.expenses.onlyExpenses}
                     </button>
                   ))}
                 </div>
@@ -1783,13 +1792,13 @@ if (!key) return;
                     onChange={(e) => setExportIncludeCategorySummary(e.target.checked)}
                   />
                   <span className="text-[11px] text-slate-700 dark:text-slate-200">
-                    Incluir resumen de gastos por categoría al final
+                    {t.includeCategorySummary}
                   </span>
                 </label>
 
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={handleExportCsv} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700">
-                    Descargar CSV
+                    {t.downloadCsv}
                   </button>
                   <button
                     type="button"
@@ -1808,22 +1817,22 @@ if (!key) return;
 
       {/* KPIs */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Ingresos del mes" value={formatMoney(totalIngresos)} tone="good" />
-        <StatCard label="Gastos del mes" value={formatMoney(totalGastos)} tone="bad" />
-        <StatCard label="Flujo (Ingresos - Gastos)" value={formatMoney(flujo)} tone={flujo >= 0 ? "good" : "bad"} />
+        <StatCard label={t.monthlyIncome} value={formatMoney(totalIngresos)} tone="good" />
+        <StatCard label={t.monthlyExpenses} value={formatMoney(totalGastos)} tone="bad" />
+        <StatCard label={t.monthlyFlow} value={formatMoney(flujo)} tone={flujo >= 0 ? "good" : "bad"} />
         <Card>
-          <Section title="Presupuesto del mes" subtitle="Guarda tu tope mensual (local en este dispositivo).">
+          <Section title={t.monthlyBudget} subtitle={t.budgetSubtitle}>
             <div className="flex gap-2">
-              <UIInput type="number" value={budgetInput} onChange={(e) => setBudgetInput(e.target.value)} placeholder="Ej. 50000" />
+              <UIInput type="number" value={budgetInput} onChange={(e) => setBudgetInput(e.target.value)} placeholder={t.budgetPlaceholder} />
               {String(budget ?? "") !== budgetInput && (
                 <Button type="button" onClick={handleSaveBudget} className="w-auto px-4">
-                  Guardar
+                  {t.save}
                 </Button>
               )}
             </div>
             {budget != null && (
               <div className={`mt-2 text-xs ${disponible != null && disponible < 0 ? "text-rose-500" : "text-emerald-600 dark:text-emerald-400"}`}>
-                Disponible: {disponible != null ? formatMoney(disponible) : "-"}
+                {t.available}: {disponible != null ? formatMoney(disponible) : "-"}
               </div>
             )}
           </Section>
@@ -1832,9 +1841,9 @@ if (!key) return;
 
       {/* Resumen inteligente */}
       <Card>
-        <Section title="Resumen inteligente del mes" subtitle="Incluye impacto estimado a Patrimonio (flujo neto).">
+        <Section title={t.smartSummaryTitle} subtitle={t.smartSummarySubtitle}>
           {smartSummary.length === 0 ? (
-            <EmptyState>Tu resumen inteligente aparecerá cuando haya suficientes movimientos del mes.</EmptyState>
+            <EmptyState>{t.smartSummaryEmpty}</EmptyState>
           ) : (
             <ul className="list-disc space-y-1 pl-5 text-xs text-slate-700 dark:text-slate-200">
               {smartSummary.map((line, idx) => (
@@ -1848,18 +1857,18 @@ if (!key) return;
       {/* Tarjetas */}
       <Card>
         <Section
-          title="Tarjetas ligadas"
-          subtitle="Si las compartes, los gastos de tu familia con esa tarjeta también se reflejan en tu resumen."
+          title={t.cardsTitle}
+          subtitle={t.cardsSubtitle}
           right={
             <Button type="button" variant="secondary" onClick={() => setShowCardsList((v) => !v)} className="w-auto">
-              {showCardsList ? "Ocultar" : `Ver (${cards.length})`}
+              {showCardsList ? t.hide : `${t.show} (${cards.length})`}
             </Button>
           }
         >
           <form onSubmit={handleAddCard} className="mt-2 grid gap-3 md:grid-cols-3 md:items-end">
             <div className="md:col-span-2">
-              <Label>Nombre de la tarjeta</Label>
-              <UIInput value={newCardName} onChange={(e) => setNewCardName(e.target.value)} placeholder="Ej. BBVA Negra David, Amex Platino…" />
+              <Label>{t.cardName}</Label>
+              <UIInput value={newCardName} onChange={(e) => setNewCardName(e.target.value)} placeholder={t.cardPlaceholder} />
               {familyCtx && canUseFamilyScope && (
                 <label className="mt-2 flex items-start gap-2">
                   <input
@@ -1869,7 +1878,7 @@ if (!key) return;
                     onChange={(e) => setNewCardShared(e.target.checked)}
                   />
                   <span className="text-[11px] text-slate-600 dark:text-slate-300">
-                    Compartir esta tarjeta con mi familia
+                    {t.shareCard}
                   </span>
                 </label>
               )}
@@ -1877,15 +1886,15 @@ if (!key) return;
             </div>
 
             <Button type="submit" disabled={savingCard}>
-              {savingCard ? "Guardando…" : "Agregar tarjeta"}
+              {savingCard ? t.saving : t.addCard}
             </Button>
           </form>
 
           <div className="mt-4">
             {!showCardsList ? (
-              <EmptyState>La lista está guardada para mantener esta vista enfocada.</EmptyState>
+              <EmptyState>{t.cardsHidden}</EmptyState>
             ) : cards.length === 0 ? (
-              <EmptyState>Agrega una tarjeta para ver tus pagos con más claridad.</EmptyState>
+              <EmptyState>{t.noCards}</EmptyState>
             ) : (
               <ul className="space-y-2">
                 {cards.map((c) => (
@@ -1895,7 +1904,7 @@ if (!key) return;
                       <>
                         <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{c.name}</div>
                         <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                          Estado: {c.shared_with_family ? "Compartida" : "Solo tú"}
+                          {t.status}: {c.shared_with_family ? t.shared : t.onlyYou}
                         </div>
                       </>
                     }
@@ -1907,11 +1916,11 @@ if (!key) return;
                             onClick={() => handleToggleCardSharing(c.id, c.shared_with_family)}
                             className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                           >
-                            {c.shared_with_family ? "Dejar de compartir" : "Compartir con familia"}
+                            {c.shared_with_family ? t.stopSharing : t.shareWithFamily}
                           </button>
                         )}
                         <LinkButton tone="danger" onClick={() => handleDeleteCard(c.id)}>
-                          Eliminar
+                          {t.delete}
                         </LinkButton>
                       </div>
                     }
@@ -1926,20 +1935,20 @@ if (!key) return;
       {/* Gráficas */}
 <Card>
   <Section
-    title="Gráficas"
-    subtitle="Visualiza categorías y tendencia por día."
+    title={t.chartsTitle}
+    subtitle={t.chartsSubtitle}
     right={
       <button
         type="button"
         onClick={() => setShowCharts((v) => !v)}
         className="rounded-lg bg-sky-500 px-3 py-2 text-xs font-medium text-white hover:bg-sky-600"
       >
-        {showCharts ? "Ocultar" : "Ver"}
+        {showCharts ? t.hide : t.show}
       </button>
     }
   >
     {!showCharts ? (
-      <EmptyState>Tus gráficas están guardadas para cuando quieras revisar tendencias.</EmptyState>
+      <EmptyState>{t.chartsHidden}</EmptyState>
     ) : (
       <GastosCharts
         isDark={isDark}
@@ -1957,18 +1966,18 @@ if (!key) return;
         className={editingId ? "scroll-mt-24 border-sky-300 bg-sky-50/60 ring-2 ring-sky-500/20 dark:border-sky-700 dark:bg-sky-950/30 dark:ring-sky-400/20" : "scroll-mt-24"}
       >
         <Section
-          title={editingId ? "Editar movimiento" : "Agregar movimiento"}
-          subtitle="Atajos: ⌘/Ctrl+Enter guardar · Esc cancelar · ⌘/Ctrl+K buscar"
-          right={editingId ? <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-700 dark:bg-sky-900/60 dark:text-sky-200">Editando ahora</span> : null}
+          title={editingId ? t.editMovement : t.addMovement}
+          subtitle={t.shortcuts}
+          right={editingId ? <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-700 dark:bg-sky-900/60 dark:text-sky-200">{t.editingNow}</span> : null}
         >
           {editingId && (
             <div className="rounded-2xl border border-sky-200 bg-white/80 px-3 py-2 text-[11px] font-medium text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
-              Estás editando un movimiento existente. Guarda cambios o cancela para salir de este modo.
+              {t.editingHelp}
             </div>
           )}
           {!editingId && (
             <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px]">
-              <span className="text-slate-400 dark:text-slate-500">Plantillas:</span>
+              <span className="text-slate-400 dark:text-slate-500">{t.templates}</span>
               {QUICK_TEMPLATES.map((tpl) => (
                 <button
                   key={tpl.id}
@@ -1987,7 +1996,7 @@ if (!key) return;
                 }}
                 className="rounded-full bg-slate-900 px-3 py-1 text-[11px] font-medium text-white hover:bg-black dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
               >
-                Limpiar
+                {t.clear}
               </button>
             </div>
           )}
@@ -1995,9 +2004,9 @@ if (!key) return;
           <form id="ff-gastos-form" onSubmit={handleSubmit} className="space-y-4">
             <div className="grid gap-3 md:grid-cols-7">
               <div className="md:col-span-2">
-                <Label>Tarjeta</Label>
+                <Label>{t.card}</Label>
                 <Select value={selectedCardId ?? ""} onChange={(e) => handleChangeCard(e.target.value ? e.target.value : null)}>
-                  <option value="">Sin tarjeta específica</option>
+                  <option value="">{t.noSpecificCard}</option>
                   {cards.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -2010,21 +2019,21 @@ if (!key) return;
                 <SegmentedControl<TxType>
                   value={form.type}
                   onChange={(v) => handleChangeForm("type", v)}
-                  label="Tipo"
+                  label={t.type}
                   options={[
-                    { value: "ingreso", label: "Ingreso" },
-                    { value: "gasto", label: "Gasto" },
+                    { value: "ingreso", label: t.income },
+                    { value: "gasto", label: t.expense },
                   ]}
                 />
               </div>
 
               <div>
-                <Label>Fecha</Label>
+                <Label>{t.date}</Label>
                 <UIInput type="date" value={form.date} onChange={(e) => handleChangeForm("date", e.target.value)} />
               </div>
 
               <div>
-                <Label>Categoría</Label>
+                <Label>{t.category}</Label>
                 <Select value={form.category} onChange={(e) => handleChangeForm("category", e.target.value)}>
                   {categories.map((c) => (
                     <option key={c.value} value={c.value}>
@@ -2035,12 +2044,12 @@ if (!key) return;
               </div>
 
               <div>
-                <Label>Monto</Label>
+                <Label>{t.amount}</Label>
                 <UIInput type="number" step="0.01" value={form.amount} onChange={(e) => handleChangeForm("amount", e.target.value)} placeholder="0.00" />
               </div>
 
               <div>
-                <Label>Método</Label>
+                <Label>{t.method}</Label>
                 <Select value={form.method} onChange={(e) => handleChangeForm("method", e.target.value)}>
                   {methods.map((m) => (
                     <option key={m.value} value={m.value}>
@@ -2051,7 +2060,7 @@ if (!key) return;
               </div>
 
               <div>
-                <Label>Quién generó</Label>
+                <Label>{t.spender}</Label>
                 <Select value={form.spenderLabel} onChange={(e) => handleChangeForm("spenderLabel", e.target.value)}>
                   {SPENDER_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -2063,9 +2072,9 @@ if (!key) return;
             </div>
 
             <div className="flex items-center justify-between">
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">Opciones avanzadas</div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">{t.advancedOptions}</div>
               <button type="button" onClick={() => setShowAdvanced((v) => !v)} className="text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400">
-                {showAdvanced ? "Ocultar" : "Mostrar"}
+                {showAdvanced ? t.hide : t.showAdvanced}
               </button>
             </div>
 
@@ -2073,29 +2082,29 @@ if (!key) return;
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950">
                 <div className="grid gap-3 md:grid-cols-2">
                   <div>
-                    <Label>Objetivo familiar (opcional)</Label>
+                    <Label>{t.familyGoalOptional}</Label>
                     <Select value={form.goalId} onChange={(e) => handleChangeForm("goalId", e.target.value)}>
-                      <option value="">Sin objetivo</option>
+                      <option value="">{t.noGoal}</option>
                       {goals.map((g) => (
                         <option key={g.id} value={g.id}>
                           {g.name}
                         </option>
                       ))}
                     </Select>
-                    <Help>Si eliges una meta, este movimiento contará para el avance del dashboard familiar.</Help>
+                    <Help>{t.goalHelp}</Help>
                   </div>
 
                   <div>
-                    <Label>Notas</Label>
-                    <Textarea value={form.notes} onChange={(e) => handleChangeForm("notes", e.target.value)} placeholder="Descripción, quién pagó, folio, etc." />
+                    <Label>{t.notes}</Label>
+                    <Textarea value={form.notes} onChange={(e) => handleChangeForm("notes", e.target.value)} placeholder={t.notesPlaceholder} />
                   </div>
                 </div>
 
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   <div>
-                    <Label>Nueva categoría</Label>
+                    <Label>{t.newCategory}</Label>
                     <div className="flex gap-2">
-                      <UIInput value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="Ej. Vacaciones…" />
+                      <UIInput value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder={t.newCategoryPlaceholder} />
                       <Button type="button" className="w-auto px-4" onClick={handleAddCategory}>
                         +
                       </Button>
@@ -2103,9 +2112,9 @@ if (!key) return;
                   </div>
 
                   <div>
-                    <Label>Nuevo método</Label>
+                    <Label>{t.newMethod}</Label>
                     <div className="flex gap-2">
-                      <UIInput value={newMethod} onChange={(e) => setNewMethod(e.target.value)} placeholder="Ej. Tarjeta Amazon…" />
+                      <UIInput value={newMethod} onChange={(e) => setNewMethod(e.target.value)} placeholder={t.newMethodPlaceholder} />
                       <Button type="button" className="w-auto px-4" onClick={handleAddMethod}>
                         +
                       </Button>
@@ -2117,12 +2126,12 @@ if (!key) return;
 
             <div className="flex flex-wrap items-center gap-3">
               <Button type="submit" disabled={saving}>
-                {saving ? "Guardando…" : editingId ? "Guardar cambios" : "Agregar"}
+                {saving ? t.saving : editingId ? t.saveChanges : t.add}
               </Button>
 
               {editingId && (
                 <Button type="button" variant="secondary" onClick={() => { resetForm(); setShowAdvanced(false); }}>
-                  Cancelar edición
+                  {t.cancelEdit}
                 </Button>
               )}
 
@@ -2134,31 +2143,31 @@ if (!key) return;
 
       {/* Filtros */}
       <Card>
-        <Section title="Filtros de movimientos" subtitle="Los totales se calculan con los movimientos filtrados.">
+        <Section title={t.filtersTitle} subtitle={t.filtersSubtitle}>
           <div className="grid gap-4 md:grid-cols-3">
-            <StatCard label="Ingresos filtrados" value={formatMoney(filteredIngresos)} tone="good" />
-            <StatCard label="Gastos filtrados" value={formatMoney(filteredGastos)} tone="bad" />
-            <StatCard label="Flujo filtrado" value={formatMoney(filteredFlujo)} tone={filteredFlujo >= 0 ? "good" : "bad"} />
+            <StatCard label={t.filteredIncome} value={formatMoney(filteredIngresos)} tone="good" />
+            <StatCard label={t.filteredExpenses} value={formatMoney(filteredGastos)} tone="bad" />
+            <StatCard label={t.filteredFlow} value={formatMoney(filteredFlujo)} tone={filteredFlujo >= 0 ? "good" : "bad"} />
           </div>
 
           <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-            Calculados con <span className="font-semibold">{filteredTransactions.length}</span> movimientos.
+            {t.calculatedWith} <span className="font-semibold">{filteredTransactions.length}</span> {t.movementsLower}.
           </p>
 
           <div className="mt-3 grid gap-3 md:grid-cols-4">
             <div>
-              <Label>Tipo</Label>
+              <Label>{t.type}</Label>
               <Select value={filterType} onChange={(e) => setFilterType(e.target.value as any)}>
-                <option value="todos">Todos</option>
-                <option value="ingreso">Ingresos</option>
-                <option value="gasto">Gastos</option>
+                <option value="todos">{t.all}</option>
+                <option value="ingreso">{t.income}</option>
+                <option value="gasto">{t.expense}</option>
               </Select>
             </div>
 
             <div>
-              <Label>Categoría</Label>
+              <Label>{t.category}</Label>
               <Select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
-                <option value="TODAS">Todas</option>
+                <option value="TODAS">{t.allCategories}</option>
                 {categories.map((c) => (
                   <option key={c.value} value={c.value}>
                     {c.label}
@@ -2168,9 +2177,9 @@ if (!key) return;
             </div>
 
             <div>
-              <Label>Método</Label>
+              <Label>{t.method}</Label>
               <Select value={filterMethod} onChange={(e) => setFilterMethod(e.target.value)}>
-                <option value="TODOS">Todos</option>
+                <option value="TODOS">{t.allMethods}</option>
                 {methods.map((m) => (
                   <option key={m.value} value={m.value}>
                     {m.label}
@@ -2180,12 +2189,12 @@ if (!key) return;
             </div>
 
             <div>
-              <Label>Buscar</Label>
+              <Label>{t.search}</Label>
               <RefInput
                 ref={searchInputRef}
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
-                placeholder="Notas, categoría, fecha..."
+                placeholder={t.searchPlaceholder}
               />
             </div>
           </div>
@@ -2194,9 +2203,9 @@ if (!key) return;
 
       {/* Visor por categoría */}
       <Card>
-        <Section title="Gastos por categoría" subtitle="Distribución del mes actual.">
+        <Section title={t.expensesByCategory} subtitle={t.expensesByCategorySubtitle}>
           {gastosPorCategoria.length === 0 ? (
-            <EmptyState>Registra tu primer gasto y RINDAY empezará a ordenar tus categorías.</EmptyState>
+            <EmptyState>{t.expensesByCategoryEmpty}</EmptyState>
           ) : (
             <div className="space-y-2">
               {gastosPorCategoria.map((item) => (
@@ -2222,18 +2231,18 @@ if (!key) return;
       {viewScope === "family" && canUseFamilyScope && familyCtx && (
         <Card>
           <Section
-            title="Gastos por persona (familia)"
-            subtitle="Sólo gastos del mes actual, por quién generó."
+            title={t.expensesByPerson}
+            subtitle={t.expensesByPersonSubtitle}
             right={
               <button type="button" onClick={() => setShowGastosPorPersona((v) => !v)} className="text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400">
-                {showGastosPorPersona ? "Ocultar" : "Ver"}
+                {showGastosPorPersona ? t.hide : t.show}
               </button>
             }
           >
             {!showGastosPorPersona ? (
-              <EmptyState>Esta vista está guardada para cuando quieras revisar el gasto por persona.</EmptyState>
+              <EmptyState>{t.expensesByPersonHidden}</EmptyState>
             ) : gastosPorPersona.length === 0 ? (
-              <EmptyState>Cuando haya gastos familiares este mes, aquí verás cómo se distribuyen por persona.</EmptyState>
+              <EmptyState>{t.expensesByPersonEmpty}</EmptyState>
             ) : (
               <div className="space-y-2">
                 {gastosPorPersona.map((item) => (
@@ -2258,27 +2267,27 @@ if (!key) return;
 
       {/* Tabla */}
       <Card>
-        <Section title={`Movimientos de ${month}`} subtitle={`Mostrando ${filteredTransactions.length} de ${transactions.length} movimientos`}>
+        <Section title={`${t.movementsOf} ${month}`} subtitle={`${t.showing} ${filteredTransactions.length} ${t.of} ${transactions.length} ${t.movementsLower}`}>
           <div className="overflow-x-auto">
             <table className="min-w-[980px] w-full border border-slate-200 text-left text-xs dark:border-slate-700 md:text-sm">
               <thead className="bg-slate-50 dark:bg-slate-900">
                 <tr>
-                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Fecha</th>
-                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Tipo</th>
-                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Categoría</th>
-                  <th className="border-b border-slate-200 px-2 py-2 text-right dark:border-slate-700">Monto</th>
-                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Método</th>
-                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Tarjeta</th>
-                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Generó</th>
-                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">Notas</th>
-                  <th className="border-b border-slate-200 px-2 py-2 text-center dark:border-slate-700">Acciones</th>
+                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">{t.table.date}</th>
+                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">{t.table.type}</th>
+                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">{t.table.category}</th>
+                  <th className="border-b border-slate-200 px-2 py-2 text-right dark:border-slate-700">{t.table.amount}</th>
+                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">{t.table.method}</th>
+                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">{t.table.card}</th>
+                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">{t.table.spender}</th>
+                  <th className="border-b border-slate-200 px-2 py-2 dark:border-slate-700">{t.table.notes}</th>
+                  <th className="border-b border-slate-200 px-2 py-2 text-center dark:border-slate-700">{t.table.actions}</th>
                 </tr>
               </thead>
               <tbody>
                 {loading && (
                   <tr>
                     <td colSpan={9} className="py-4 text-center text-slate-500 dark:text-slate-400">
-                      Cargando movimientos…
+                      {t.table.loading}
                     </td>
                   </tr>
                 )}
@@ -2286,7 +2295,7 @@ if (!key) return;
                 {!loading && filteredTransactions.length === 0 && (
                   <tr>
                     <td colSpan={9} className="py-4 text-center text-slate-500 dark:text-slate-400">
-                      No encontramos movimientos con estos filtros.
+                      {t.table.empty}
                     </td>
                   </tr>
                 )}
@@ -2313,7 +2322,7 @@ if (!key) return;
                                 : "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200"
                             }`}
                           >
-                            {t.type === "ingreso" ? "Ingreso" : "Gasto"}
+                            {t.type === "ingreso" ? dictionary.expenses.income : dictionary.expenses.expense}
                           </span>
                         </td>
 
@@ -2326,7 +2335,7 @@ if (!key) return;
                             </span>
                             {t.localOnly && (
                               <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-[10px] font-medium text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200">
-                                Offline
+                                {dictionary.expenses.table.offline}
                               </span>
                             )}
                           </div>
@@ -2355,7 +2364,7 @@ if (!key) return;
                         <td className="border-t border-slate-200 px-2 py-2 dark:border-slate-700">
                           {goal && (
                             <span className="mb-0.5 mr-1 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">
-                              Meta: {goal.name}
+                              {dictionary.expenses.table.goal}: {goal.name}
                             </span>
                           )}
 
@@ -2370,15 +2379,15 @@ if (!key) return;
 
                         <td className="border-t border-slate-200 px-2 py-2 text-center dark:border-slate-700">
                           <button type="button" onClick={() => handleEdit(t)} className="mr-2 text-xs text-sky-600 hover:underline">
-                            Editar
+                            {dictionary.expenses.table.edit}
                           </button>
 
                           <button type="button" onClick={() => handleDuplicate(t)} className="mr-2 text-xs text-slate-600 hover:underline dark:text-slate-300">
-                            Duplicar
+                            {dictionary.expenses.table.duplicate}
                           </button>
 
                           <button type="button" onClick={() => handleDelete(t)} className="text-xs text-rose-600 hover:underline">
-                            Eliminar
+                            {dictionary.expenses.table.delete}
                           </button>
                         </td>
                       </tr>
