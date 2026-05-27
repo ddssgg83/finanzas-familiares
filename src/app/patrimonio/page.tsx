@@ -5,8 +5,9 @@ import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
 import { PageShell } from "@/components/ui/PageShell";
-import { formatDateDisplay, formatMoney as fmtMoney, toNumberSafe } from "@/lib/format";
+import { formatDateDisplay, toNumberSafe } from "@/lib/format";
 import { useFamilyContext } from "@/hooks/useFamilyContext";
+import { useI18n } from "@/lib/i18n/useI18n";
 import {
   Button,
   Card,
@@ -235,7 +236,17 @@ function applyOpsToState(baseAssets: Asset[], baseDebts: Debt[], ops: OfflineOp[
 }
 
 export default function PatrimonioPage() {
-  const formatMoney = (n: number) => fmtMoney(n, "MXN");
+  const { dictionary, locale } = useI18n();
+  const t = dictionary.netWorthPage;
+  const formatMoney = useCallback(
+    (n: number) =>
+      (Number.isFinite(n) ? n : 0).toLocaleString(locale, {
+        style: "currency",
+        currency: "MXN",
+        minimumFractionDigits: 2,
+      }),
+    [locale]
+  );
 
   // -------- AUTH --------
   const [user, setUser] = useState<User | null>(null);
@@ -320,7 +331,7 @@ export default function PatrimonioPage() {
       } catch {
         if (!ignore) {
           setUser(null);
-          setAuthError("Hubo un problema al cargar tu sesión.");
+          setAuthError(t.errors.auth);
         }
       } finally {
         if (!ignore) setAuthLoading(false);
@@ -339,7 +350,7 @@ export default function PatrimonioPage() {
       ignore = true;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [t.errors.auth]);
 
   const handleSignOut = async () => {
     try {
@@ -545,7 +556,7 @@ export default function PatrimonioPage() {
         setDebts(patched.debts);
 
         if (assetsRes.error || debtsRes.error) {
-          setDataError("No se pudo cargar por completo el patrimonio. Se conservó la información disponible.");
+          setDataError(t.errors.partialLoad);
         }
 
         syncOfflineOps();
@@ -564,7 +575,7 @@ export default function PatrimonioPage() {
           setDataError(null);
         } else {
           console.error("Error cargando patrimonio:", err);
-          setDataError("No se pudo cargar el patrimonio. Intenta de nuevo más tarde.");
+          setDataError(t.errors.load);
         }
       } finally {
         if (alive) setLoading(false);
@@ -575,7 +586,7 @@ export default function PatrimonioPage() {
     return () => {
       alive = false;
     };
-  }, [user, familyCtx?.familyId, isFamilyView, syncOfflineOps]);
+  }, [user, familyCtx?.familyId, isFamilyView, syncOfflineOps, t.errors.load, t.errors.partialLoad]);
 
   // =========================================================
   // LOAD FLUJO DEL MES (transactions) — OFFLINE SAFE (cache)
@@ -658,7 +669,7 @@ export default function PatrimonioPage() {
         if (looksOffline) setTxError(null);
         else {
           console.error("Error cargando flujo del mes:", err);
-          setTxError("No se pudo calcular el flujo del mes desde Gastos.");
+          setTxError(t.errors.flow);
         }
       } finally {
         if (alive) setTxLoading(false);
@@ -669,7 +680,7 @@ export default function PatrimonioPage() {
     return () => {
       alive = false;
     };
-  }, [user, month, familyCtx?.familyId, isFamilyView]);
+  }, [user, month, familyCtx?.familyId, isFamilyView, t.errors.flow]);
 
   // =========================================================
   // Cálculos (patrimonio)
@@ -681,11 +692,11 @@ export default function PatrimonioPage() {
   const flujoMes = monthIngresos - monthGastos;
 
   const monthLabel = useMemo(() => {
-    const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
     const [y, m] = month.split("-");
-    const mi = Math.max(1, Math.min(12, Number(m))) - 1;
-    return `${meses[mi]} ${y}`;
-  }, [month]);
+    const date = new Date(Number(y), Number(m) - 1, 1);
+    const raw = date.toLocaleDateString(locale, { year: "numeric", month: "long" });
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+  }, [locale, month]);
 
   // =========================================================
   // Form helpers
@@ -733,11 +744,11 @@ export default function PatrimonioPage() {
   // =========================================================
   const handleSubmitAsset = async (e: FormEvent) => {
     e.preventDefault();
-    if (!user) return alert("Tu sesión expiró. Vuelve a iniciar sesión.");
+    if (!user) return alert(t.errors.expired);
 
     const val = toNumberSafe(assetForm.current_value);
     if (!assetForm.name.trim() || !Number.isFinite(val) || val < 0) {
-      return alert("Revisa el nombre y el valor del activo.");
+      return alert(t.errors.assetInvalid);
     }
 
     const familyIdToUse = familyCtx?.familyId ?? null;
@@ -865,7 +876,7 @@ export default function PatrimonioPage() {
         resetAssetForm();
       } else {
         console.error("Error guardando activo:", err);
-        alert("No se pudo guardar el activo. Intenta de nuevo.");
+        alert(t.errors.saveAsset);
       }
     } finally {
       setSavingAsset(false);
@@ -877,16 +888,16 @@ export default function PatrimonioPage() {
   // =========================================================
   const handleSubmitDebt = async (e: FormEvent) => {
     e.preventDefault();
-    if (!user) return alert("Tu sesión expiró. Vuelve a iniciar sesión.");
+    if (!user) return alert(t.errors.expired);
 
     const total = toNumberSafe(debtForm.total_amount);
     if (!debtForm.name.trim() || !Number.isFinite(total) || total < 0) {
-      return alert("Revisa el nombre y el monto total de la deuda.");
+      return alert(t.errors.debtInvalid);
     }
 
     const currentBalance = debtForm.current_balance?.trim() ? toNumberSafe(debtForm.current_balance) : total;
     if (!Number.isFinite(currentBalance) || currentBalance < 0) {
-      return alert("Revisa el saldo actual de la deuda.");
+      return alert(t.errors.debtBalanceInvalid);
     }
 
     const debtType = DEBT_TYPES.includes(debtForm.type) ? debtForm.type : "Otro";
@@ -1015,7 +1026,7 @@ export default function PatrimonioPage() {
         resetDebtForm();
       } else {
         console.error("Error guardando deuda:", err);
-        alert("No se pudo guardar la deuda.");
+        alert(t.errors.saveDebt);
       }
     } finally {
       setSavingDebt(false);
@@ -1026,7 +1037,7 @@ export default function PatrimonioPage() {
   // Delete — ONLINE + OFFLINE (optimistic + cola)
   // =========================================================
   const handleDeleteAsset = async (id: string) => {
-    if (!window.confirm("¿Seguro que quieres eliminar este activo?")) return;
+    if (!window.confirm(t.confirms.deleteAsset)) return;
     if (!user) return;
 
     const previousAssets = assets;
@@ -1071,13 +1082,13 @@ export default function PatrimonioPage() {
           writeCurrentScopeCache(previousAssets, debtsRef.current);
         }
         console.error("Error eliminando activo:", err);
-        alert("No se pudo eliminar el activo.");
+        alert(t.errors.deleteAsset);
       }
     }
   };
 
   const handleDeleteDebt = async (id: string) => {
-    if (!window.confirm("¿Seguro que quieres eliminar esta deuda?")) return;
+    if (!window.confirm(t.confirms.deleteDebt)) return;
     if (!user) return;
 
     const previousDebts = debts;
@@ -1122,7 +1133,7 @@ export default function PatrimonioPage() {
           writeCurrentScopeCache(assetsRef.current, previousDebts);
         }
         console.error("Error eliminando deuda:", err);
-        alert("No se pudo eliminar la deuda.");
+        alert(t.errors.deleteDebt);
       }
     }
   };
@@ -1160,7 +1171,7 @@ export default function PatrimonioPage() {
   if (authLoading) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
-        Cargando sesión…
+        {t.authLoading}
       </div>
     );
   }
@@ -1169,16 +1180,16 @@ export default function PatrimonioPage() {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center px-4 text-center text-sm text-slate-600 dark:text-slate-300">
         <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h1 className="text-base font-semibold text-slate-950 dark:text-slate-50">Patrimonio privado</h1>
+          <h1 className="text-base font-semibold text-slate-950 dark:text-slate-50">{t.guestTitle}</h1>
           <p className="mt-2 leading-6">
-            Inicia sesión para ver y editar tus activos, deudas y patrimonio familiar.
+            {t.guestBody}
           </p>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             <a href="/onboarding?mode=login&next=%2Fpatrimonio">
-              <Button>Iniciar sesión</Button>
+              <Button>{dictionary.common.login}</Button>
             </a>
             <a href="/onboarding?mode=signup&next=%2Fpatrimonio">
-              <LinkButton tone="info">Crear cuenta</LinkButton>
+              <LinkButton tone="info">{dictionary.common.signup}</LinkButton>
             </a>
           </div>
         </div>
@@ -1193,8 +1204,8 @@ export default function PatrimonioPage() {
   return (
     <PageShell>
       <AppHeader
-        title="Patrimonio (activos y deudas)"
-        subtitle="Foto completa de lo que tienes y lo que debes. Conectado a tu flujo mensual."
+        title={t.title}
+        subtitle={t.subtitle}
         activeTab="patrimonio"
         userName={(user.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user.email}
@@ -1207,11 +1218,11 @@ export default function PatrimonioPage() {
         <section className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200">
           {isOfflineNow() ? (
             <div>
-              Estás en <span className="font-semibold">modo offline</span>. Puedes agregar, editar o eliminar; RINDAY sincronizará los cambios cuando vuelva la conexión.
+              {t.offline}
             </div>
           ) : (
             <div>
-              Sincronizando… Cambios pendientes: <span className="font-semibold">{pendingOpsCount}</span>
+              {t.syncing} <span className="font-semibold">{pendingOpsCount}</span>
             </div>
           )}
         </section>
@@ -1221,24 +1232,24 @@ export default function PatrimonioPage() {
       <section className="space-y-4">
         <Card>
           <Section
-            title="Resumen"
-            subtitle="Aquí ves tus activos, deudas y patrimonio neto. Si eres administrador familiar, puedes cambiar la vista a patrimonio familiar."
+            title={t.summary}
+            subtitle={t.summarySubtitle}
             right={
               familyCtx && isFamilyOwner ? (
                 <SegmentedControl<ViewScope>
                   value={effectiveScope}
                   onChange={(v) => setViewScope(v)}
-                  label="Vista"
-                  help="En modo familiar se suman activos y deudas de miembros activos."
+                  label={t.view}
+                  help={t.viewHelp}
                   options={[
-                    { value: "personal", label: "Solo yo" },
-                    { value: "family", label: "Familiar" },
+                    { value: "personal", label: t.mine },
+                    { value: "family", label: t.family },
                   ]}
                 />
               ) : (
                 <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
-                  Vista actual: <span className="font-semibold">Solo tu patrimonio.</span>
-                  {familyCtx && !isFamilyOwner && <> El modo familiar solo está disponible para el administrador familiar.</>}
+                  {t.currentView} <span className="font-semibold">{t.personalOnly}</span>
+                  {familyCtx && !isFamilyOwner && <> {t.familyAdminOnly}</>}
                 </div>
               )
             }
@@ -1246,13 +1257,13 @@ export default function PatrimonioPage() {
             {familyCtx && (
               <div className="mt-2 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
                 <div>
-                  Familia: <span className="font-semibold">{familyCtx.familyName}</span>{" "}
-                  {isFamilyOwner ? "(administrador familiar)" : "(miembro)"}
+                  {t.familyLabel}: <span className="font-semibold">{familyCtx.familyName}</span>{" "}
+                  ({isFamilyOwner ? t.familyAdmin : t.member})
                 </div>
                 <div>
-                  Miembros activos: <span className="font-semibold">{familyCtx.activeMembers}</span>
+                  {t.activeMembers}: <span className="font-semibold">{familyCtx.activeMembers}</span>
                 </div>
-                {familyLoading && <div className="text-[10px] text-slate-400">Actualizando información de familia…</div>}
+                {familyLoading && <div className="text-[10px] text-slate-400">{t.updatingFamily}</div>}
               </div>
             )}
             {familyError && <p className="mt-2 text-[11px] text-rose-500">{familyError}</p>}
@@ -1260,23 +1271,23 @@ export default function PatrimonioPage() {
         </Card>
 
         <div className="grid gap-4 md:grid-cols-3">
-          <StatCard label="Activos" value={formatMoney(totalActivos)} hint="Todo lo que tienes a valor aproximado actual." tone="good" />
-          <StatCard label="Deudas" value={formatMoney(totalDeudas)} hint="Saldo pendiente considerando tarjetas, créditos y préstamos." tone="bad" />
+          <StatCard label={t.assets} value={formatMoney(totalActivos)} hint={t.assetsHint} tone="good" />
+          <StatCard label={t.debts} value={formatMoney(totalDeudas)} hint={t.debtsHint} tone="bad" />
           <StatCard
-            label="Neto"
+            label={t.net}
             value={formatMoney(patrimonioNeto)}
-            hint="Activos – Deudas. Número clave para ver crecer."
+            hint={t.netHint}
             tone={patrimonioNeto >= 0 ? "good" : "bad"}
           />
         </div>
 
         <Card>
           <Section
-            title="Conexión con Gastos"
-            subtitle="Tu flujo mensual (ingresos - gastos) debería reflejarse con el tiempo en tu patrimonio."
+            title={t.expensesConnection}
+            subtitle={t.expensesConnectionSubtitle}
             right={
               <div className="w-full max-w-[220px]">
-                <Label>Mes</Label>
+                <Label>{t.month}</Label>
                 <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
               </div>
             }
@@ -1288,18 +1299,18 @@ export default function PatrimonioPage() {
             )}
 
             <div className="grid gap-4 md:grid-cols-3">
-              <StatCard label={`Ingresos (${monthLabel})`} value={formatMoney(monthIngresos)} tone="good" />
-              <StatCard label={`Gastos (${monthLabel})`} value={formatMoney(monthGastos)} tone="bad" />
+              <StatCard label={`${t.incomeFor} (${monthLabel})`} value={formatMoney(monthIngresos)} tone="good" />
+              <StatCard label={`${t.expensesFor} (${monthLabel})`} value={formatMoney(monthGastos)} tone="bad" />
               <StatCard
-                label={`Flujo neto (${monthLabel})`}
+                label={`${t.netFlowFor} (${monthLabel})`}
                 value={formatMoney(flujoMes)}
                 tone={flujoMes >= 0 ? "good" : "bad"}
-                hint={txLoading ? "Calculando…" : "Dato calculado desde tu módulo de Gastos (con cache offline)."}
+                hint={txLoading ? t.calculating : t.flowHint}
               />
             </div>
 
             <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-              Tip: si el flujo es positivo pero tu patrimonio no sube, normalmente significa que falta registrar el destino (ahorro/inversión) en Activos.
+              {t.flowTip}
             </p>
           </Section>
         </Card>
@@ -1313,29 +1324,29 @@ export default function PatrimonioPage() {
           className={editingAssetId ? "scroll-mt-24 border-sky-300 bg-sky-50/60 ring-2 ring-sky-500/20 dark:border-sky-700 dark:bg-sky-950/30 dark:ring-sky-400/20" : "scroll-mt-24"}
         >
           <Section
-            title={editingAssetId ? "Editar activo" : "Agregar activo"}
-            subtitle="Cuentas bancarias, inversiones, propiedades, autos, negocios, etc."
-            right={editingAssetId ? <span className="flex items-center gap-3"><span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-700 dark:bg-sky-900/60 dark:text-sky-200">Editando activo</span><LinkButton onClick={resetAssetForm}>Cancelar</LinkButton></span> : null}
+            title={editingAssetId ? t.editAsset : t.addAsset}
+            subtitle={t.assetSubtitle}
+            right={editingAssetId ? <span className="flex items-center gap-3"><span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-700 dark:bg-sky-900/60 dark:text-sky-200">{t.editingAsset}</span><LinkButton onClick={resetAssetForm}>{t.cancel}</LinkButton></span> : null}
           >
             {editingAssetId && (
               <div className="rounded-2xl border border-sky-200 bg-white/80 px-3 py-2 text-[11px] font-medium text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
-                Este bloque está activo para edición. Los cambios se guardarán sobre el activo seleccionado.
+                {t.editingAssetHelp}
               </div>
             )}
             <form onSubmit={handleSubmitAsset} className="mt-2 space-y-3">
               <div>
-                <Label>Nombre</Label>
+                <Label>{t.name}</Label>
                 <Input
                   value={assetForm.name}
                   onChange={(e) => setAssetForm((p) => ({ ...p, name: e.target.value }))}
-                  placeholder="Ej. Cuenta BBVA, Casa Monterrey, Tesla…"
+                  placeholder={t.assetNamePlaceholder}
                   required
                 />
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
-                  <Label>Categoría</Label>
+                  <Label>{t.category}</Label>
                   <Select value={assetForm.category} onChange={(e) => setAssetForm((p) => ({ ...p, category: e.target.value }))}>
                     {ASSET_CATEGORIES.map((c) => (
                       <option key={c} value={c}>
@@ -1346,39 +1357,39 @@ export default function PatrimonioPage() {
                 </div>
 
                 <div>
-                  <Label>Valor aproximado</Label>
+                  <Label>{t.approximateValue}</Label>
                   <Input
                     type="number"
                     min="0"
                     step="0.01"
                     value={assetForm.current_value}
                     onChange={(e) => setAssetForm((p) => ({ ...p, current_value: e.target.value }))}
-                    placeholder="Ej. 250000"
+                    placeholder={t.assetValuePlaceholder}
                     required
                   />
                 </div>
               </div>
 
               <div>
-                <Label>A nombre de</Label>
+                <Label>{t.owner}</Label>
                 <Input
                   value={assetForm.owner}
                   onChange={(e) => setAssetForm((p) => ({ ...p, owner: e.target.value }))}
-                  placeholder="Ej. David, Dibri, Empresa…"
+                  placeholder={t.ownerPlaceholder}
                 />
               </div>
 
               <div>
-                <Label>Notas (opcional)</Label>
+                <Label>{t.notesOptional}</Label>
                 <Textarea
                   value={assetForm.notes}
                   onChange={(e) => setAssetForm((p) => ({ ...p, notes: e.target.value }))}
-                  placeholder="Ej. Emergencias, valuación aproximada, etc."
+                  placeholder={t.assetNotesPlaceholder}
                 />
               </div>
 
               <Button type="submit" disabled={savingAsset}>
-                {savingAsset ? (editingAssetId ? "Actualizando…" : "Guardando…") : editingAssetId ? "Guardar cambios" : "Guardar activo"}
+                {savingAsset ? (editingAssetId ? t.updating : t.saving) : editingAssetId ? t.saveChanges : t.saveAsset}
               </Button>
             </form>
           </Section>
@@ -1390,29 +1401,29 @@ export default function PatrimonioPage() {
           className={editingDebtId ? "scroll-mt-24 border-sky-300 bg-sky-50/60 ring-2 ring-sky-500/20 dark:border-sky-700 dark:bg-sky-950/30 dark:ring-sky-400/20" : "scroll-mt-24"}
         >
           <Section
-            title={editingDebtId ? "Editar deuda" : "Agregar deuda"}
-            subtitle="Tarjetas, préstamos, créditos de auto/casa. Lo importante es el saldo actual."
-            right={editingDebtId ? <span className="flex items-center gap-3"><span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-700 dark:bg-sky-900/60 dark:text-sky-200">Editando deuda</span><LinkButton onClick={resetDebtForm}>Cancelar</LinkButton></span> : null}
+            title={editingDebtId ? t.editDebt : t.addDebt}
+            subtitle={t.debtSubtitle}
+            right={editingDebtId ? <span className="flex items-center gap-3"><span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-700 dark:bg-sky-900/60 dark:text-sky-200">{t.editingDebt}</span><LinkButton onClick={resetDebtForm}>{t.cancel}</LinkButton></span> : null}
           >
             {editingDebtId && (
               <div className="rounded-2xl border border-sky-200 bg-white/80 px-3 py-2 text-[11px] font-medium text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
-                Este bloque está activo para edición. Los cambios se guardarán sobre la deuda seleccionada.
+                {t.editingDebtHelp}
               </div>
             )}
             <form onSubmit={handleSubmitDebt} className="mt-2 space-y-3">
               <div>
-                <Label>Nombre</Label>
+                <Label>{t.name}</Label>
                 <Input
                   value={debtForm.name}
                   onChange={(e) => setDebtForm((p) => ({ ...p, name: e.target.value }))}
-                  placeholder="Ej. Tarjeta BBVA Azul, Crédito casa…"
+                  placeholder={t.debtNamePlaceholder}
                   required
                 />
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
-                  <Label>Tipo</Label>
+                  <Label>{t.type}</Label>
                   <Select value={debtForm.type} onChange={(e) => setDebtForm((p) => ({ ...p, type: e.target.value }))}>
                     {DEBT_TYPES.map((t) => (
                       <option key={t} value={t}>
@@ -1423,43 +1434,43 @@ export default function PatrimonioPage() {
                 </div>
 
                 <div>
-                  <Label>Monto total</Label>
+                  <Label>{t.totalAmount}</Label>
                   <Input
                     type="number"
                     min="0"
                     step="0.01"
                     value={debtForm.total_amount}
                     onChange={(e) => setDebtForm((p) => ({ ...p, total_amount: e.target.value }))}
-                    placeholder="Ej. 100000"
+                    placeholder={t.totalAmountPlaceholder}
                     required
                   />
                 </div>
               </div>
 
               <div>
-                <Label>Saldo actual (opcional)</Label>
+                <Label>{t.currentBalanceOptional}</Label>
                 <Input
                   type="number"
                   min="0"
                   step="0.01"
                   value={debtForm.current_balance}
                   onChange={(e) => setDebtForm((p) => ({ ...p, current_balance: e.target.value }))}
-                  placeholder="Ej. 45000"
+                  placeholder={t.currentBalancePlaceholder}
                 />
-                <Help>Si lo dejas vacío, se tomará el monto total como saldo.</Help>
+                <Help>{t.currentBalanceHelp}</Help>
               </div>
 
               <div>
-                <Label>Notas (opcional)</Label>
+                <Label>{t.notesOptional}</Label>
                 <Textarea
                   value={debtForm.notes}
                   onChange={(e) => setDebtForm((p) => ({ ...p, notes: e.target.value }))}
-                  placeholder="Ej. Se paga el 5 de cada mes, tasa, plazo, etc."
+                  placeholder={t.debtNotesPlaceholder}
                 />
               </div>
 
               <Button type="submit" disabled={savingDebt}>
-                {savingDebt ? (editingDebtId ? "Actualizando…" : "Guardando…") : editingDebtId ? "Guardar cambios" : "Guardar deuda"}
+                {savingDebt ? (editingDebtId ? t.updating : t.saving) : editingDebtId ? t.saveChanges : t.saveDebt}
               </Button>
             </form>
           </Section>
@@ -1469,11 +1480,11 @@ export default function PatrimonioPage() {
       {/* Listas */}
       <section className="grid gap-4 md:grid-cols-2">
         <Card>
-          <Section title="Activos" right={<span className="text-[11px] text-slate-500 dark:text-slate-400">{assets.length} activos</span>}>
+          <Section title={t.assets} right={<span className="text-[11px] text-slate-500 dark:text-slate-400">{t.assetsCount(assets.length)}</span>}>
             {loading ? (
-              <EmptyState>Cargando activos…</EmptyState>
+              <EmptyState>{t.loadingAssets}</EmptyState>
             ) : assets.length === 0 ? (
-              <EmptyState>Agrega tu primer activo para empezar a construir tu foto patrimonial.</EmptyState>
+              <EmptyState>{t.emptyAssets}</EmptyState>
             ) : (
               <ul className="space-y-2">
                 {assets.map((a) => (
@@ -1483,8 +1494,8 @@ export default function PatrimonioPage() {
                       <>
                         <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{a.name}</div>
                         <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                          {(a.category || "Sin categoría") + " · "}
-                          {a.owner ? `A nombre de: ${a.owner}` : "Propietario: N/D"}
+                          {(a.category || t.uncategorized) + " · "}
+                          {a.owner ? `${t.ownedBy} ${a.owner}` : t.ownerUnavailable}
                         </div>
 
                         {(a.created_at || isFamilyView || a.notes) && (
@@ -1492,7 +1503,7 @@ export default function PatrimonioPage() {
                             {a.created_at && <div className="text-[10px] text-slate-400 dark:text-slate-500">{formatDateDisplay(a.created_at)}</div>}
                             {isFamilyView && (
                               <div className="text-[10px] text-slate-400 dark:text-slate-500">
-                                Registrado por: {a.user_id === user.id ? "Tú" : "Otro miembro"}
+                                {t.registeredBy} {a.user_id === user.id ? t.you : t.otherMember}
                               </div>
                             )}
                             {a.notes && <div className="text-[11px] text-slate-600 dark:text-slate-300">{a.notes}</div>}
@@ -1506,9 +1517,9 @@ export default function PatrimonioPage() {
 
                         {a.user_id === user.id && (
                           <div className="flex items-center gap-3">
-                            <LinkButton onClick={() => startEditAsset(a)}>Editar</LinkButton>
+                            <LinkButton onClick={() => startEditAsset(a)}>{t.edit}</LinkButton>
                             <LinkButton tone="danger" onClick={() => handleDeleteAsset(a.id)}>
-                              Eliminar
+                              {t.delete}
                             </LinkButton>
                           </div>
                         )}
@@ -1522,11 +1533,11 @@ export default function PatrimonioPage() {
         </Card>
 
         <Card>
-          <Section title="Deudas" right={<span className="text-[11px] text-slate-500 dark:text-slate-400">{debts.length} deudas</span>}>
+          <Section title={t.debts} right={<span className="text-[11px] text-slate-500 dark:text-slate-400">{t.debtsCount(debts.length)}</span>}>
             {loading ? (
-              <EmptyState>Cargando deudas…</EmptyState>
+              <EmptyState>{t.loadingDebts}</EmptyState>
             ) : debts.length === 0 ? (
-              <EmptyState>Registra tus deudas para ver tu patrimonio con honestidad y precisión.</EmptyState>
+              <EmptyState>{t.emptyDebts}</EmptyState>
             ) : (
               <ul className="space-y-2">
                 {debts.map((d) => (
@@ -1536,7 +1547,7 @@ export default function PatrimonioPage() {
                       <>
                         <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{d.name}</div>
                         <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                          {(d.type || "Sin tipo") + " · Total: "} {formatMoney(d.total_amount ?? 0)}
+                          {(d.type || t.noType) + ` · ${t.total} `} {formatMoney(d.total_amount ?? 0)}
                         </div>
 
                         {(d.created_at || isFamilyView || d.notes) && (
@@ -1544,7 +1555,7 @@ export default function PatrimonioPage() {
                             {d.created_at && <div className="text-[10px] text-slate-400 dark:text-slate-500">{formatDateDisplay(d.created_at)}</div>}
                             {isFamilyView && (
                               <div className="text-[10px] text-slate-400 dark:text-slate-500">
-                                Registrada por: {d.user_id === user.id ? "Tú" : "Otro miembro"}
+                                {t.registeredDebtBy} {d.user_id === user.id ? t.you : t.otherMember}
                               </div>
                             )}
                             {d.notes && <div className="text-[11px] text-slate-600 dark:text-slate-300">{d.notes}</div>}
@@ -1560,9 +1571,9 @@ export default function PatrimonioPage() {
 
                         {d.user_id === user.id && (
                           <div className="flex items-center gap-3">
-                            <LinkButton onClick={() => startEditDebt(d)}>Editar</LinkButton>
+                            <LinkButton onClick={() => startEditDebt(d)}>{t.edit}</LinkButton>
                             <LinkButton tone="danger" onClick={() => handleDeleteDebt(d.id)}>
-                              Eliminar
+                              {t.delete}
                             </LinkButton>
                           </div>
                         )}

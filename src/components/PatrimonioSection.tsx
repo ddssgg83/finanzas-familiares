@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 type PatrimonioSectionProps = {
   userId: string;
@@ -51,8 +52,8 @@ type Investment = {
 
 type TabKey = "assets" | "debts" | "goals" | "investments";
 
-function formatMoney(num: number) {
-  return num.toLocaleString("es-MX", {
+function formatMoney(num: number, locale: string) {
+  return num.toLocaleString(locale, {
     style: "currency",
     currency: "MXN",
     minimumFractionDigits: 2,
@@ -60,6 +61,8 @@ function formatMoney(num: number) {
 }
 
 export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
+  const { dictionary, locale } = useI18n();
+  const t = dictionary.netWorthPage.legacy;
   const [activeTab, setActiveTab] = useState<TabKey>("assets");
 
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -196,14 +199,14 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
         );
       } catch (err: any) {
         console.error(err);
-        setError("No se pudo cargar el patrimonio.");
+        setError(dictionary.netWorthPage.errors.load);
       } finally {
         setLoading(false);
       }
     }
 
     loadAll();
-  }, [userId]);
+  }, [userId, dictionary.netWorthPage.errors.load]);
 
   // Totales
   const totalAssets = useMemo(
@@ -239,7 +242,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
     try {
       const value = Number(assetForm.current_value);
       if (!assetForm.name || !value) {
-        alert("Nombre y valor son obligatorios.");
+        alert(t.requiredAsset);
         return;
       }
       const { data, error } = await supabase
@@ -270,7 +273,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
       setAssetForm({ name: "", category: "", current_value: "", owner: "" });
     } catch (err: any) {
       console.error(err);
-      setError("No se pudo guardar el activo.");
+      setError(t.saveAssetError);
     } finally {
       setSaving(false);
     }
@@ -283,7 +286,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
     try {
       const total = Number(debtForm.total_amount);
       if (!debtForm.name || !total) {
-        alert("Nombre y saldo total son obligatorios.");
+        alert(t.requiredDebt);
         return;
       }
       const { data, error } = await supabase
@@ -336,7 +339,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
       });
     } catch (err: any) {
       console.error(err);
-      setError("No se pudo guardar la deuda.");
+      setError(t.saveDebtError);
     } finally {
       setSaving(false);
     }
@@ -350,7 +353,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
       const target = Number(goalForm.target_amount);
       const current = Number(goalForm.current_amount || 0);
       if (!goalForm.name || !target) {
-        alert("Nombre y monto objetivo son obligatorios.");
+        alert(t.requiredGoal);
         return;
       }
       const { data, error } = await supabase
@@ -389,7 +392,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
       });
     } catch (err: any) {
       console.error(err);
-      setError("No se pudo guardar la meta.");
+      setError(t.saveGoalError);
     } finally {
       setSaving(false);
     }
@@ -403,7 +406,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
       const invested = Number(investmentForm.invested_amount);
       const current = Number(investmentForm.current_value || invested);
       if (!investmentForm.name || !invested) {
-        alert("Nombre y monto invertido son obligatorios.");
+        alert(t.requiredInvestment);
         return;
       }
       const { data, error } = await supabase
@@ -445,7 +448,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
       });
     } catch (err: any) {
       console.error(err);
-      setError("No se pudo guardar la inversión.");
+      setError(t.saveInvestmentError);
     } finally {
       setSaving(false);
     }
@@ -455,25 +458,25 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
-          <h2 className="text-sm font-semibold">Patrimonio familiar</h2>
+          <h2 className="text-sm font-semibold">{t.title}</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Activos, deudas, metas e inversiones de toda la familia.
+            {t.subtitle}
           </p>
         </div>
         <div className="text-right text-xs">
           <div className="font-medium">
-            Valor neto:{" "}
+            {t.netWorth}{" "}
             <span
               className={
                 netWorth >= 0 ? "text-emerald-600" : "text-rose-600"
               }
             >
-              {formatMoney(netWorth)}
+              {formatMoney(netWorth, locale)}
             </span>
           </div>
           <div className="text-[11px] text-slate-500">
-            Activos: {formatMoney(totalAssets)} · Deudas:{" "}
-            {formatMoney(totalDebts)}
+            {dictionary.netWorthPage.assets}: {formatMoney(totalAssets, locale)} · {dictionary.netWorthPage.debts}:{" "}
+            {formatMoney(totalDebts, locale)}
           </div>
         </div>
       </div>
@@ -481,28 +484,28 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
       {/* Tarjetas de resumen */}
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
-          <div className="text-slate-500 dark:text-slate-300">Activos</div>
+          <div className="text-slate-500 dark:text-slate-300">{dictionary.netWorthPage.assets}</div>
           <div className="mt-1 text-lg font-semibold text-emerald-600 dark:text-emerald-400">
-            {formatMoney(totalAssets)}
+            {formatMoney(totalAssets, locale)}
           </div>
           <div className="mt-1 text-[11px] text-slate-500">
-            {assets.length} registro(s)
+            {t.records(assets.length)}
           </div>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
-          <div className="text-slate-500 dark:text-slate-300">Deudas</div>
+          <div className="text-slate-500 dark:text-slate-300">{dictionary.netWorthPage.debts}</div>
           <div className="mt-1 text-lg font-semibold text-rose-600 dark:text-rose-400">
-            {formatMoney(totalDebts)}
+            {formatMoney(totalDebts, locale)}
           </div>
           <div className="mt-1 text-[11px] text-slate-500">
-            {debts.length} registro(s)
+            {t.records(debts.length)}
           </div>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
           <div className="text-slate-500 dark:text-slate-300">
-            Progreso de metas
+            {t.goalsProgress}
           </div>
           <div className="mt-1 text-lg font-semibold text-sky-600 dark:text-sky-400">
             {goals.length ? `${goalsProgress.toFixed(1)}%` : "--"}
@@ -517,13 +520,13 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
           <div className="text-slate-500 dark:text-slate-300">
-            Inversiones
+            {t.investments}
           </div>
           <div className="mt-1 text-lg font-semibold text-emerald-600 dark:text-emerald-400">
-            {formatMoney(totalInvestmentsValue)}
+            {formatMoney(totalInvestmentsValue, locale)}
           </div>
           <div className="mt-1 text-[11px] text-slate-500">
-            {investments.length} registro(s)
+            {t.records(investments.length)}
           </div>
         </div>
       </div>
@@ -532,10 +535,10 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
       <div className="mt-4 border-b border-slate-200 text-xs dark:border-slate-700">
         <div className="flex flex-wrap gap-2">
           {[
-            { key: "assets", label: "Activos" },
-            { key: "debts", label: "Deudas" },
-            { key: "goals", label: "Metas" },
-            { key: "investments", label: "Inversiones" },
+            { key: "assets", label: t.tabs.assets },
+            { key: "debts", label: t.tabs.debts },
+            { key: "goals", label: t.tabs.goals },
+            { key: "investments", label: t.tabs.investments },
           ].map((tab) => (
             <button
               key={tab.key}
@@ -555,13 +558,13 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
 
       {error && (
         <p className="mt-2 text-xs text-rose-500">
-          {error} Intenta recargar la página.
+          {error} {t.retry}
         </p>
       )}
 
       {loading && (
         <p className="mt-2 text-xs text-slate-500">
-          Cargando información de patrimonio…
+          {t.loading}
         </p>
       )}
 
@@ -576,7 +579,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
             >
               <input
                 type="text"
-                placeholder="Nombre del activo (casa, coche, etc.)"
+                placeholder={t.placeholders.assetName}
                 value={assetForm.name}
                 onChange={(e) =>
                   setAssetForm((f) => ({ ...f, name: e.target.value }))
@@ -585,7 +588,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               />
               <input
                 type="text"
-                placeholder="Categoría"
+                placeholder={t.placeholders.category}
                 value={assetForm.category}
                 onChange={(e) =>
                   setAssetForm((f) => ({ ...f, category: e.target.value }))
@@ -594,7 +597,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               />
               <input
                 type="number"
-                placeholder="Valor actual"
+                placeholder={t.placeholders.currentValue}
                 value={assetForm.current_value}
                 onChange={(e) =>
                   setAssetForm((f) => ({
@@ -606,7 +609,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               />
               <input
                 type="text"
-                placeholder="Propietario (opcional)"
+                placeholder={t.placeholders.ownerOptional}
                 value={assetForm.owner}
                 onChange={(e) =>
                   setAssetForm((f) => ({ ...f, owner: e.target.value }))
@@ -618,7 +621,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                 disabled={saving}
                 className="rounded-lg bg-sky-500 px-3 py-1 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-60"
               >
-                {saving ? "Guardando…" : "Agregar"}
+                {saving ? dictionary.netWorthPage.saving : t.add}
               </button>
             </form>
 
@@ -626,10 +629,10 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               <table className="min-w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 text-[11px] uppercase tracking-wide text-slate-500 dark:border-slate-700">
-                    <th className="px-2 py-1">Nombre</th>
-                    <th className="px-2 py-1">Categoría</th>
-                    <th className="px-2 py-1 text-right">Valor actual</th>
-                    <th className="px-2 py-1">Propietario</th>
+                    <th className="px-2 py-1">{t.headers.name}</th>
+                    <th className="px-2 py-1">{t.headers.category}</th>
+                    <th className="px-2 py-1 text-right">{t.headers.currentValue}</th>
+                    <th className="px-2 py-1">{t.headers.owner}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -641,7 +644,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                       <td className="px-2 py-1">{a.name}</td>
                       <td className="px-2 py-1">{a.category}</td>
                       <td className="px-2 py-1 text-right">
-                        {formatMoney(a.current_value)}
+                        {formatMoney(a.current_value, locale)}
                       </td>
                       <td className="px-2 py-1">{a.owner}</td>
                     </tr>
@@ -652,7 +655,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                         colSpan={4}
                         className="px-2 py-2 text-center text-slate-400"
                       >
-                        Agrega tu primer activo para completar tu foto patrimonial.
+                        {t.emptyAssets}
                       </td>
                     </tr>
                   )}
@@ -671,7 +674,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
             >
               <input
                 type="text"
-                placeholder="Nombre de la deuda (hipoteca, tarjeta...)"
+                placeholder={t.placeholders.debtName}
                 value={debtForm.name}
                 onChange={(e) =>
                   setDebtForm((f) => ({ ...f, name: e.target.value }))
@@ -680,7 +683,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               />
               <input
                 type="text"
-                placeholder="Categoría"
+                placeholder={t.placeholders.category}
                 value={debtForm.category}
                 onChange={(e) =>
                   setDebtForm((f) => ({ ...f, category: e.target.value }))
@@ -689,7 +692,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               />
               <input
                 type="number"
-                placeholder="Saldo total"
+                placeholder={t.placeholders.totalBalance}
                 value={debtForm.total_amount}
                 onChange={(e) =>
                   setDebtForm((f) => ({
@@ -701,7 +704,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               />
               <input
                 type="number"
-                placeholder="Pago mensual"
+                placeholder={t.placeholders.monthlyPayment}
                 value={debtForm.monthly_payment}
                 onChange={(e) =>
                   setDebtForm((f) => ({
@@ -713,7 +716,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               />
               <input
                 type="number"
-                placeholder="% interés anual"
+                placeholder={t.placeholders.interest}
                 value={debtForm.interest_rate}
                 onChange={(e) =>
                   setDebtForm((f) => ({
@@ -728,7 +731,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                 disabled={saving}
                 className="rounded-lg bg-sky-500 px-3 py-1 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-60"
               >
-                {saving ? "Guardando…" : "Agregar"}
+                {saving ? dictionary.netWorthPage.saving : t.add}
               </button>
             </form>
 
@@ -736,11 +739,11 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               <table className="min-w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 text-[11px] uppercase tracking-wide text-slate-500 dark:border-slate-700">
-                    <th className="px-2 py-1">Nombre</th>
-                    <th className="px-2 py-1">Categoría</th>
-                    <th className="px-2 py-1 text-right">Saldo total</th>
-                    <th className="px-2 py-1 text-right">Pago mensual</th>
-                    <th className="px-2 py-1 text-right">% interés</th>
+                    <th className="px-2 py-1">{t.headers.name}</th>
+                    <th className="px-2 py-1">{t.headers.category}</th>
+                    <th className="px-2 py-1 text-right">{t.headers.totalBalance}</th>
+                    <th className="px-2 py-1 text-right">{t.headers.monthlyPayment}</th>
+                    <th className="px-2 py-1 text-right">{t.headers.interest}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -752,11 +755,11 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                       <td className="px-2 py-1">{d.name}</td>
                       <td className="px-2 py-1">{d.category}</td>
                       <td className="px-2 py-1 text-right">
-                        {formatMoney(d.total_amount)}
+                        {formatMoney(d.total_amount, locale)}
                       </td>
                       <td className="px-2 py-1 text-right">
                         {d.monthly_payment != null
-                          ? formatMoney(d.monthly_payment)
+                          ? formatMoney(d.monthly_payment, locale)
                           : "-"}
                       </td>
                       <td className="px-2 py-1 text-right">
@@ -772,7 +775,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                         colSpan={5}
                         className="px-2 py-2 text-center text-slate-400"
                       >
-                        Registra tus deudas para ver tu patrimonio neto con mayor precisión.
+                        {t.emptyDebts}
                       </td>
                     </tr>
                   )}
@@ -791,7 +794,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
             >
               <input
                 type="text"
-                placeholder="Meta (fondo de emergencia, viaje...)"
+                placeholder={t.placeholders.goalName}
                 value={goalForm.name}
                 onChange={(e) =>
                   setGoalForm((f) => ({ ...f, name: e.target.value }))
@@ -800,7 +803,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               />
               <input
                 type="number"
-                placeholder="Objetivo"
+                placeholder={t.placeholders.target}
                 value={goalForm.target_amount}
                 onChange={(e) =>
                   setGoalForm((f) => ({
@@ -812,7 +815,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               />
               <input
                 type="number"
-                placeholder="Acumulado"
+                placeholder={t.placeholders.current}
                 value={goalForm.current_amount}
                 onChange={(e) =>
                   setGoalForm((f) => ({
@@ -835,7 +838,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                 disabled={saving}
                 className="rounded-lg bg-sky-500 px-3 py-1 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-60"
               >
-                {saving ? "Guardando…" : "Agregar"}
+                {saving ? dictionary.netWorthPage.saving : t.add}
               </button>
             </form>
 
@@ -843,11 +846,11 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               <table className="min-w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 text-[11px] uppercase tracking-wide text-slate-500 dark:border-slate-700">
-                    <th className="px-2 py-1">Meta</th>
-                    <th className="px-2 py-1 text-right">Objetivo</th>
-                    <th className="px-2 py-1 text-right">Acumulado</th>
-                    <th className="px-2 py-1 text-right">Progreso</th>
-                    <th className="px-2 py-1">Fecha objetivo</th>
+                    <th className="px-2 py-1">{t.headers.goal}</th>
+                    <th className="px-2 py-1 text-right">{t.headers.target}</th>
+                    <th className="px-2 py-1 text-right">{t.headers.current}</th>
+                    <th className="px-2 py-1 text-right">{t.headers.progress}</th>
+                    <th className="px-2 py-1">{t.headers.deadline}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -862,10 +865,10 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                       >
                         <td className="px-2 py-1">{g.name}</td>
                         <td className="px-2 py-1 text-right">
-                          {formatMoney(g.target_amount)}
+                          {formatMoney(g.target_amount, locale)}
                         </td>
                         <td className="px-2 py-1 text-right">
-                          {formatMoney(g.current_amount)}
+                          {formatMoney(g.current_amount, locale)}
                         </td>
                         <td className="px-2 py-1 text-right">
                           {p.toFixed(1)}%
@@ -882,7 +885,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                         colSpan={5}
                         className="px-2 py-2 text-center text-slate-400"
                       >
-                        Agrega una meta para conectar tu patrimonio con un plan concreto.
+                        {t.emptyGoals}
                       </td>
                     </tr>
                   )}
@@ -901,7 +904,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
             >
               <input
                 type="text"
-                placeholder="Nombre de la inversión (CETE, ETF...)"
+                placeholder={t.placeholders.investmentName}
                 value={investmentForm.name}
                 onChange={(e) =>
                   setInvestmentForm((f) => ({ ...f, name: e.target.value }))
@@ -910,7 +913,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               />
               <input
                 type="text"
-                placeholder="Plataforma (GBM, Fintual...)"
+                placeholder={t.placeholders.platform}
                 value={investmentForm.platform}
                 onChange={(e) =>
                   setInvestmentForm((f) => ({
@@ -922,7 +925,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               />
               <input
                 type="number"
-                placeholder="Invertido"
+                placeholder={t.placeholders.invested}
                 value={investmentForm.invested_amount}
                 onChange={(e) =>
                   setInvestmentForm((f) => ({
@@ -934,7 +937,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               />
               <input
                 type="number"
-                placeholder="Valor actual"
+                placeholder={t.placeholders.currentValue}
                 value={investmentForm.current_value}
                 onChange={(e) =>
                   setInvestmentForm((f) => ({
@@ -946,7 +949,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               />
               <input
                 type="text"
-                placeholder="Categoría"
+                placeholder={t.placeholders.category}
                 value={investmentForm.category}
                 onChange={(e) =>
                   setInvestmentForm((f) => ({
@@ -961,7 +964,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                 disabled={saving}
                 className="rounded-lg bg-sky-500 px-3 py-1 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-60"
               >
-                {saving ? "Guardando…" : "Agregar"}
+                {saving ? dictionary.netWorthPage.saving : t.add}
               </button>
             </form>
 
@@ -969,10 +972,10 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
               <table className="min-w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 text-[11px] uppercase tracking-wide text-slate-500 dark:border-slate-700">
-                    <th className="px-2 py-1">Inversión</th>
-                    <th className="px-2 py-1">Plataforma</th>
-                    <th className="px-2 py-1 text-right">Invertido</th>
-                    <th className="px-2 py-1 text-right">Valor actual</th>
+                    <th className="px-2 py-1">{t.headers.investment}</th>
+                    <th className="px-2 py-1">{t.headers.platform}</th>
+                    <th className="px-2 py-1 text-right">{t.headers.invested}</th>
+                    <th className="px-2 py-1 text-right">{t.headers.currentValue}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -984,10 +987,10 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                       <td className="px-2 py-1">{i.name}</td>
                       <td className="px-2 py-1">{i.platform}</td>
                       <td className="px-2 py-1 text-right">
-                        {formatMoney(i.invested_amount)}
+                        {formatMoney(i.invested_amount, locale)}
                       </td>
                       <td className="px-2 py-1 text-right">
-                        {formatMoney(i.current_value)}
+                        {formatMoney(i.current_value, locale)}
                       </td>
                     </tr>
                   ))}
@@ -997,7 +1000,7 @@ export function PatrimonioSection({ userId }: PatrimonioSectionProps) {
                         colSpan={4}
                         className="px-2 py-2 text-center text-slate-400"
                       >
-                        Agrega tu primera inversión para completar tu visión patrimonial.
+                        {t.emptyInvestments}
                       </td>
                     </tr>
                   )}
