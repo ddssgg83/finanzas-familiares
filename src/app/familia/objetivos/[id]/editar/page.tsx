@@ -8,6 +8,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
 import { PageShell } from "@/components/ui/PageShell";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,10 @@ type GoalFormState = {
 
 export default function EditFamilyGoalPage() {
   const router = useRouter();
+  const { dictionary } = useI18n();
+  const t = dictionary.family;
+  const newT = t.newGoal;
+  const editT = t.editGoal;
 
   // ✅ App Router (client): params via useParams()
   const params = useParams<{ id: string }>();
@@ -72,7 +77,7 @@ export default function EditFamilyGoalPage() {
       } catch (_err) {
         if (!ignore) {
           setUser(null);
-          setAuthError("Hubo un problema al cargar tu sesión.");
+          setAuthError(editT.errors.auth);
         }
       } finally {
         if (!ignore) setAuthLoading(false);
@@ -91,7 +96,7 @@ export default function EditFamilyGoalPage() {
       ignore = true;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [editT.errors.auth]);
 
   // Cargar meta cuando haya user + goalId
   useEffect(() => {
@@ -104,7 +109,7 @@ export default function EditFamilyGoalPage() {
       }
 
       if (!goalId) {
-        setError("No se encontró el ID de la meta.");
+        setError(editT.errors.missingId);
         setLoading(false);
         return;
       }
@@ -124,7 +129,7 @@ export default function EditFamilyGoalPage() {
         if (goalError) throw goalError;
 
         if (!goal) {
-          if (!cancelled) setError("No se encontró la meta familiar.");
+          if (!cancelled) setError(editT.errors.missingGoal);
           return;
         }
 
@@ -145,7 +150,7 @@ export default function EditFamilyGoalPage() {
       } catch (err: any) {
         console.error("Error cargando meta familiar:", err);
         if (!cancelled) {
-          setError(err?.message || "Ocurrió un error al cargar la meta familiar.");
+          setError(err?.message || editT.errors.load);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -157,7 +162,7 @@ export default function EditFamilyGoalPage() {
     return () => {
       cancelled = true;
     };
-  }, [user, goalId]);
+  }, [user, goalId, editT.errors.load, editT.errors.missingGoal, editT.errors.missingId]);
 
   const handleSignOut = async () => {
     try {
@@ -182,7 +187,7 @@ export default function EditFamilyGoalPage() {
     e.preventDefault();
     if (!user) return;
     if (!goalId) {
-      setError("No se encontró el ID de la meta.");
+      setError(editT.errors.missingId);
       return;
     }
 
@@ -192,7 +197,7 @@ export default function EditFamilyGoalPage() {
 
       const targetAmountNum = Number(form.target_amount || 0);
       if (!targetAmountNum || targetAmountNum <= 0) {
-        setError("Ingresa un monto objetivo válido mayor a 0.");
+        setError(editT.errors.target);
         return;
       }
 
@@ -221,7 +226,7 @@ export default function EditFamilyGoalPage() {
       router.refresh();
     } catch (err: any) {
       console.error("Error actualizando meta familiar:", err);
-      setError(err?.message || "Ocurrió un error al guardar los cambios de la meta.");
+      setError(err?.message || editT.errors.save);
     } finally {
       setSaving(false);
     }
@@ -231,7 +236,7 @@ export default function EditFamilyGoalPage() {
   if (authLoading) {
     return (
       <div className="flex flex-1 items-center justify-center text-sm text-slate-600 dark:text-slate-300">
-        Cargando sesión...
+        {t.loadingSession}
       </div>
     );
   }
@@ -240,16 +245,16 @@ export default function EditFamilyGoalPage() {
     return (
       <div className="flex flex-1 items-center justify-center px-4">
         <div className="w-full max-w-md space-y-3 rounded-2xl border border-slate-200 bg-white p-5 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="text-sm font-semibold">Editar objetivo</div>
+          <div className="text-sm font-semibold">{editT.guestTitle}</div>
           <p className="text-slate-500 dark:text-slate-400">
-            Inicia sesión para editar objetivos familiares.
+            {editT.guestBody}
           </p>
           {authError && <p className="text-[11px] text-rose-600 dark:text-rose-400">{authError}</p>}
           <Link
             href="/"
             className="inline-flex w-fit rounded-full bg-sky-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-sky-600"
           >
-            Ir al inicio
+            {editT.goHome}
           </Link>
         </div>
       </div>
@@ -259,8 +264,8 @@ export default function EditFamilyGoalPage() {
   return (
     <main className="flex min-h-screen flex-col pb-16 md:pb-4">
       <AppHeader
-        title="Editar objetivo familiar"
-        subtitle="Ajusta nombre, monto y seguimiento automático."
+        title={editT.title}
+        subtitle={editT.subtitle}
         activeTab="familia"
         userName={(user.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user.email ?? ""}
@@ -277,15 +282,15 @@ export default function EditFamilyGoalPage() {
 
         {loading ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            Cargando información de la meta…
+            {editT.loading}
           </div>
         ) : (
           <section className="rounded-2xl border border-slate-200 bg-white p-4 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="mb-3 flex items-start justify-between gap-2">
               <div>
-                <h1 className="text-base font-semibold">Editar objetivo familiar</h1>
+                <h1 className="text-base font-semibold">{editT.header}</h1>
                 <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                  Tip: activa el seguimiento automático si quieres que el avance se calcule solo.
+                  {editT.body}
                 </p>
               </div>
               <button
@@ -293,7 +298,7 @@ export default function EditFamilyGoalPage() {
                 onClick={() => router.push("/familia/objetivos")}
                 className="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
               >
-                Volver
+                {newT.back}
               </button>
             </div>
 
@@ -301,7 +306,7 @@ export default function EditFamilyGoalPage() {
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                    Nombre del objetivo
+                    {editT.goalName}
                   </label>
                   <input
                     type="text"
@@ -310,13 +315,13 @@ export default function EditFamilyGoalPage() {
                     onChange={handleChange}
                     required
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950"
-                    placeholder="Ej. Viaje familiar, fondo de emergencia…"
+                    placeholder={editT.goalNamePlaceholder}
                   />
                 </div>
 
                 <div>
                   <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                    Monto objetivo (MXN)
+                    {editT.targetAmount}
                   </label>
                   <input
                     type="number"
@@ -335,7 +340,7 @@ export default function EditFamilyGoalPage() {
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                    Fecha límite (opcional)
+                    {editT.dueDate}
                   </label>
                   <input
                     type="date"
@@ -348,7 +353,7 @@ export default function EditFamilyGoalPage() {
 
                 <div>
                   <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                    Categoría (opcional)
+                    {newT.category}
                   </label>
                   <input
                     type="text"
@@ -356,7 +361,7 @@ export default function EditFamilyGoalPage() {
                     value={form.category}
                     onChange={handleChange}
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950"
-                    placeholder="Ej. Viajes, ahorro, deudas…"
+                    placeholder={editT.categoryPlaceholder}
                   />
                 </div>
               </div>
@@ -364,7 +369,7 @@ export default function EditFamilyGoalPage() {
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                    Tipo (opcional)
+                    {newT.type}
                   </label>
                   <input
                     type="text"
@@ -372,13 +377,13 @@ export default function EditFamilyGoalPage() {
                     value={form.type}
                     onChange={handleChange}
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950"
-                    placeholder="Ej. Ahorro, reducción de gasto…"
+                    placeholder={editT.typePlaceholder}
                   />
                 </div>
 
                 <div>
                   <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                    Estatus (opcional)
+                    {editT.status}
                   </label>
                   <input
                     type="text"
@@ -386,14 +391,14 @@ export default function EditFamilyGoalPage() {
                     value={form.status}
                     onChange={handleChange}
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950"
-                    placeholder="Ej. en_progreso, pausado…"
+                    placeholder={editT.statusPlaceholder}
                   />
                 </div>
               </div>
 
               <div>
                 <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                  Descripción (opcional)
+                  {newT.description}
                 </label>
                 <textarea
                   name="description"
@@ -401,7 +406,7 @@ export default function EditFamilyGoalPage() {
                   onChange={handleChange}
                   rows={3}
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950"
-                  placeholder="Cuenta un poco más sobre esta meta."
+                  placeholder={editT.descriptionPlaceholder}
                 />
               </div>
 
@@ -409,9 +414,9 @@ export default function EditFamilyGoalPage() {
                 <label className="flex items-start gap-2">
                   <input type="checkbox" name="auto_track" checked={form.auto_track} onChange={handleChange} className="mt-[2px]" />
                   <span>
-                    Activar seguimiento automático con movimientos
+                    {editT.autoTrack}
                     <span className="mt-1 block text-[10px] text-slate-500 dark:text-slate-400">
-                      Elige qué tipo de movimientos cuentan y (opcionalmente) una categoría.
+                      {editT.autoTrackBody}
                     </span>
                   </span>
                 </label>
@@ -420,7 +425,7 @@ export default function EditFamilyGoalPage() {
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
                     <div>
                       <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                        ¿Qué movimientos cuentan?
+                        {editT.whatCounts}
                       </label>
                       <select
                         name="track_direction"
@@ -428,19 +433,19 @@ export default function EditFamilyGoalPage() {
                         onChange={handleChange}
                         className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950"
                       >
-                        <option value="">Selecciona una opción</option>
-                        <option value="ingresos">Ingresos</option>
-                        <option value="ahorros">Ahorros</option>
-                        <option value="gastos_reducidos">Gastos reducidos</option>
+                        <option value="">{editT.selectOption}</option>
+                        <option value="ingresos">{editT.income}</option>
+                        <option value="ahorros">{editT.savings}</option>
+                        <option value="gastos_reducidos">{editT.reducedSpend}</option>
                       </select>
                       <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
-                        Nota: “ahorros” depende de cómo lo estés calculando en tu app (por ahora lo tratamos como ingresos ligados).
+                        {editT.savingsNote}
                       </p>
                     </div>
 
                     <div>
                       <label className="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">
-                        Categoría relacionada (opcional)
+                        {editT.relatedCategory}
                       </label>
                       <input
                         type="text"
@@ -448,7 +453,7 @@ export default function EditFamilyGoalPage() {
                         value={form.track_category}
                         onChange={handleChange}
                         className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-950"
-                        placeholder="Ej. SUPER, VIAJES, SERVICIOS…"
+                        placeholder={editT.relatedCategoryPlaceholder}
                       />
                     </div>
                   </div>
@@ -461,14 +466,14 @@ export default function EditFamilyGoalPage() {
                   onClick={() => router.push("/familia/objetivos")}
                   className="rounded-full border border-slate-300 px-4 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
-                  Cancelar
+                  {t.cancel}
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
                   className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  {saving ? "Guardando…" : "Guardar cambios"}
+                  {saving ? t.saving : editT.saveChanges}
                 </button>
               </div>
             </form>

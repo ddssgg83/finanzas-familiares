@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import { AppHeader } from "@/components/AppHeader";
 import { PageShell } from "@/components/ui/PageShell";
 import { useFamilyContext } from "@/hooks/useFamilyContext";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 export const dynamic = "force-dynamic";
 
@@ -62,19 +63,19 @@ type GoalWithProgress = FamilyGoal & {
   progressPct: number;
 };
 
-function formatCurrency(monto: number): string {
-  return (monto || 0).toLocaleString("es-MX", {
+function formatCurrency(monto: number, locale: string): string {
+  return (monto || 0).toLocaleString(locale, {
     style: "currency",
     currency: "MXN",
     maximumFractionDigits: 0,
   });
 }
 
-function formatDate(dateStr?: string | null): string {
-  if (!dateStr) return "Sin fecha límite";
+function formatDate(dateStr: string | null | undefined, locale: string, fallback: string): string {
+  if (!dateStr) return fallback;
   const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return "Sin fecha límite";
-  return d.toLocaleDateString("es-MX", {
+  if (Number.isNaN(d.getTime())) return fallback;
+  return d.toLocaleDateString(locale, {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -106,6 +107,9 @@ function getIsOnline() {
 }
 
 export default function FamilyGoalsPage() {
+  const { dictionary, locale } = useI18n();
+  const t = dictionary.family;
+  const goalsT = t.goals;
   // Auth
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -135,7 +139,7 @@ export default function FamilyGoalsPage() {
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
     };
-  }, []);
+  }, [dictionary.family.errors.auth]);
 
   // ---------- AUTH ----------
   useEffect(() => {
@@ -152,7 +156,7 @@ export default function FamilyGoalsPage() {
       } catch {
         if (!ignore) {
           setUser(null);
-          setAuthError("Hubo un problema al cargar tu sesión.");
+          setAuthError(dictionary.family.errors.auth);
         }
       } finally {
         if (!ignore) setAuthLoading(false);
@@ -171,7 +175,7 @@ export default function FamilyGoalsPage() {
       ignore = true;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [dictionary.family.errors.auth]);
 
   const handleSignOut = async () => {
     try {
@@ -207,7 +211,7 @@ export default function FamilyGoalsPage() {
           if (!cancelled) {
             setGoals([]);
             setTxs([]);
-            setError("Estás en modo offline. Las metas se cargarán cuando vuelvas a estar en línea.");
+            setError(goalsT.offlineLoad);
           }
           return;
         }
@@ -289,9 +293,9 @@ export default function FamilyGoalsPage() {
 
         if (!cancelled) {
           if (looksOffline) {
-            setError("Estás en modo offline. No se pudieron cargar metas desde el servidor.");
+            setError(goalsT.offlineServer);
           } else {
-            setError(msg || "Ocurrió un error al cargar las metas familiares. Intenta de nuevo.");
+            setError(msg || goalsT.loadError);
           }
         }
       } finally {
@@ -304,7 +308,7 @@ export default function FamilyGoalsPage() {
     return () => {
       cancelled = true;
     };
-  }, [user, familyCtx?.familyId, familyLoading, isOnline]);
+  }, [user, familyCtx?.familyId, familyLoading, isOnline, dictionary.family.errors.auth, goalsT.loadError, goalsT.offlineLoad, goalsT.offlineServer]);
 
   const goalsWithProgress: GoalWithProgress[] = useMemo(() => {
     if (!goals.length) return [];
@@ -339,7 +343,7 @@ export default function FamilyGoalsPage() {
   if (authLoading) {
     return (
       <div className="flex flex-1 items-center justify-center text-sm text-slate-600 dark:text-slate-300">
-        Cargando sesión...
+        {t.loadingSession}
       </div>
     );
   }
@@ -348,9 +352,9 @@ export default function FamilyGoalsPage() {
     return (
       <div className="flex flex-1 items-center justify-center px-4">
         <div className="w-full max-w-md space-y-3 rounded-2xl border border-slate-200 bg-white p-5 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="text-sm font-semibold">Metas familiares</div>
+          <div className="text-sm font-semibold">{goalsT.title}</div>
           <p className="text-slate-500 dark:text-slate-400">
-            Inicia sesión para ver y administrar metas familiares.
+            {goalsT.guestBody}
           </p>
           {authError && (
             <p className="text-[11px] text-rose-600 dark:text-rose-400">{authError}</p>
@@ -359,7 +363,7 @@ export default function FamilyGoalsPage() {
             href="/onboarding?mode=login&next=%2Ffamilia%2Fobjetivos"
             className="inline-flex w-fit rounded-full bg-sky-500 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-sky-600"
           >
-            Iniciar sesión
+            {t.login}
           </Link>
         </div>
       </div>
@@ -369,8 +373,8 @@ export default function FamilyGoalsPage() {
   return (
     <main className="flex min-h-screen flex-col pb-16 md:pb-4">
       <AppHeader
-        title="Familia"
-        subtitle="Metas familiares y planes en conjunto"
+        title={t.title}
+        subtitle={goalsT.subtitle}
         activeTab="familia"
         userName={(user.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user.email ?? ""}
@@ -381,10 +385,9 @@ export default function FamilyGoalsPage() {
       <PageShell maxWidth="6xl">
         <section className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Metas familiares</h1>
+            <h1 className="text-xl font-semibold tracking-tight md:text-2xl">{goalsT.title}</h1>
             <p className="text-xs text-slate-500 dark:text-slate-400 md:text-sm">
-              Define y administra los objetivos financieros de tu familia. Puedes ligarlos a tus
-              movimientos para que el avance se calcule solo.
+              {goalsT.body}
             </p>
 
             <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
@@ -392,11 +395,10 @@ export default function FamilyGoalsPage() {
                 <span className="text-rose-600 dark:text-rose-300">{familyError}</span>
               ) : familyCtx?.familyId ? (
                 <>
-                  Familia: <span className="font-semibold">{familyCtx.familyName}</span> · Miembros
-                  activos: <span className="font-semibold">{familyCtx.activeMembers}</span>
+              {t.familyLabel}: <span className="font-semibold">{familyCtx.familyName}</span> · {t.activeMembers}: <span className="font-semibold">{familyCtx.activeMembers}</span>
                 </>
               ) : (
-                <>Aún no tienes familia configurada.</>
+                <>{t.noFamily}</>
               )}
             </div>
           </div>
@@ -406,21 +408,21 @@ export default function FamilyGoalsPage() {
               href="/familia/dashboard"
               className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
             >
-              Ver dashboard de metas
+              {goalsT.viewDashboard}
             </Link>
 
             <Link
               href="/familia/objetivos/nuevo"
               className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600"
             >
-              + Agregar objetivo
+              {goalsT.addGoal}
             </Link>
           </div>
         </section>
 
         {loading && (
           <div className="mt-4 flex items-center justify-center rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            Cargando metas familiares…
+            {goalsT.loading}
           </div>
         )}
 
@@ -435,17 +437,17 @@ export default function FamilyGoalsPage() {
             {goalsWithProgress.length === 0 ? (
               <section className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-xs text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
                 <p className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-100">
-                  Aún no tienes metas familiares.
+                  {goalsT.emptyTitle}
                 </p>
                 <p>
-                  Crea tu primera meta para convertir el ahorro familiar en un plan claro y compartido.
+                  {goalsT.emptyBody}
                 </p>
                 <div className="mt-4 flex justify-center">
                   <Link
                     href="/familia/objetivos/nuevo"
                     className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600"
                   >
-                    Crear primera meta
+                    {goalsT.createFirst}
                   </Link>
                 </div>
               </section>
@@ -455,24 +457,24 @@ export default function FamilyGoalsPage() {
                   const normalizedProgress = Math.min(goal.progressPct, 100);
                   const overGoal = goal.progressPct >= 100;
 
-                  let statusLabel = "Pendiente";
+                  let statusLabel = goalsT.pending;
                   let statusClass =
                     "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200";
 
                   if (overGoal || goal.status === "completado") {
-                    statusLabel = "Completado";
+                    statusLabel = goalsT.completed;
                     statusClass =
                       "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300";
                   } else if (goal.status === "en_progreso") {
-                    statusLabel = "En progreso";
+                    statusLabel = goalsT.inProgress;
                     statusClass =
                       "bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300";
                   } else if (goal.status === "pausado") {
-                    statusLabel = "Pausado";
+                    statusLabel = goalsT.paused;
                     statusClass =
                       "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300";
                   } else if (goal.status === "cancelado") {
-                    statusLabel = "Cancelado";
+                    statusLabel = goalsT.cancelled;
                     statusClass =
                       "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300";
                   }
@@ -510,21 +512,21 @@ export default function FamilyGoalsPage() {
 
                           <div className="mb-1 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
                             <span>
-                              Meta:{" "}
+                              {goalsT.target}{" "}
                               <span className="font-semibold text-slate-800 dark:text-slate-100">
-                                {formatCurrency(goal.target_amount || 0)}
+                                {formatCurrency(goal.target_amount || 0, locale)}
                               </span>
                             </span>
                             <span>
-                              Aportado:{" "}
+                              {goalsT.contributed}{" "}
                               <span className="font-semibold text-slate-800 dark:text-slate-100">
-                                {formatCurrency(goal.totalContributed || 0)}
+                                {formatCurrency(goal.totalContributed || 0, locale)}
                               </span>
                             </span>
                           </div>
 
                           <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                            {normalizedProgress.toFixed(1)}% completado · {formatDate(goal.due_date)}
+                            {normalizedProgress.toFixed(1)}% {goalsT.completedPct} · {formatDate(goal.due_date, locale, goalsT.noDeadline)}
                           </p>
                         </div>
                       </div>
@@ -533,13 +535,13 @@ export default function FamilyGoalsPage() {
                         <div className="flex flex-wrap gap-2">
                           {goal.auto_track && goal.track_category && (
                             <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                              Se actualiza con:{" "}
+                              {goalsT.autoUpdatesWith}{" "}
                               <span className="font-semibold">{goal.track_category}</span>
                             </span>
                           )}
                           {goal.track_direction && (
                             <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                              Dirección: <span className="font-semibold">{goal.track_direction}</span>
+                              {goalsT.direction} <span className="font-semibold">{goal.track_direction}</span>
                             </span>
                           )}
                         </div>
@@ -548,7 +550,7 @@ export default function FamilyGoalsPage() {
                           href={`/familia/objetivos/${goal.id}/editar`}
                           className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                         >
-                          Editar
+                          {t.edit}
                         </Link>
                       </div>
                     </article>

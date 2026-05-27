@@ -7,6 +7,7 @@ import { PageShell } from "@/components/ui/PageShell";
 import { Button, Card, EmptyState, Help, LinkButton, Section } from "@/components/ui/kit";
 import { supabase } from "@/lib/supabase";
 import { getSupabaseConfigError, prettySupabaseAuthError } from "@/lib/authErrors";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 type InviteRow = {
   id: string;
@@ -24,15 +25,18 @@ type InviteRow = {
 
 type AuthMode = "signup" | "login";
 
-function formatDateMX(iso: string) {
+function formatDateDisplay(iso: string, locale: string) {
   try {
-    return new Date(iso).toLocaleString("es-MX");
+    return new Date(iso).toLocaleString(locale);
   } catch {
     return iso;
   }
 }
 
 export default function AceptarClient() {
+  const { dictionary, locale } = useI18n();
+  const t = dictionary.family;
+  const acceptT = t.accept;
   const sp = useSearchParams();
   const router = useRouter();
   const token = (sp.get("token") ?? "").trim();
@@ -69,11 +73,11 @@ export default function AceptarClient() {
 
     const json = await res.json().catch(() => ({}));
     if (!res.ok || json?.ok !== true) {
-      throw new Error(json?.error || "No se pudo cargar la invitación.");
+      throw new Error(json?.error || acceptT.errors.preview);
     }
 
     return (json.invite ?? null) as InviteRow | null;
-  }, [token]);
+  }, [acceptT.errors.preview, token]);
 
   const acceptInvite = useCallback(async (accessToken: string) => {
     const res = await fetch("/api/family/accept", {
@@ -90,9 +94,9 @@ export default function AceptarClient() {
       const code = String(json?.code ?? "");
       if (code === "NEEDS_LOGIN") setNeedsAuth(true);
       if (code === "EMAIL_MISMATCH") setEmailMismatch(true);
-      throw new Error(json?.error || "No se pudo aceptar la invitación.");
+      throw new Error(json?.error || acceptT.errors.accept);
     }
-  }, [token]);
+  }, [acceptT.errors.accept, token]);
 
   const completeInviteAcceptance = useCallback(async () => {
     setAccepting(true);
@@ -106,7 +110,7 @@ export default function AceptarClient() {
 
       if (!u || !accessToken) {
         setNeedsAuth(true);
-        setError("Necesitas autenticarte para aceptar la invitación.");
+        setError(acceptT.errors.needsAuth);
         return;
       }
 
@@ -122,11 +126,11 @@ export default function AceptarClient() {
 
       router.replace("/familia");
     } catch (e: any) {
-      setError(e?.message ?? "No se pudo aceptar la invitación.");
+      setError(e?.message ?? acceptT.errors.accept);
     } finally {
       setAccepting(false);
     }
-  }, [acceptInvite, fetchPreview, router]);
+  }, [acceptInvite, acceptT.errors.accept, acceptT.errors.needsAuth, fetchPreview, router]);
 
   const onSignOutWrongSession = async () => {
     try {
@@ -140,7 +144,7 @@ export default function AceptarClient() {
       setNeedsAuth(true);
       setError(null);
     } catch (e: any) {
-      setAuthError(e?.message ?? "No se pudo cerrar la sesión actual.");
+      setAuthError(e?.message ?? acceptT.errors.signOut);
     } finally {
       setSigningOut(false);
     }
@@ -162,15 +166,15 @@ export default function AceptarClient() {
       }
 
       if (!fullName.trim()) {
-        setAuthError("Escribe tu nombre para crear la cuenta.");
+        setAuthError(acceptT.errors.fullName);
         return;
       }
       if (password.length < 6) {
-        setAuthError("Tu contraseña debe tener al menos 6 caracteres.");
+        setAuthError(acceptT.errors.passwordMin);
         return;
       }
       if (password !== confirmPassword) {
-        setAuthError("Las contraseñas no coinciden.");
+        setAuthError(acceptT.errors.passwordMatch);
         return;
       }
 
@@ -199,7 +203,7 @@ export default function AceptarClient() {
 
         if (signInError || !signInData.session) {
           setAuthError(
-            "La cuenta se creó, pero no pudimos iniciar sesión automáticamente. Revisa si tu proyecto exige confirmación por correo o intenta con Ya tengo cuenta."
+            acceptT.errors.createdNoSession
           );
           return;
         }
@@ -208,11 +212,11 @@ export default function AceptarClient() {
       }
 
       if (!hasSession) {
-        setAuthError("No pudimos abrir tu sesión después de crear la cuenta.");
+        setAuthError(acceptT.errors.noSession);
         return;
       }
 
-      setAuthInfo("Cuenta creada. Estamos agregándote a la familia…");
+      setAuthInfo(acceptT.info.created);
       await completeInviteAcceptance();
     } catch (e: any) {
       setAuthError(prettySupabaseAuthError(e?.message));
@@ -237,7 +241,7 @@ export default function AceptarClient() {
       }
 
       if (!password) {
-        setAuthError("Escribe tu contraseña para continuar.");
+        setAuthError(acceptT.errors.passwordRequired);
         return;
       }
 
@@ -251,7 +255,7 @@ export default function AceptarClient() {
         return;
       }
 
-      setAuthInfo("Sesión iniciada. Estamos agregándote a la familia…");
+      setAuthInfo(acceptT.info.signedIn);
       await completeInviteAcceptance();
     } catch (e: any) {
       setAuthError(prettySupabaseAuthError(e?.message));
@@ -274,13 +278,13 @@ export default function AceptarClient() {
       setAuthInfo(null);
 
       if (!token) {
-        setError("Falta el token de invitación.");
+        setError(acceptT.errors.missingToken);
         setLoading(false);
         return;
       }
 
       if (typeof window !== "undefined" && !navigator.onLine) {
-        setError("Para aceptar la invitación necesitas conexión a internet.");
+        setError(acceptT.errors.onlineRequired);
         setLoading(false);
         return;
       }
@@ -291,7 +295,7 @@ export default function AceptarClient() {
         setInvite(inv);
 
         if (inv?.status === "revoked" || inv?.status === "expired") {
-          setError("Esta invitación ya no está disponible.");
+          setError(acceptT.errors.unavailable);
           setLoading(false);
           return;
         }
@@ -324,7 +328,7 @@ export default function AceptarClient() {
         await completeInviteAcceptance();
       } catch (e: any) {
         if (!alive) return;
-        setError(e?.message ?? "No se pudo aceptar la invitación.");
+        setError(e?.message ?? acceptT.errors.accept);
       } finally {
         if (!alive) return;
         setLoading(false);
@@ -336,13 +340,13 @@ export default function AceptarClient() {
     return () => {
       alive = false;
     };
-  }, [completeInviteAcceptance, fetchPreview, token]);
+  }, [acceptT.errors.accept, acceptT.errors.missingToken, acceptT.errors.onlineRequired, acceptT.errors.unavailable, completeInviteAcceptance, fetchPreview, token]);
 
   return (
     <main className="flex min-h-screen flex-col pb-16 md:pb-4">
       <AppHeader
-        title="Aceptar invitación"
-        subtitle="Únete a tu familia con un flujo corto y seguro."
+        title={acceptT.title}
+        subtitle={acceptT.subtitle}
         activeTab="familia"
         userEmail={userEmail ?? undefined}
         userId={userId ?? undefined}
@@ -351,22 +355,22 @@ export default function AceptarClient() {
       <PageShell maxWidth="3xl">
         <Card>
           <Section
-            title={success ? "Invitación aceptada" : "Aceptar invitación"}
+            title={success ? acceptT.acceptedTitle : acceptT.title}
             subtitle={
               success
-                ? "Tu acceso familiar quedó listo."
-                : "Confirma tu cuenta y entra directo al espacio familiar."
+                ? acceptT.acceptedSubtitle
+                : acceptT.defaultSubtitle
             }
             right={
               invite?.status ? (
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Estado: <span className="font-semibold">{invite.status}</span>
+                  {t.status}: <span className="font-semibold">{t.statusLabels[invite.status] ?? invite.status}</span>
                 </span>
               ) : null
             }
           >
             {loading ? (
-              <EmptyState>Preparando tu invitación…</EmptyState>
+              <EmptyState>{acceptT.preparing}</EmptyState>
             ) : (
               <div className="space-y-4">
                 {invite ? (
@@ -374,21 +378,21 @@ export default function AceptarClient() {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-                          Invitación
+                          {acceptT.invite}
                         </div>
                         <div className="mt-1 text-base font-semibold text-slate-900 dark:text-slate-50">
-                          {invite.family_name?.trim() || "Tu familia en RINDAY"}
+                          {invite.family_name?.trim() || acceptT.familyFallback}
                         </div>
                       </div>
                       <div className="rounded-full border border-slate-200 px-3 py-1 text-[11px] font-medium dark:border-slate-700">
-                        Rol: {invite.role}
+                        {t.role}: {t.roleLabels[invite.role] ?? invite.role}
                       </div>
                     </div>
 
                     <div className="mt-4 grid gap-3 md:grid-cols-2">
                       <div>
                         <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-                          Correo invitado
+                          {acceptT.invitedEmail}
                         </div>
                         <div className="mt-1 font-medium">{invite.email}</div>
                       </div>
@@ -396,16 +400,16 @@ export default function AceptarClient() {
                       {invite.expires_at ? (
                         <div>
                           <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
-                            Expira
+                            {acceptT.expires}
                           </div>
-                          <div className="mt-1 font-medium">{formatDateMX(invite.expires_at)}</div>
+                          <div className="mt-1 font-medium">{formatDateDisplay(invite.expires_at, locale)}</div>
                         </div>
                       ) : null}
                     </div>
 
                     {invite.message ? (
                       <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3 text-[13px] dark:border-slate-800 dark:bg-slate-900">
-                        <div className="font-semibold">Mensaje</div>
+                        <div className="font-semibold">{acceptT.message}</div>
                         <div className="mt-1">{invite.message}</div>
                       </div>
                     ) : null}
@@ -414,7 +418,7 @@ export default function AceptarClient() {
 
                 {!canRun ? (
                   <Help>
-                    Asegúrate de abrir el enlace completo con <code>?token=...</code>
+                    {acceptT.missingTokenHelp}
                   </Help>
                 ) : null}
 
@@ -427,31 +431,30 @@ export default function AceptarClient() {
                 {success ? (
                   <div className="space-y-3">
                     <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200">
-                      Ya eres parte de la familia. Te estamos llevando al dashboard familiar.
+                      {acceptT.acceptedBody}
                     </div>
 
                     <div className="flex flex-wrap gap-2">
                       <a href="/familia">
-                        <Button>Ir a Familia</Button>
+                        <Button>{acceptT.goToFamily}</Button>
                       </a>
                       <a href="/familia/dashboard">
-                        <LinkButton tone="info">Ir al dashboard familiar</LinkButton>
+                        <LinkButton tone="info">{acceptT.goToDashboard}</LinkButton>
                       </a>
                     </div>
                   </div>
                 ) : emailMismatch ? (
                   <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/30">
                     <div className="text-sm font-semibold text-amber-900 dark:text-amber-100">
-                      Esta invitación es para otro correo
+                      {acceptT.wrongEmailTitle}
                     </div>
                     <p className="mt-2 text-sm text-amber-800 dark:text-amber-200">
-                      Tienes una sesión abierta como <span className="font-semibold">{userEmail ?? "otro correo"}</span>,
-                      pero la invitación corresponde a <span className="font-semibold">{invitedEmail ?? "el correo invitado"}</span>.
+                      {acceptT.wrongEmailBody(userEmail ?? t.email, invitedEmail ?? acceptT.invitedEmail)}
                     </p>
 
                     <div className="mt-4 flex flex-wrap gap-2">
                       <Button onClick={onSignOutWrongSession} disabled={signingOut}>
-                        {signingOut ? "Cerrando sesión…" : "Cerrar sesión y continuar"}
+                        {signingOut ? acceptT.signingOut : acceptT.signOutContinue}
                       </Button>
                     </div>
                   </div>
@@ -460,12 +463,12 @@ export default function AceptarClient() {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <div className="text-base font-semibold text-slate-900 dark:text-slate-50">
-                          {authMode === "signup" ? "Crea tu cuenta" : "Inicia sesión"}
+                          {authMode === "signup" ? acceptT.createAccount : acceptT.signIn}
                         </div>
                         <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
                           {authMode === "signup"
-                            ? "Si todavía no tienes cuenta, créala con el mismo correo de la invitación."
-                            : "Entra con el correo invitado y te agregamos a la familia en el mismo paso."}
+                            ? acceptT.signupBody
+                            : acceptT.loginBody}
                         </p>
                       </div>
 
@@ -485,7 +488,7 @@ export default function AceptarClient() {
                               : "text-slate-600 dark:text-slate-300"
                           }`}
                         >
-                          Crear cuenta
+                          {t.signup}
                         </button>
                         <button
                           type="button"
@@ -501,21 +504,19 @@ export default function AceptarClient() {
                               : "text-slate-600 dark:text-slate-300"
                           }`}
                         >
-                          Ya tengo cuenta
+                          {acceptT.haveAccount}
                         </button>
                       </div>
                     </div>
 
                     <div className="mt-4 space-y-4">
                       <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-100">
-                        Esta invitación está ligada a{" "}
-                        <span className="font-semibold">{invitedEmail ?? "el correo invitado"}</span>. Para aceptarla,
-                        crea una cuenta o inicia sesión usando ese mismo correo.
+                        {acceptT.inviteEmailNotice(invitedEmail ?? acceptT.invitedEmail)}
                       </div>
 
                       <div>
                         <label className="mb-1 block text-[12px] font-semibold text-slate-700 dark:text-slate-200">
-                          Correo invitado
+                          {acceptT.invitedEmail}
                         </label>
                         <input
                           value={invitedEmail ?? ""}
@@ -527,14 +528,14 @@ export default function AceptarClient() {
                       {authMode === "signup" ? (
                         <div>
                           <label className="mb-1 block text-[12px] font-semibold text-slate-700 dark:text-slate-200">
-                            Nombre
+                            {acceptT.fullName}
                           </label>
                           <input
                             value={fullName}
                             onChange={(e) => setFullName(e.target.value)}
                             disabled={authBusy}
                             autoComplete="name"
-                            placeholder="Cómo quieres aparecer en la familia"
+                            placeholder={acceptT.fullNamePlaceholder}
                             className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-sky-900/30"
                           />
                         </div>
@@ -543,7 +544,7 @@ export default function AceptarClient() {
                       <div className="grid gap-4 md:grid-cols-2">
                         <div>
                           <label className="mb-1 block text-[12px] font-semibold text-slate-700 dark:text-slate-200">
-                            Contraseña
+                            {acceptT.password}
                           </label>
                           <input
                             type="password"
@@ -551,7 +552,7 @@ export default function AceptarClient() {
                             onChange={(e) => setPassword(e.target.value)}
                             disabled={authBusy}
                             autoComplete={authMode === "signup" ? "new-password" : "current-password"}
-                            placeholder={authMode === "signup" ? "Mínimo 6 caracteres" : "Tu contraseña"}
+                            placeholder={authMode === "signup" ? acceptT.passwordSignupPlaceholder : acceptT.passwordLoginPlaceholder}
                             className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-sky-900/30"
                           />
                         </div>
@@ -559,7 +560,7 @@ export default function AceptarClient() {
                         {authMode === "signup" ? (
                           <div>
                             <label className="mb-1 block text-[12px] font-semibold text-slate-700 dark:text-slate-200">
-                              Confirmar contraseña
+                              {acceptT.confirmPassword}
                             </label>
                             <input
                               type="password"
@@ -567,7 +568,7 @@ export default function AceptarClient() {
                               onChange={(e) => setConfirmPassword(e.target.value)}
                               disabled={authBusy}
                               autoComplete="new-password"
-                              placeholder="Repite tu contraseña"
+                              placeholder={acceptT.confirmPasswordPlaceholder}
                               className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none focus:border-sky-400 focus:ring-4 focus:ring-sky-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-sky-900/30"
                             />
                           </div>
@@ -592,21 +593,21 @@ export default function AceptarClient() {
                           disabled={authBusy || accepting}
                         >
                           {authBusy || accepting
-                            ? "Procesando…"
+                            ? t.processing
                             : authMode === "signup"
-                            ? "Crear cuenta y unirme"
-                            : "Entrar y unirme"}
+                            ? acceptT.createAndJoin
+                            : acceptT.enterAndJoin}
                         </Button>
 
                         <a href="/familia">
-                          <LinkButton tone="info">Volver a Familia</LinkButton>
+                          <LinkButton tone="info">{t.backToFamily}</LinkButton>
                         </a>
                       </div>
 
                       {authMode === "login" ? (
                         <div className="text-xs text-slate-600 dark:text-slate-300">
                           <a href="/auth/reset-password" className="text-sky-600 underline">
-                            Olvidé mi contraseña
+                            {acceptT.forgotPassword}
                           </a>
                         </div>
                       ) : null}
@@ -615,10 +616,10 @@ export default function AceptarClient() {
                 ) : (
                   <div className="flex flex-wrap gap-2">
                     <Button onClick={completeInviteAcceptance} disabled={accepting || !canRun}>
-                      {accepting ? "Procesando…" : "Aceptar invitación"}
+                      {accepting ? t.processing : acceptT.acceptInvite}
                     </Button>
                     <a href="/familia">
-                      <LinkButton tone="info">Volver a Familia</LinkButton>
+                      <LinkButton tone="info">{t.backToFamily}</LinkButton>
                     </a>
                   </div>
                 )}

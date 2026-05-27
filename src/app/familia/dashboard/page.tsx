@@ -20,6 +20,7 @@ import {
 } from "recharts";
 import { PageShell } from "@/components/ui/PageShell";
 import { useFamilyContext } from "@/hooks/useFamilyContext";
+import { useI18n } from "@/lib/i18n/useI18n";
 
 export const dynamic = "force-dynamic";
 
@@ -112,19 +113,19 @@ function writeCache<T>(key: string, value: T) {
   } catch {}
 }
 
-function formatCurrency(monto: number): string {
-  return (monto || 0).toLocaleString("es-MX", {
+function formatCurrency(monto: number, locale: string): string {
+  return (monto || 0).toLocaleString(locale, {
     style: "currency",
     currency: "MXN",
     maximumFractionDigits: 0,
   });
 }
 
-function formatDate(dateStr?: string | null): string {
-  if (!dateStr) return "Sin fecha";
+function formatDate(dateStr: string | null | undefined, locale: string, fallback: string): string {
+  if (!dateStr) return fallback;
   const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return "Sin fecha";
-  return d.toLocaleDateString("es-MX", {
+  if (Number.isNaN(d.getTime())) return fallback;
+  return d.toLocaleDateString(locale, {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -137,6 +138,9 @@ function daysDiff(from: Date, to: Date): number {
 }
 
 export default function FamilyDashboardPage() {
+  const { dictionary, locale } = useI18n();
+  const t = dictionary.family;
+  const dashT = t.dashboard;
   const { theme } = useTheme();
   const isDark = theme === "dark";
 
@@ -287,7 +291,7 @@ export default function FamilyDashboardPage() {
                   const label =
                     m.full_name ??
                     m.invited_email ??
-                    (uid ? `Usuario ${String(uid).slice(0, 8)}` : "Miembro");
+                    (uid ? `${dashT.unknownMember} ${String(uid).slice(0, 8)}` : t.member);
 
                   return {
                     id: uid ?? m.id,
@@ -306,7 +310,7 @@ export default function FamilyDashboardPage() {
             {
               id: user.id,
               user_id: user.id,
-              full_name: user.email ?? "Tu cuenta",
+              full_name: user.email ?? t.yourAccount,
               role: familyGroupId ? "owner" : "member",
               status: "active",
             },
@@ -377,8 +381,8 @@ export default function FamilyDashboardPage() {
                     {
                       id: user.id,
                       user_id: user.id,
-                      full_name: user.email ?? "Tu cuenta",
-                      role: familyGroupId ? "owner" : "jefe",
+                      full_name: user.email ?? t.yourAccount,
+                      role: familyGroupId ? "owner" : "member",
                       status: "active",
                     },
                   ]
@@ -387,7 +391,7 @@ export default function FamilyDashboardPage() {
             setTxs(cachedTxs);
             setError(null);
           } else {
-            setError(err?.message || "Ocurrió un error al cargar el dashboard familiar. Intenta de nuevo.");
+            setError(err?.message || dashT.error);
           }
         }
       } finally {
@@ -403,7 +407,7 @@ export default function FamilyDashboardPage() {
     return () => {
       ignore = true;
     };
-  }, [user, authLoading, familyCtx?.familyId, familyLoading, isOffline]);
+  }, [user, authLoading, familyCtx?.familyId, familyLoading, isOffline, dashT.error, dashT.unknownMember, t.member, t.yourAccount]);
 
   // =========================================================
   // MAPS + KPIs
@@ -494,24 +498,24 @@ export default function FamilyDashboardPage() {
     const map = new Map<string, number>();
     txs.forEach((tx) => {
       if (!tx.goal_id) return;
-      const key = tx.spender_user_id || tx.owner_user_id || tx.created_by || tx.user_id || "desconocido";
+      const key = tx.spender_user_id || tx.owner_user_id || tx.created_by || tx.user_id || dashT.unknownUser;
       map.set(key, (map.get(key) || 0) + (tx.amount || 0));
     });
     return Array.from(map.entries()).map(([userId, total]) => {
       const member = memberMap.get(userId);
-      return { name: member?.full_name || "Miembro", aporte: total };
+      return { name: member?.full_name || t.member, aporte: total };
     });
-  }, [txs, memberMap]);
+  }, [txs, memberMap, dashT.unknownUser, t.member]);
 
   const headerRoleLabel = useMemo(() => {
-    if (!familyCtx?.familyId) return "Cuenta individual";
-    return isFamilyOwner ? "Administrador familiar" : "Miembro";
-  }, [familyCtx?.familyId, isFamilyOwner]);
+    if (!familyCtx?.familyId) return t.individualAccount;
+    return isFamilyOwner ? t.familyAdmin : t.member;
+  }, [familyCtx?.familyId, isFamilyOwner, t.familyAdmin, t.individualAccount, t.member]);
 
   if (authLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center px-4 text-sm text-slate-600 dark:text-slate-300">
-        Cargando sesión…
+        {t.loadingSession}
       </div>
     );
   }
@@ -520,22 +524,22 @@ export default function FamilyDashboardPage() {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center px-4 text-center text-sm text-slate-600 dark:text-slate-300">
         <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h1 className="text-base font-semibold text-slate-950 dark:text-slate-50">Dashboard familiar</h1>
+          <h1 className="text-base font-semibold text-slate-950 dark:text-slate-50">{dashT.guestTitle}</h1>
           <p className="mt-2 leading-6">
-            Inicia sesión para ver objetivos, aportaciones y avances de tu familia.
+            {dashT.guestBody}
           </p>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             <Link
               href="/onboarding?mode=login&next=%2Ffamilia%2Fdashboard"
               className="rounded-full bg-sky-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-600"
             >
-              Iniciar sesión
+              {t.login}
             </Link>
             <Link
               href="/onboarding?mode=signup&next=%2Ffamilia%2Fdashboard"
               className="rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800"
             >
-              Crear cuenta
+              {t.signup}
             </Link>
           </div>
         </div>
@@ -546,8 +550,8 @@ export default function FamilyDashboardPage() {
   return (
     <main className="flex min-h-screen flex-col pb-16 md:pb-4">
       <AppHeader
-        title="Familia"
-        subtitle="Objetivos familiares y actividad del grupo"
+        title={t.title}
+        subtitle={dashT.subtitle}
         activeTab="familia"
         userName={(user?.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user?.email ?? ""}
@@ -558,9 +562,9 @@ export default function FamilyDashboardPage() {
       <PageShell maxWidth="6xl">
         <section className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Dashboard familiar</h1>
+            <h1 className="text-xl font-semibold tracking-tight md:text-2xl">{dashT.title}</h1>
             <p className="text-xs text-slate-500 dark:text-slate-400 md:text-sm">
-              Visualiza el avance de tus objetivos familiares, quién está aportando más y qué tan cerca están de lograrse.
+              {dashT.body}
             </p>
 
             <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
@@ -568,28 +572,28 @@ export default function FamilyDashboardPage() {
                 href="/familia/objetivos"
                 className="rounded-full border border-slate-300 bg-white px-3 py-1 font-medium text-slate-700 shadow-sm transition hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
               >
-                Ver metas familiares
+                {dashT.viewGoals}
               </Link>
               <Link
                 href="/familia/objetivos/nuevo"
                 className="rounded-full bg-sky-500 px-3 py-1 font-medium text-white shadow-sm transition hover:bg-sky-600"
               >
-                Crear nueva meta
+                {dashT.createGoal}
               </Link>
             </div>
 
             <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
               {isOffline ? (
-                <span className="text-amber-700 dark:text-amber-300">Modo offline: mostrando datos guardados.</span>
+                <span className="text-amber-700 dark:text-amber-300">{dashT.offline}</span>
               ) : familyError ? (
                 <span className="text-rose-600 dark:text-rose-300">{familyError}</span>
               ) : familyCtx?.familyId ? (
                 <>
-                  Familia: <span className="font-semibold">{familyCtx.familyName}</span> · Miembros activos:{" "}
+                  {t.familyLabel}: <span className="font-semibold">{familyCtx.familyName}</span> · {t.activeMembers}:{" "}
                   <span className="font-semibold">{familyCtx.activeMembers}</span>
                 </>
               ) : (
-                <>Aún no tienes familia configurada.</>
+                <>{t.noFamily}</>
               )}
             </div>
           </div>
@@ -604,7 +608,7 @@ export default function FamilyDashboardPage() {
 
         {loading && (
           <div className="mt-4 flex items-center justify-center rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            Cargando dashboard familiar…
+            {dashT.loading}
           </div>
         )}
 
@@ -619,27 +623,27 @@ export default function FamilyDashboardPage() {
             {/* Resumen */}
             <section className="mt-4 grid gap-4 md:grid-cols-3">
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Metas familiares</div>
+                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{dashT.totalGoals}</div>
                 <div className="flex items-baseline gap-2">
                   <div className="text-2xl font-semibold">{globalSummary.totalGoals}</div>
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">totales</div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">{dashT.total}</div>
                 </div>
                 <div className="mt-2 flex gap-3 text-[11px] text-slate-500 dark:text-slate-400">
                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    {globalSummary.completedGoals} completadas
+                    {globalSummary.completedGoals} {dashT.completed}
                   </span>
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
                     <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                    {globalSummary.inProgressGoals} en progreso
+                    {globalSummary.inProgressGoals} {dashT.inProgress}
                   </span>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Ahorro enfocado a metas</div>
+                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{dashT.focusedSavings}</div>
                 <div className="text-xs text-slate-500 dark:text-slate-400">
-                  {formatCurrency(globalSummary.globalContributed)} / {formatCurrency(globalSummary.globalTarget || 0)}
+                  {formatCurrency(globalSummary.globalContributed, locale)} / {formatCurrency(globalSummary.globalTarget || 0, locale)}
                 </div>
                 <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                   <div
@@ -648,15 +652,15 @@ export default function FamilyDashboardPage() {
                   />
                 </div>
                 <div className="mt-1 text-right text-[11px] text-slate-500 dark:text-slate-400">
-                  Avance global{" "}
+                  {dashT.globalProgress}{" "}
                   <span className="font-semibold text-slate-800 dark:text-slate-100">{globalSummary.globalProgressPct.toFixed(1)}%</span>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Aportado a metas este mes</div>
-                <div className="text-2xl font-semibold">{formatCurrency(globalSummary.monthlyGoalContrib || 0)}</div>
-                <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Suma de movimientos ligados a objetivos durante el mes actual.</p>
+                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{dashT.contributedThisMonth}</div>
+                <div className="text-2xl font-semibold">{formatCurrency(globalSummary.monthlyGoalContrib || 0, locale)}</div>
+                <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{dashT.contributedThisMonthHint}</p>
               </div>
             </section>
 
@@ -664,13 +668,13 @@ export default function FamilyDashboardPage() {
             <section className="mt-4 grid gap-4 lg:grid-cols-3">
               <div className="lg:col-span-2">
                 <div className="mb-3">
-                  <h2 className="text-sm font-semibold">Objetivos familiares</h2>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Objetivos vinculados a tus movimientos. El avance se calcula automáticamente.</p>
+                  <h2 className="text-sm font-semibold">{dashT.goalsTitle}</h2>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">{dashT.goalsSubtitle}</p>
                 </div>
 
                 {goalsWithProgress.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
-                    Crea una meta familiar para convertir el ahorro en un plan compartido.
+                    {dashT.emptyGoals}
                   </div>
                 ) : (
                   <div className="grid gap-3 md:grid-cols-2">
@@ -681,10 +685,10 @@ export default function FamilyDashboardPage() {
 
                       const intensityBadge =
                         goal.intensity === "on_track"
-                          ? { label: "En ruta", className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" }
+                          ? { label: dashT.onTrack, className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" }
                           : goal.intensity === "at_risk"
-                          ? { label: "En riesgo", className: "bg-amber-50 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" }
-                          : { label: "Fuera de ruta", className: "bg-rose-50 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" };
+                          ? { label: dashT.atRisk, className: "bg-amber-50 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" }
+                          : { label: dashT.offTrack, className: "bg-rose-50 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300" };
 
                       return (
                         <article
@@ -705,10 +709,10 @@ export default function FamilyDashboardPage() {
 
                           <div className="mb-2 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
                             <span>
-                              Meta: <span className="font-semibold text-slate-800 dark:text-slate-100">{formatCurrency(goal.target_amount || 0)}</span>
+                              {dashT.target} <span className="font-semibold text-slate-800 dark:text-slate-100">{formatCurrency(goal.target_amount || 0, locale)}</span>
                             </span>
                             <span>
-                              Avance: <span className="font-semibold text-slate-800 dark:text-slate-100">{formatCurrency(goal.totalContributed)}</span>
+                              {dashT.progress} <span className="font-semibold text-slate-800 dark:text-slate-100">{formatCurrency(goal.totalContributed, locale)}</span>
                             </span>
                           </div>
 
@@ -721,13 +725,13 @@ export default function FamilyDashboardPage() {
 
                           <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
                             <span>
-                              {goal.progressPct.toFixed(1)}% completado
-                              {goal.due_date && <> {" · "}meta al {formatDate(goal.due_date)}</>}
+                              {goal.progressPct.toFixed(1)}% {dashT.completedPct}
+                              {goal.due_date && <> {" · "}{dashT.due} {formatDate(goal.due_date, locale, dictionary.family.goals.noDeadline)}</>}
                             </span>
                             {member?.full_name && (
                               <span className="inline-flex items-center gap-1">
                                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                Líder: <span className="font-medium text-slate-700 dark:text-slate-200">{member.full_name}</span>
+                                {dashT.leader} <span className="font-medium text-slate-700 dark:text-slate-200">{member.full_name}</span>
                               </span>
                             )}
                           </div>
@@ -735,18 +739,16 @@ export default function FamilyDashboardPage() {
                           <div className="mt-3 rounded-xl bg-slate-50 p-2 text-[11px] text-slate-500 dark:bg-slate-900/70 dark:text-slate-400">
                             {goal.last30Amount > 0 ? (
                               <p>
-                                En los últimos 30 días se han aportado{" "}
-                                <span className="font-semibold text-slate-800 dark:text-slate-100">{formatCurrency(goal.last30Amount)}</span>.
+                                <span>{dashT.last30(formatCurrency(goal.last30Amount, locale))}</span>
                                 {goal.projectedDaysToGoal && (
                                   <>
                                     {" "}
-                                    A este ritmo, podrían completarla en{" "}
-                                    <span className="font-semibold text-slate-800 dark:text-slate-100">~{Math.round(goal.projectedDaysToGoal)} días</span>.
+                                    <span>{dashT.projectedDays(Math.round(goal.projectedDaysToGoal))}</span>
                                   </>
                                 )}
                               </p>
                             ) : (
-                              <p>Todavía no hay aportaciones recientes. Vincula movimientos o define una categoría para que avance automáticamente.</p>
+                              <p>{dashT.noRecent}</p>
                             )}
                           </div>
                         </article>
@@ -758,31 +760,31 @@ export default function FamilyDashboardPage() {
 
               <div className="space-y-4">
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <h3 className="text-xs font-semibold">Termómetro familiar</h3>
-                  <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Resumen rápido del estado de tus objetivos.</p>
+                  <h3 className="text-xs font-semibold">{dashT.thermometer}</h3>
+                  <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{dashT.thermometerBody}</p>
 
                   <ul className="mt-3 space-y-2 text-[11px] text-slate-600 dark:text-slate-300">
-                    <li className="flex items-start gap-2"><span className="mt-1 h-1.5 w-1.5 rounded-full bg-emerald-500" /><span>{globalSummary.completedGoals} objetivo(s) completado(s).</span></li>
-                    <li className="flex items-start gap-2"><span className="mt-1 h-1.5 w-1.5 rounded-full bg-amber-500" /><span>{globalSummary.inProgressGoals} objetivo(s) en progreso.</span></li>
-                    <li className="flex items-start gap-2"><span className="mt-1 h-1.5 w-1.5 rounded-full bg-sky-500" /><span>Avance global: {globalSummary.globalProgressPct.toFixed(1)}%.</span></li>
+                    <li className="flex items-start gap-2"><span className="mt-1 h-1.5 w-1.5 rounded-full bg-emerald-500" /><span>{dashT.completedGoalsLine(globalSummary.completedGoals)}</span></li>
+                    <li className="flex items-start gap-2"><span className="mt-1 h-1.5 w-1.5 rounded-full bg-amber-500" /><span>{dashT.inProgressGoalsLine(globalSummary.inProgressGoals)}</span></li>
+                    <li className="flex items-start gap-2"><span className="mt-1 h-1.5 w-1.5 rounded-full bg-sky-500" /><span>{dashT.globalProgressLine(globalSummary.globalProgressPct.toFixed(1))}</span></li>
                   </ul>
                 </div>
 
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-xs font-semibold">Progreso por objetivo</h3>
-                      <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Cada barra representa el avance de una meta.</p>
+                      <h3 className="text-xs font-semibold">{dashT.progressByGoal}</h3>
+                      <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{dashT.progressByGoalBody}</p>
                     </div>
                     <button type="button" onClick={() => setShowGoalsChart((v) => !v)} className="text-[11px] font-medium text-sky-600 hover:underline">
-                      {showGoalsChart ? "Ocultar" : "Ver gráfica"}
+                      {showGoalsChart ? t.hideChart : t.showChart}
                     </button>
                   </div>
 
                   {showGoalsChart && (
                     <>
                       {goalsChartData.length === 0 ? (
-                        <div className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">Crea al menos una meta para ver su avance visual.</div>
+                        <div className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">{dashT.chartEmpty}</div>
                       ) : (
                         <div className="mt-3 h-40">
                           <ResponsiveContainer width="100%" height="100%">
@@ -801,19 +803,19 @@ export default function FamilyDashboardPage() {
                 </div>
 
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                  <h3 className="text-xs font-semibold">Aportaciones por miembro</h3>
-                  <p className="mb-2 mt-1 text-[11px] text-slate-500 dark:text-slate-400">Quién está aportando más a las metas (según movimientos ligados).</p>
+                  <h3 className="text-xs font-semibold">{dashT.contributionsByMember}</h3>
+                  <p className="mb-2 mt-1 text-[11px] text-slate-500 dark:text-slate-400">{dashT.contributionsByMemberBody}</p>
 
                   {memberContributionChartData.length === 0 ? (
-                    <div className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">Vincula movimientos a metas para ver aportaciones por miembro.</div>
+                    <div className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">{dashT.contributionsEmpty}</div>
                   ) : (
                     <div className="h-40">
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={memberContributionChartData}>
                           <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
                           <XAxis dataKey="name" tick={{ fontSize: 10 }} tickLine={false} />
-                          <YAxis tick={{ fontSize: 10 }} tickLine={false} tickFormatter={(value) => formatCurrency(Number(value))} />
-                          <Tooltip contentStyle={{ fontSize: 11 }} formatter={(value: any) => formatCurrency(Number(value))} />
+                          <YAxis tick={{ fontSize: 10 }} tickLine={false} tickFormatter={(value) => formatCurrency(Number(value), locale)} />
+                          <Tooltip contentStyle={{ fontSize: 11 }} formatter={(value: any) => formatCurrency(Number(value), locale)} />
                           <Legend wrapperStyle={{ fontSize: 10 }} />
                           <Line type="monotone" dataKey="aporte" dot={false} strokeWidth={2} />
                         </LineChart>

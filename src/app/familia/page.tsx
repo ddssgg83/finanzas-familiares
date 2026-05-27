@@ -10,6 +10,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { PageShell } from "@/components/ui/PageShell";
 import { formatDateDisplay } from "@/lib/format";
 import { useFamilyContext, type FamilyContext } from "@/hooks/useFamilyContext";
+import { useI18n } from "@/lib/i18n/useI18n";
 import {
   Button,
   Card,
@@ -233,6 +234,10 @@ function friendlyFamilyError(message?: string | null) {
 // Página
 // =========================================================
 export default function FamiliaPage() {
+  const { dictionary } = useI18n();
+  const t = dictionary.family;
+  const pageT = t.page;
+
   // -------- AUTH --------
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -249,7 +254,7 @@ export default function FamiliaPage() {
       window.removeEventListener("online", update);
       window.removeEventListener("offline", update);
     };
-  }, []);
+  }, [t.errors.auth]);
   const offline = !isOnline;
 
   // -------- FAMILY CTX --------
@@ -326,15 +331,15 @@ export default function FamiliaPage() {
   const copyInviteLink = async (token: string | null) => {
     try {
       if (!token) {
-        alert("Esta invitación no tiene token.");
+        alert(t.errors.copyMissingToken);
         return;
       }
       const link = buildInviteLink(token);
       await navigator.clipboard.writeText(link);
-      alert("Link copiado ✅");
+      alert(pageT.linkCopied);
     } catch (err) {
       console.error("Error copiando link:", err);
-      alert("No se pudo copiar el link.");
+      alert(t.errors.copyLink);
     }
   };
 
@@ -355,7 +360,7 @@ export default function FamiliaPage() {
       } catch {
         if (!ignore) {
           setUser(null);
-          setAuthError("Hubo un problema al cargar tu sesión.");
+          setAuthError(t.errors.auth);
         }
       } finally {
         if (!ignore) setAuthLoading(false);
@@ -374,7 +379,7 @@ export default function FamiliaPage() {
       ignore = true;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [t.errors.auth]);
 
   // ✅ cuando ya conozcamos user, leemos familyId del cache inmediato
   useEffect(() => {
@@ -384,7 +389,7 @@ export default function FamiliaPage() {
     }
     const cached = readFamilyCtxCache(user.id);
     setCachedFamilyId(cached?.familyId ?? null);
-  }, [user?.id]);
+  }, [user]);
 
   // =========================================================
   // Leer MI rol desde BD (family_members)
@@ -430,7 +435,7 @@ export default function FamiliaPage() {
         if (!row) {
           setMyRole("member");
           setDbFamilyId(null);
-          setRoleError("No encontramos una membresía familiar activa para tu cuenta.");
+          setRoleError(t.errors.noActiveMembership);
           return;
         }
 
@@ -451,7 +456,7 @@ export default function FamiliaPage() {
     return () => {
       alive = false;
     };
-  }, [user?.id, isOnline]);
+  }, [user, user?.id, isOnline, familyCtx?.ownerUserId, familyGroup?.owner_user_id, t.errors.noActiveMembership]);
 
   // ✅ UI gating basado en BD (no en cache)
   const isFamilyOwnerUI =
@@ -552,7 +557,7 @@ export default function FamiliaPage() {
                 familyId: op.payload.family_id,
                 email: op.payload.email,
                 role: op.payload.role,
-                inviterName: user.email ?? "Administrador familiar",
+                inviterName: user.email ?? t.familyAdmin,
                 message: op.payload.message ?? null,
               }),
             });
@@ -738,7 +743,7 @@ export default function FamiliaPage() {
           setDataError(null);
         } else {
           console.error("Error cargando módulo familia:", err);
-          setDataError("No se pudo cargar el módulo Familia. Intenta de nuevo más tarde.");
+          setDataError(t.errors.loadFamily);
         }
       } finally {
         if (alive) setLoading(false);
@@ -793,8 +798,8 @@ export default function FamiliaPage() {
   // =========================================================
   const handleCreateFamily = async (e: FormEvent) => {
     e.preventDefault();
-    if (!user) return alert("Tu sesión expiró. Vuelve a iniciar sesión.");
-    if (!createFamilyForm.name.trim()) return alert("Ponle un nombre a tu familia.");
+    if (!user) return alert(t.errors.expired);
+    if (!createFamilyForm.name.trim()) return alert(t.errors.familyNameRequired);
     if (familyCtx?.familyId) return;
 
     const localFamilyId = safeUUID();
@@ -821,7 +826,7 @@ export default function FamiliaPage() {
           id: safeUUID(),
           family_id: localFamilyId,
           user_id: user.id,
-          full_name: user.email ?? "Owner",
+          full_name: user.email ?? t.owner,
           invited_email: user.email ?? null,
           role: "owner",
           status: "active",
@@ -870,7 +875,7 @@ export default function FamiliaPage() {
         {
           family_id: familyId,
           user_id: user.id,
-          full_name: user.email ?? "Owner",
+          full_name: user.email ?? t.owner,
           invited_email: user.email ?? null,
           role: "owner",
           status: "active",
@@ -883,7 +888,7 @@ export default function FamiliaPage() {
       setReloadTick((n) => n + 1);
     } catch (err) {
       console.error("Error creando familia:", err);
-      alert("No se pudo crear la familia. Revisa tu conexión e inténtalo de nuevo.");
+      alert(t.errors.createFamily);
     } finally {
       setSavingCreateFamily(false);
     }
@@ -894,21 +899,21 @@ export default function FamiliaPage() {
   // =========================================================
   const handleInvite = async (e: FormEvent) => {
     e.preventDefault();
-    if (!user) return alert("Tu sesión expiró. Vuelve a iniciar sesión.");
+    if (!user) return alert(t.errors.expired);
 
     const famId = effectiveFamilyId;
-    if (!famId) return alert("Primero crea tu familia.");
-    if (!canManageInvitesUI) return alert("Sólo owner o admin pueden invitar miembros.");
+    if (!famId) return alert(t.errors.createFamilyFirst);
+    if (!canManageInvitesUI) return alert(t.errors.invitePermission);
 
     const email = inviteForm.email.trim().toLowerCase();
-    if (!email || !email.includes("@")) return alert("Escribe un email válido.");
+    if (!email || !email.includes("@")) return alert(t.errors.validEmail);
 
     try {
       setSavingInvite(true);
       setInviteFeedback(null);
 
       if (offline) {
-        alert("Necesitas conexión a internet para enviar una invitación.");
+        alert(t.errors.inviteOnline);
         return;
       }
 
@@ -925,7 +930,7 @@ export default function FamiliaPage() {
           familyId: famId,
           email,
           role: inviteForm.role === "admin" ? "admin" : "member",
-          inviterName: user.email ?? "Un familiar",
+          inviterName: user.email ?? t.member,
           message: inviteForm.message || null,
         }),
       });
@@ -933,7 +938,7 @@ export default function FamiliaPage() {
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok || json?.ok !== true) {
-        throw new Error(json?.error || "No se pudo enviar la invitación.");
+        throw new Error(json?.error || t.errors.inviteSend);
       }
 
       const optimistic: FamilyInviteRow = {
@@ -962,15 +967,15 @@ export default function FamiliaPage() {
       if (json.email_sent) {
         setInviteFeedback({
           tone: "success",
-          message: `Invitación creada y enviada a ${email}.`,
+          message: pageT.inviteCreatedSent(email),
         });
       } else {
         const reason = String(json.email_error ?? "").trim();
         setInviteFeedback({
           tone: "warning",
           message: reason
-            ? `La invitación se creó, pero el correo no se pudo enviar. Motivo: ${reason}`
-            : "La invitación se creó, pero el correo no se pudo enviar. Puedes compartir el link manualmente.",
+            ? pageT.inviteCreatedNoEmailReason(reason)
+            : pageT.inviteCreatedNoEmail,
         });
         console.warn("SMTP error:", json.email_error);
       }
@@ -981,7 +986,7 @@ export default function FamiliaPage() {
       console.error("Error invitando:", err);
       setInviteFeedback({
         tone: "error",
-        message: err?.message ?? "No se pudo enviar la invitación.",
+        message: err?.message ?? t.errors.inviteSend,
       });
     } finally {
       setSavingInvite(false);
@@ -993,8 +998,8 @@ export default function FamiliaPage() {
   // =========================================================
   const handleRemoveMember = async (memberId: string) => {
     if (!user) return;
-    if (!isFamilyOwnerUI) return alert("Solo el administrador familiar puede remover miembros.");
-    if (!window.confirm("¿Remover miembro de la familia?")) return;
+    if (!isFamilyOwnerUI) return alert(t.errors.removeMemberPermission);
+    if (!window.confirm(t.confirms.removeMember)) return;
 
     setMembers((prev) => prev.map((m) => (m.id === memberId ? { ...m, status: "removed" } : m)));
 
@@ -1019,7 +1024,7 @@ export default function FamiliaPage() {
       setReloadTick((n) => n + 1);
     } catch (err) {
       console.error("Error removiendo miembro:", err);
-      alert("No se pudo remover el miembro.");
+      alert(t.errors.removeMember);
     }
   };
 
@@ -1047,7 +1052,7 @@ export default function FamiliaPage() {
       setReloadTick((n) => n + 1);
     } catch (err) {
       console.error("Error cambiando rol:", err);
-      alert("No se pudo cambiar el rol.");
+      alert(t.errors.changeRole);
     }
   };
 
@@ -1057,7 +1062,7 @@ export default function FamiliaPage() {
   const handleRevokeInvite = async (inviteId: string) => {
     if (!user) return;
     if (!canManageInvitesUI) return;
-    if (!window.confirm("¿Revocar invitación?")) return;
+    if (!window.confirm(t.confirms.revokeInvite)) return;
 
     setInvites((prev) => prev.map((i) => (i.id === inviteId ? { ...i, status: "revoked" } : i)));
 
@@ -1084,7 +1089,7 @@ export default function FamiliaPage() {
       setReloadTick((n) => n + 1);
     } catch (err) {
       console.error("Error revocando invitación:", err);
-      alert("No se pudo revocar la invitación.");
+      alert(t.errors.inviteSend);
     }
   };
 
@@ -1093,11 +1098,11 @@ export default function FamiliaPage() {
     if (!canManageInvitesUI) return;
 
     if (offline) {
-      alert("Necesitas internet para eliminar invitaciones.");
+      alert(t.errors.deleteInviteOnline);
       return;
     }
 
-    if (!window.confirm("¿Eliminar definitivamente esta invitación?")) return;
+    if (!window.confirm(t.confirms.deleteInvite)) return;
 
     const prev = invites;
     setInvites((list) => list.filter((i) => i.id !== inviteId));
@@ -1112,7 +1117,7 @@ export default function FamiliaPage() {
       if (error) throw error;
 
       if (!data || data.length === 0) {
-        throw new Error("No se eliminó. Puede que ya no exista o que no tengas permisos.");
+        throw new Error(t.errors.deleteInviteMissing);
       }
 
       await syncOfflineOps();
@@ -1120,7 +1125,7 @@ export default function FamiliaPage() {
     } catch (err: any) {
       console.error("Error eliminando invitación:", err);
       setInvites(prev);
-      alert(err?.message ?? "No se pudo eliminar la invitación.");
+      alert(err?.message ?? t.errors.deleteInvite);
     }
   };
 
@@ -1130,18 +1135,16 @@ export default function FamiliaPage() {
     if (!effectiveFamilyId) return;
 
     if (offline) {
-      alert("Necesitas internet para limpiar invitaciones.");
+      alert(t.errors.purgeOnline);
       return;
     }
 
     if (historicalInvitesCount === 0) {
-      alert("No hay invitaciones históricas para limpiar.");
+      alert(t.errors.purgeNone);
       return;
     }
 
-    const ok = window.confirm(
-      `Esto eliminará del historial ${historicalInvitesCount} invitación(es) (ACEPTADAS/REVOCADAS/EXPIRADAS).\n\n¿Continuar?`
-    );
+    const ok = window.confirm(t.confirms.purgeHistory(historicalInvitesCount));
     if (!ok) return;
 
     const prev = invites;
@@ -1162,7 +1165,7 @@ export default function FamiliaPage() {
       if (error) throw error;
 
       const deletedCount = data?.length ?? 0;
-      if (deletedCount === 0) throw new Error("No se eliminó nada.");
+      if (deletedCount === 0) throw new Error(t.errors.purgeEmpty);
 
       if (cleanupNudgeKey) {
         try {
@@ -1174,11 +1177,11 @@ export default function FamiliaPage() {
       await syncOfflineOps();
       setReloadTick((n) => n + 1);
 
-      alert(`Listo ✅ Se limpiaron ${deletedCount} invitación(es) del historial.`);
+      alert(pageT.purgeDone(deletedCount));
     } catch (err: any) {
       console.error("Error limpiando historial:", err);
       setInvites(prev);
-      alert(err?.message ?? "No se pudo limpiar el historial.");
+      alert(err?.message ?? t.errors.purgeHistory);
     } finally {
       setPurgeLoading(false);
     }
@@ -1198,7 +1201,7 @@ export default function FamiliaPage() {
   if (authLoading) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center text-sm text-slate-600 dark:text-slate-300">
-        Cargando sesión…
+        {t.loadingSession}
       </div>
     );
   }
@@ -1207,16 +1210,16 @@ export default function FamiliaPage() {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center px-4 text-center text-sm text-slate-600 dark:text-slate-300">
         <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h1 className="text-base font-semibold text-slate-950 dark:text-slate-50">Tu familia en RINDAY</h1>
+          <h1 className="text-base font-semibold text-slate-950 dark:text-slate-50">{pageT.guestTitle}</h1>
           <p className="mt-2 leading-6">
-            Inicia sesión o crea tu cuenta para aceptar invitaciones y administrar tu familia.
+            {pageT.guestBody}
           </p>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             <a href="/onboarding?mode=login&next=%2Ffamilia">
-              <Button>Iniciar sesión</Button>
+              <Button>{t.login}</Button>
             </a>
             <a href="/onboarding?mode=signup&next=%2Ffamilia">
-              <LinkButton tone="info">Crear cuenta</LinkButton>
+              <LinkButton tone="info">{t.signup}</LinkButton>
             </a>
           </div>
         </div>
@@ -1234,8 +1237,8 @@ export default function FamiliaPage() {
   return (
     <PageShell>
       <AppHeader
-        title="Familia"
-        subtitle="Invita miembros, define roles y mantén control del dashboard familiar."
+        title={t.title}
+        subtitle={pageT.subtitle}
         activeTab="familia"
         userName={(user.user_metadata as { full_name?: string } | undefined)?.full_name ?? null}
         userEmail={user.email ?? ""}
@@ -1248,19 +1251,17 @@ export default function FamiliaPage() {
           {isOfflineNow() ? (
             <div className="space-y-1">
               <div>
-                Estás en <span className="font-semibold">modo offline</span>. Puedes remover o cambiar
-                roles; RINDAY sincronizará los cambios cuando vuelva la conexión.{" "}
-                <span className="font-semibold">Las invitaciones requieren internet.</span>
+                {pageT.offline}
               </div>
               {showSnapshotBadge && (
                 <div className="text-[11px] text-slate-600 dark:text-slate-300">
-                  Mostrando <span className="font-semibold">último estado guardado</span>.
+                  {pageT.snapshot}
                 </div>
               )}
             </div>
           ) : pendingOpsCount > 0 ? (
             <div>
-              Sincronizando… Cambios pendientes:{" "}
+              {pageT.syncing}{" "}
               <span className="font-semibold">{pendingOpsCount}</span>
             </div>
           ) : null}
@@ -1269,7 +1270,7 @@ export default function FamiliaPage() {
 
       {!offline && roleError ? (
         <section className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
-          <div className="font-semibold">No pude confirmar tu rol familiar</div>
+          <div className="font-semibold">{pageT.roleConfirmTitle}</div>
           <div className="mt-1 text-[11px] opacity-90">
             {roleError}
           </div>
@@ -1280,22 +1281,21 @@ export default function FamiliaPage() {
         <section className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div className="space-y-1">
-              <div className="font-semibold">Tu historial de invitaciones está creciendo</div>
+              <div className="font-semibold">{pageT.cleanupTitle}</div>
               <div className="text-[11px] opacity-90">
-                Tienes <span className="font-semibold">{historicalInvitesCount}</span> invitaciones
-                aceptadas/revocadas/expiradas. Puedes limpiarlas para mantener la lista ordenada.
+                {pageT.cleanupBody(historicalInvitesCount)}
               </div>
             </div>
             <div className="flex items-center gap-2">
               <Button
                 onClick={handlePurgeInviteHistory}
                 disabled={purgeLoading || offline}
-                title={offline ? "Necesitas internet" : undefined}
+                title={offline ? t.errors.purgeOnline : undefined}
               >
-                {purgeLoading ? "Limpiando…" : "Limpiar historial"}
+                {purgeLoading ? pageT.cleaning : pageT.cleanHistory}
               </Button>
               <LinkButton tone="info" onClick={handleHideCleanupNudge}>
-                Ocultar
+                {t.hide}
               </LinkButton>
             </div>
           </div>
@@ -1306,34 +1306,34 @@ export default function FamiliaPage() {
       <section className="space-y-4">
         <Card>
           <Section
-            title="Resumen"
-            subtitle="Tu grupo familiar y su estado."
+            title={pageT.summaryTitle}
+            subtitle={pageT.summarySubtitle}
             right={
               familyCtx || familyGroup ? (
                 <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
-                  Familia:{" "}
+                  {t.familyLabel}:{" "}
                   <span className="font-semibold">
-                    {familyCtx?.familyName ?? familyGroup?.name ?? "Mi familia"}
+                    {familyCtx?.familyName ?? familyGroup?.name ?? pageT.fallbackFamilyName}
                   </span>{" "}
                   ·{" "}
                   {isFamilyOwnerUI ? (
-                    <span className="font-semibold">Administrador familiar</span>
+                    <span className="font-semibold">{t.familyAdmin}</span>
                   ) : myRole === "admin" ? (
-                    <span className="font-semibold">Admin</span>
+                    <span className="font-semibold">{t.admin}</span>
                   ) : (
-                    <span className="font-semibold">Miembro</span>
+                    <span className="font-semibold">{t.member}</span>
                   )}
                 </div>
               ) : (
                 <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
-                  Aún no tienes familia configurada.
+                  {t.noFamily}
                 </div>
               )
             }
           >
             {familyLoading && (
               <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                Actualizando información de familia…
+                {pageT.updatingFamily}
               </div>
             )}
             {familyError && <p className="mt-2 text-[11px] text-rose-500">{familyError}</p>}
@@ -1342,28 +1342,28 @@ export default function FamiliaPage() {
 
         <div className="grid gap-4 md:grid-cols-3">
           <StatCard
-            label="Miembros activos"
+            label={t.activeMembers}
             value={String(activeMembers)}
-            hint="Personas activas dentro de tu espacio familiar."
+            hint={pageT.activeMembersHint}
             tone="good"
           />
           <StatCard
-            label="Invitaciones pendientes"
+            label={pageT.pendingInvites}
             value={String(pendingInvites)}
-            hint="Invitaciones enviadas que aún no aceptan."
+            hint={pageT.pendingInvitesHint}
             tone="neutral"
           />
           <StatCard
-            label="Tu rol"
+            label={pageT.yourRole}
             value={
-              roleLoading ? "..." : isFamilyOwnerUI ? "Administrador" : myRole === "admin" ? "Admin" : "Miembro"
+              roleLoading ? "..." : isFamilyOwnerUI ? t.administrator : myRole === "admin" ? t.admin : t.member
             }
             hint={
               isFamilyOwnerUI
-                ? "Controlas invitaciones y roles."
+                ? pageT.ownerHint
                 : myRole === "admin"
-                ? "Tienes permisos elevados dentro de la familia."
-                : "El administrador familiar controla invitaciones y roles."
+                ? pageT.adminHint
+                : pageT.memberHint
             }
             tone={isFamilyOwnerUI ? "good" : "neutral"}
           />
@@ -1375,34 +1375,34 @@ export default function FamiliaPage() {
         <section className="mt-4">
           <Card>
             <Section
-              title="Crear familia"
-              subtitle="Crea tu espacio familiar para invitar miembros y habilitar el dashboard familiar."
+              title={pageT.createFamilyTitle}
+              subtitle={pageT.createFamilySubtitle}
             >
               <form onSubmit={handleCreateFamily} className="mt-2 space-y-3">
                 <div>
-                  <Label>Nombre de la familia</Label>
+                  <Label>{pageT.familyName}</Label>
                   <Input
                     value={createFamilyForm.name}
                     onChange={(e) => setCreateFamilyForm((p) => ({ ...p, name: e.target.value }))}
-                    placeholder="Ej. Familia Sloane"
+                    placeholder={pageT.familyNamePlaceholder}
                     required
                   />
                 </div>
 
                 <div>
-                  <Label>Notas (opcional)</Label>
+                  <Label>{pageT.notesOptional}</Label>
                   <Textarea
                     value={createFamilyForm.notes}
                     onChange={(e) => setCreateFamilyForm((p) => ({ ...p, notes: e.target.value }))}
-                    placeholder="Ej. Reglas internas, propósito, etc."
+                    placeholder={pageT.notesPlaceholder}
                   />
                   <Help>
-                    Estas notas son solo informativas para orientar el uso del espacio familiar.
+                    {pageT.notesHelp}
                   </Help>
                 </div>
 
                 <Button type="submit" disabled={savingCreateFamily}>
-                  {savingCreateFamily ? "Creando…" : "Crear familia"}
+                  {savingCreateFamily ? pageT.creating : pageT.createFamily}
                 </Button>
               </form>
             </Section>
@@ -1414,40 +1414,40 @@ export default function FamiliaPage() {
       <section className="mt-4 grid gap-4 md:grid-cols-2">
         <Card>
           <Section
-            title="Invitar miembro"
+            title={pageT.inviteMember}
             subtitle={
               isFamilyOwnerUI
-                ? "Invita por email y define el rol de cada persona."
+                ? pageT.inviteOwnerSubtitle
                 : myRole === "admin"
-                ? "Puedes invitar miembros y gestionar invitaciones."
-                : "Solo administradores pueden invitar miembros."
+                ? pageT.inviteAdminSubtitle
+                : pageT.inviteRestrictedSubtitle
             }
             right={
               !canManageInvitesUI ? (
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Acción restringida
+                  {pageT.restrictedAction}
                 </span>
               ) : offline ? (
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Requiere internet
+                  {pageT.requiresInternet}
                 </span>
               ) : null
             }
           >
             {offline && canManageInvitesUI ? (
               <div className="mt-2 rounded-2xl border p-3 text-[12px]">
-                <div className="font-medium">Estás sin internet</div>
-                <div className="opacity-80">Para enviar invitaciones necesitas conexión.</div>
+                <div className="font-medium">{pageT.offlineInviteTitle}</div>
+                <div className="opacity-80">{pageT.offlineInviteBody}</div>
               </div>
             ) : null}
 
             <form onSubmit={handleInvite} className="mt-2 space-y-3">
               <div>
-                <Label>Email</Label>
+                <Label>{t.email}</Label>
                 <Input
                   value={inviteForm.email}
                   onChange={(e) => setInviteForm((p) => ({ ...p, email: e.target.value }))}
-                  placeholder="ej. familiar@email.com"
+                  placeholder={pageT.emailPlaceholder}
                   disabled={!canManageInvitesUI || offline}
                   required
                 />
@@ -1455,7 +1455,7 @@ export default function FamiliaPage() {
 
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
-                  <Label>Rol</Label>
+                  <Label>{t.role}</Label>
                   <Select
                     value={inviteForm.role}
                     onChange={(e) =>
@@ -1466,20 +1466,20 @@ export default function FamiliaPage() {
                     }
                     disabled={!canManageInvitesUI || offline}
                   >
-                    <option value="member">Miembro</option>
-                    <option value="admin">Administrador</option>
+                    <option value="member">{t.member}</option>
+                    <option value="admin">{t.administrator}</option>
                   </Select>
                   <Help>
-                    Administrador: puede apoyar con invitaciones y gestión familiar.
+                    {pageT.inviteRoleHelp}
                   </Help>
                 </div>
 
                 <div>
-                  <Label>Mensaje (opcional)</Label>
+                  <Label>{pageT.messageOptional}</Label>
                   <Input
                     value={inviteForm.message}
                     onChange={(e) => setInviteForm((p) => ({ ...p, message: e.target.value }))}
-                    placeholder="Ej. Te agrego a la familia…"
+                    placeholder={pageT.messagePlaceholder}
                     disabled={!canManageInvitesUI || offline}
                   />
                 </div>
@@ -1488,9 +1488,9 @@ export default function FamiliaPage() {
               <Button
                 type="submit"
                 disabled={!canManageInvitesUI || savingInvite || !effectiveFamilyId || offline}
-                title={offline ? "Necesitas conexión para enviar invitaciones" : undefined}
+                title={offline ? t.errors.inviteOnline : undefined}
               >
-                {savingInvite ? "Enviando…" : "Enviar invitación"}
+                {savingInvite ? pageT.sending : pageT.sendInvite}
               </Button>
 
               {inviteFeedback ? (
@@ -1507,37 +1507,37 @@ export default function FamiliaPage() {
                 </div>
               ) : null}
 
-              {!effectiveFamilyId && <Help>Primero crea tu familia para poder invitar miembros.</Help>}
-              {offline && canManageInvitesUI && <Help>Invitar requiere internet.</Help>}
+              {!effectiveFamilyId && <Help>{pageT.createFamilyBeforeInvite}</Help>}
+              {offline && canManageInvitesUI && <Help>{pageT.inviteRequiresInternet}</Help>}
             </form>
           </Section>
         </Card>
 
         <Card>
           <Section
-            title="Invitaciones"
+            title={pageT.invitesTitle}
             right={
               <div className="flex items-center gap-3">
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  {invites.length} total
+                  {pageT.invitationsCount(invites.length)}
                 </span>
 
                 {canManageInvitesUI && historicalInvitesCount > 0 ? (
                   <Button
                     onClick={handlePurgeInviteHistory}
                     disabled={purgeLoading || offline}
-                    title={offline ? "Necesitas internet" : undefined}
+                    title={offline ? t.errors.purgeOnline : undefined}
                   >
-                    {purgeLoading ? "Limpiando…" : "Limpiar historial"}
+                    {purgeLoading ? pageT.cleaning : pageT.cleanHistory}
                   </Button>
                 ) : null}
               </div>
             }
           >
             {loading ? (
-              <EmptyState>Cargando invitaciones…</EmptyState>
+              <EmptyState>{pageT.loadingInvites}</EmptyState>
             ) : invites.length === 0 ? (
-              <EmptyState>Cuando invites a alguien, aquí verás el estado de cada invitación.</EmptyState>
+              <EmptyState>{pageT.emptyInvites}</EmptyState>
             ) : (
               <ul className="space-y-2">
                 {invites.map((i) => {
@@ -1556,22 +1556,22 @@ export default function FamiliaPage() {
                             {i.email}
                           </div>
                           <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                            Rol: {i.role.toUpperCase()} · Estado: {i.status}
+                            {t.role}: {t.roleLabels[i.role] ?? i.role} · {t.status}: {t.statusLabels[i.status] ?? i.status}
                           </div>
                           {emailDelivered ? (
                             <div className="mt-1 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200">
-                              Correo enviado
+                              {pageT.emailSent}
                             </div>
                           ) : null}
                           {emailFailed ? (
                             <div className="mt-1 space-y-1">
                               <div className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-                                Correo no enviado
+                                {pageT.emailNotSent}
                               </div>
                               <div className="text-[11px] text-amber-700 dark:text-amber-200">
                                 {i.email_error?.trim()
-                                  ? `Motivo: ${i.email_error}`
-                                  : "No pudimos entregar el correo. Puedes compartir el link manualmente."}
+                                  ? `${pageT.reason} ${i.email_error}`
+                                  : pageT.emailFallback}
                               </div>
                             </div>
                           ) : null}
@@ -1586,19 +1586,19 @@ export default function FamiliaPage() {
                         <div className="flex items-center gap-2">
                           {canCopy ? (
                             <LinkButton tone="info" onClick={() => copyInviteLink(i.token)}>
-                              Copiar link
+                              {t.copyLink}
                             </LinkButton>
                           ) : null}
 
                           {canRevoke ? (
                             <LinkButton tone="danger" onClick={() => handleRevokeInvite(i.id)}>
-                              Revocar
+                              {t.revoke}
                             </LinkButton>
                           ) : null}
 
                           {canDelete ? (
                             <LinkButton tone="danger" onClick={() => handleDeleteInvite(i.id)}>
-                              Eliminar
+                              {t.delete}
                             </LinkButton>
                           ) : null}
 
@@ -1620,20 +1620,20 @@ export default function FamiliaPage() {
       <section className="mt-4">
         <Card>
           <Section
-            title="Miembros"
+            title={pageT.membersTitle}
             right={
               <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                {members.length} total
+                {pageT.invitationsCount(members.length)}
               </span>
             }
           >
             {loading ? (
-              <EmptyState>Cargando miembros…</EmptyState>
+              <EmptyState>{pageT.loadingMembers}</EmptyState>
             ) : members.length === 0 ? (
               <EmptyState>
                 {isOfflineNow() && (familyCtx?.activeMembers ?? 0) > 0
-                  ? "No pude leer la lista completa sin internet, pero tu familia existe y guardamos una vista reciente."
-                  : "Invita a tu primer miembro para convertir RINDAY en una vista familiar compartida."}
+                  ? pageT.emptyMembersOffline
+                  : pageT.emptyMembers}
               </EmptyState>
             ) : (
               <ul className="space-y-2">
@@ -1643,7 +1643,7 @@ export default function FamiliaPage() {
                   const label =
                     m.full_name ||
                     m.invited_email ||
-                    (m.user_id ? `Usuario ${m.user_id.slice(0, 8)}` : "Miembro");
+                    (m.user_id ? pageT.userFallback(m.user_id.slice(0, 8)) : t.member);
 
                   const canEditThis = isFamilyOwnerUI && !isMe && m.role !== "owner";
 
@@ -1656,12 +1656,12 @@ export default function FamiliaPage() {
                             {label}{" "}
                             {isMe ? (
                               <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                                (Tú)
+                                ({t.you})
                               </span>
                             ) : null}
                           </div>
                           <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                            Rol: {m.role.toUpperCase()} · Estado: {m.status}
+                            {t.role}: {t.roleLabels[(m.role as "owner" | "admin" | "member") ?? "member"] ?? m.role} · {t.status}: {t.statusLabels[(m.status as keyof typeof t.statusLabels) ?? "active"] ?? m.status}
                           </div>
                           {m.created_at && (
                             <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
@@ -1682,11 +1682,11 @@ export default function FamiliaPage() {
                                 )
                               }
                             >
-                              <option value="member">Miembro</option>
-                              <option value="admin">Administrador</option>
+                              <option value="member">{t.member}</option>
+                              <option value="admin">{t.administrator}</option>
                             </Select>
                             <LinkButton tone="danger" onClick={() => handleRemoveMember(m.id)}>
-                              Remover
+                              {t.revoke}
                             </LinkButton>
                           </div>
                         ) : (
@@ -1710,17 +1710,13 @@ export default function FamiliaPage() {
 
       <section className="mt-4">
         <Card>
-          <Section title="Siguiente paso" subtitle="Mejoras futuras para seguir fortaleciendo Familia">
+          <Section title={pageT.nextStepTitle} subtitle={pageT.nextStepSubtitle}>
             <div className="space-y-2 text-[12px] text-slate-600 dark:text-slate-300">
-              <p>
-                1) <span className="font-semibold">Aceptar invitación</span>: ya está listo el flujo con token.
-              </p>
-              <p>
-                2) <span className="font-semibold">Tarjetas compartidas</span>: tabla puente para asignar tarjetas a miembros.
-              </p>
-              <p>
-                3) <span className="font-semibold">Permisos familiares</span>: afinar qué ve administrador vs miembro.
-              </p>
+              {pageT.nextSteps.map((step, index) => (
+                <p key={step}>
+                  {index + 1}) <span className="font-semibold">{step}</span>
+                </p>
+              ))}
             </div>
           </Section>
         </Card>
