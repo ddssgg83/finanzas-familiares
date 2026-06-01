@@ -1,3 +1,7 @@
+import { en } from "@/lib/i18n/dictionaries/en";
+import { es } from "@/lib/i18n/dictionaries/es";
+import type { Locale } from "@/lib/i18n/config";
+
 function looksLikeUrl(value: string) {
   try {
     new URL(value);
@@ -7,55 +11,61 @@ function looksLikeUrl(value: string) {
   }
 }
 
-export function prettySupabaseAuthError(message?: string) {
+function getAuthCopy(locale?: Locale | string | null) {
+  return String(locale ?? "").toLowerCase().startsWith("en") ? en.authErrors : es.authErrors;
+}
+
+export function prettySupabaseAuthError(message?: string, locale?: Locale | string | null) {
+  const copy = getAuthCopy(locale);
   const raw = String(message ?? "").trim();
   const msg = raw.toLowerCase();
 
   if (!raw) {
-    return "No pudimos iniciar sesión. Intenta de nuevo.";
+    return copy.generic;
   }
 
   if (msg.includes("invalid login credentials")) {
-    return "Correo o contraseña incorrectos.";
+    return copy.invalidCredentials;
   }
 
   if (msg.includes("email not confirmed")) {
-    return "Tu cuenta requiere verificación de correo antes de continuar.";
+    return copy.emailNotConfirmed;
   }
 
   if (msg.includes("user already registered")) {
-    return "Este correo ya tiene cuenta. Inicia sesión o usa otro correo.";
+    return copy.alreadyRegistered;
   }
 
   if (msg.includes("password")) {
-    return "La contraseña no es válida. Usa al menos 6 caracteres.";
+    return copy.password;
   }
 
   if (msg.includes("failed to fetch") || msg.includes("network") || msg.includes("load failed")) {
-    return "No pudimos conectarnos al servicio de acceso. Revisa tu conexión e intenta de nuevo en unos segundos.";
+    return copy.network;
   }
 
   if (msg.includes("offline")) {
-    return "No hay conexión a internet. Reconéctate e intenta de nuevo.";
+    return copy.offline;
   }
 
   if (msg.includes("fetch")) {
-    return "La solicitud de acceso no pudo completarse. Intenta de nuevo en unos segundos.";
+    return copy.fetch;
   }
 
   return raw;
 }
 
-export function getSupabaseConfigError() {
+export function getSupabaseConfigError(locale?: Locale | string | null) {
+  const copy = getAuthCopy(locale);
   const url = String(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").trim();
   const anonKey = String(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "").trim();
 
   if (!url || !anonKey) {
-    return "Falta configurar Supabase en este despliegue.";
+    return copy.missingConfig;
   }
 
   if (!looksLikeUrl(url)) {
-    return "La URL pública de Supabase no es válida en este despliegue.";
+    return copy.invalidConfig;
   }
 
   return null;

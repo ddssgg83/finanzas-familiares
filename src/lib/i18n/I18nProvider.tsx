@@ -24,6 +24,11 @@ function getInitialLocale(): Locale {
   if (typeof window === "undefined") return DEFAULT_LOCALE;
 
   try {
+    const fromUrl = new URLSearchParams(window.location.search).get("locale");
+    if (isLocale(fromUrl)) return fromUrl;
+  } catch {}
+
+  try {
     const saved = window.localStorage.getItem(LOCALE_STORAGE_KEY);
     if (isLocale(saved)) return saved;
   } catch {}
@@ -59,4 +64,3 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
-

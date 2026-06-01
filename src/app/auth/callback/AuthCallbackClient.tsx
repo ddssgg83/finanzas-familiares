@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppHeader } from "@/components/AppHeader";
 import { PageShell } from "@/components/ui/PageShell";
+import { useI18n } from "@/lib/i18n/useI18n";
 import { supabase } from "@/lib/supabase";
 
 type Props = {
@@ -11,22 +12,24 @@ type Props = {
   redirectTo: string;
 };
 
-function prettyAuthError(message?: string) {
+function prettyAuthError(message: string | undefined, copy: ReturnType<typeof useI18n>["dictionary"]["authCallback"]["errors"]) {
   const msg = (message ?? "").toLowerCase();
 
   if (msg.includes("expired") || msg.includes("invalid")) {
-    return "El enlace ya no es valido o ya expiró. Solicita uno nuevo.";
+    return copy.expired;
   }
 
   if (msg.includes("code verifier")) {
-    return "Este enlace debe abrirse en el mismo dispositivo donde solicitaste el acceso.";
+    return copy.sameDevice;
   }
 
-  return "No pudimos completar el acceso. Vuelve a abrir el enlace del correo.";
+  return copy.generic;
 }
 
 export function AuthCallbackClient({ code, redirectTo }: Props) {
   const router = useRouter();
+  const { dictionary } = useI18n();
+  const t = dictionary.authCallback;
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -72,14 +75,12 @@ export function AuthCallbackClient({ code, redirectTo }: Props) {
           if (!alive) return;
           const hasSession = await completeLogin().catch(() => false);
           if (!hasSession) {
-            setError(
-              "No detectamos una sesión válida. Vuelve a abrir el enlace desde el mismo dispositivo."
-            );
+            setError(t.errors.noSession);
           }
         }, 2500);
       } catch (err: any) {
         if (!alive) return;
-        setError(prettyAuthError(err?.message));
+        setError(prettyAuthError(err?.message, t.errors));
       }
     };
 
@@ -90,26 +91,26 @@ export function AuthCallbackClient({ code, redirectTo }: Props) {
       if (timeoutId) window.clearTimeout(timeoutId);
       unsubscribe?.();
     };
-  }, [code, redirectTo, router]);
+  }, [code, redirectTo, router, t.errors]);
 
   return (
     <main className="flex min-h-screen flex-col pb-16 md:pb-4">
       <AppHeader
-        title="Accediendo"
-        subtitle="Estamos validando tu enlace seguro."
+        title={t.title}
+        subtitle={t.subtitle}
         activeTab="dashboard"
       />
 
       <PageShell maxWidth="2xl">
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <h1 className="text-sm font-semibold text-slate-900 dark:text-slate-50">
-            {error ? "No se pudo completar el acceso" : "Entrando a RINDAY..."}
+            {error ? t.errorTitle : t.successTitle}
           </h1>
 
           <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
             {error
               ? error
-              : "Un momento mientras terminamos tu inicio de sesión y te llevamos a la app."}
+              : t.successBody}
           </p>
 
           {error ? (
@@ -118,13 +119,13 @@ export function AuthCallbackClient({ code, redirectTo }: Props) {
                 href={`/onboarding?mode=login&next=${encodeURIComponent(redirectTo)}`}
                 className="inline-flex items-center rounded-full bg-sky-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-600"
               >
-                Pedir nuevo enlace
+                {t.requestNewLink}
               </a>
               <a
                 href={redirectTo}
                 className="inline-flex items-center rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800"
               >
-                Ir a la app
+                {t.goApp}
               </a>
             </div>
           ) : (

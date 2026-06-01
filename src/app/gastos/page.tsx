@@ -448,7 +448,7 @@ export default function GastosPage() {
     e.preventDefault();
     setAuthError(null);
 
-    const configError = getSupabaseConfigError();
+    const configError = getSupabaseConfigError(locale);
     if (configError) {
       setAuthError(configError);
       return;
@@ -460,13 +460,13 @@ export default function GastosPage() {
         password: authPassword,
       });
       if (error) {
-        setAuthError(prettySupabaseAuthError(error.message));
+        setAuthError(prettySupabaseAuthError(error.message, locale));
         return;
       }
       setAuthEmail("");
       setAuthPassword("");
     } catch (err: any) {
-      setAuthError(prettySupabaseAuthError(err?.message));
+      setAuthError(prettySupabaseAuthError(err?.message, locale));
     }
   };
 
@@ -474,7 +474,7 @@ export default function GastosPage() {
     e.preventDefault();
     setAuthError(null);
 
-    const configError = getSupabaseConfigError();
+    const configError = getSupabaseConfigError(locale);
     if (configError) {
       setAuthError(configError);
       return;
@@ -486,14 +486,14 @@ export default function GastosPage() {
         password: authPassword,
       });
       if (error) {
-        setAuthError(prettySupabaseAuthError(error.message));
+        setAuthError(prettySupabaseAuthError(error.message, locale));
         return;
       }
       alert(t.accountCreated);
       setAuthMode("login");
       setAuthPassword("");
     } catch (err: any) {
-      setAuthError(prettySupabaseAuthError(err?.message));
+      setAuthError(prettySupabaseAuthError(err?.message, locale));
     }
   };
 
@@ -1441,8 +1441,8 @@ if (!key) return;
       setShowAdvanced(false);
     } catch (err) {
       console.error("Error en handleSubmit:", err);
-      setError("No se pudo guardar el movimiento.");
-      alert("No se pudo guardar el movimiento.");
+      setError(t.alerts.saveMovement);
+      alert(t.alerts.saveMovement);
     } finally {
       setSaving(false);
     }
@@ -1484,8 +1484,8 @@ if (!key) return;
   };
 
   const handleDelete = async (tx: Tx) => {
-    if (!isOnline) return alert("No puedes eliminar movimientos mientras estás sin conexión.");
-    if (!user) return alert("Debes iniciar sesión para eliminar movimientos.");
+    if (!isOnline) return alert(t.alerts.deleteOffline);
+    if (!user) return alert(t.alerts.deleteLogin);
 
     try {
       // Nota: deja que RLS valide permisos; no amarremos a user_id porque puede ser legacy/NULL
@@ -1494,7 +1494,7 @@ if (!key) return;
       setTransactions((prev) => prev.filter((t) => t.id !== tx.id));
     } catch (err) {
       console.error(err);
-      alert("No se pudo eliminar el movimiento.");
+      alert(t.alerts.deleteMovement);
     }
   };
 
@@ -1506,7 +1506,7 @@ if (!key) return;
     if (!trimmed) return;
 
     const value = trimmed.toUpperCase().replace(/\s+/g, "_");
-    if (categories.some((c) => c.value === value)) return alert("Esa categoría ya existe.");
+    if (categories.some((c) => c.value === value)) return alert(t.alerts.duplicateCategory);
 
     const updated = [...categories, { label: trimmed, value }];
     setCategories(updated);
@@ -1519,7 +1519,7 @@ if (!key) return;
     if (!trimmed) return;
 
     const value = trimmed.toUpperCase().replace(/\s+/g, "_");
-    if (methods.some((m) => m.value === value)) return alert("Ese método ya existe.");
+    if (methods.some((m) => m.value === value)) return alert(t.alerts.duplicateMethod);
 
     const updated = [...methods, { label: trimmed, value }];
     setMethods(updated);
@@ -1535,7 +1535,7 @@ if (!key) return;
     if (!user) return;
 
     const trimmed = newCardName.trim();
-    if (!trimmed) return alert("Escribe un nombre para la tarjeta (ej. BBVA Negra David).");
+    if (!trimmed) return alert(t.alerts.cardNameRequired);
 
     setSavingCard(true);
     setCardError(null);
@@ -1572,7 +1572,7 @@ if (!key) return;
       setNewCardShared(false);
     } catch (err) {
       console.error("Error creando tarjeta:", err);
-      setCardError("No se pudo crear la tarjeta.");
+      setCardError(t.alerts.createCard);
     } finally {
       setSavingCard(false);
     }
@@ -1580,7 +1580,7 @@ if (!key) return;
 
   const handleDeleteCard = async (cardId: string) => {
     if (!user) return;
-    const ok = confirm("¿Seguro que quieres eliminar esta tarjeta? No se borran tus movimientos, solo la etiqueta.");
+    const ok = confirm(t.alerts.confirmDeleteCard);
     if (!ok) return;
 
     const ownerId = familyCtx?.ownerUserId ?? user.id;
@@ -1592,7 +1592,7 @@ if (!key) return;
       if (selectedCardId === cardId) setSelectedCardId(null);
     } catch (err) {
       console.error("Error eliminando tarjeta", err);
-      alert("No se pudo eliminar la tarjeta.");
+      alert(t.alerts.deleteCard);
     }
   };
 

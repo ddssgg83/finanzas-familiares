@@ -67,8 +67,8 @@ export default function AceptarClient() {
   const fetchPreview = useCallback(async (): Promise<InviteRow | null> => {
     const res = await fetch("/api/family/accept", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, mode: "preview" }),
+      headers: { "Content-Type": "application/json", "x-rinday-locale": locale },
+      body: JSON.stringify({ token, mode: "preview", locale }),
     });
 
     const json = await res.json().catch(() => ({}));
@@ -77,7 +77,7 @@ export default function AceptarClient() {
     }
 
     return (json.invite ?? null) as InviteRow | null;
-  }, [acceptT.errors.preview, token]);
+  }, [acceptT.errors.preview, locale, token]);
 
   const acceptInvite = useCallback(async (accessToken: string) => {
     const res = await fetch("/api/family/accept", {
@@ -85,8 +85,9 @@ export default function AceptarClient() {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
+        "x-rinday-locale": locale,
       },
-      body: JSON.stringify({ token, mode: "accept" }),
+      body: JSON.stringify({ token, mode: "accept", locale }),
     });
 
     const json = await res.json().catch(() => ({}));
@@ -96,7 +97,7 @@ export default function AceptarClient() {
       if (code === "EMAIL_MISMATCH") setEmailMismatch(true);
       throw new Error(json?.error || acceptT.errors.accept);
     }
-  }, [acceptT.errors.accept, token]);
+  }, [acceptT.errors.accept, locale, token]);
 
   const completeInviteAcceptance = useCallback(async () => {
     setAccepting(true);
@@ -159,7 +160,7 @@ export default function AceptarClient() {
     setError(null);
 
     try {
-      const configError = getSupabaseConfigError();
+      const configError = getSupabaseConfigError(locale);
       if (configError) {
         setAuthError(configError);
         return;
@@ -189,7 +190,7 @@ export default function AceptarClient() {
       });
 
       if (signUpError) {
-        setAuthError(prettySupabaseAuthError(signUpError.message));
+        setAuthError(prettySupabaseAuthError(signUpError.message, locale));
         return;
       }
 
@@ -219,7 +220,7 @@ export default function AceptarClient() {
       setAuthInfo(acceptT.info.created);
       await completeInviteAcceptance();
     } catch (e: any) {
-      setAuthError(prettySupabaseAuthError(e?.message));
+      setAuthError(prettySupabaseAuthError(e?.message, locale));
     } finally {
       setAuthBusy(false);
     }
@@ -234,7 +235,7 @@ export default function AceptarClient() {
     setError(null);
 
     try {
-      const configError = getSupabaseConfigError();
+      const configError = getSupabaseConfigError(locale);
       if (configError) {
         setAuthError(configError);
         return;
@@ -251,14 +252,14 @@ export default function AceptarClient() {
       });
 
       if (signInError) {
-        setAuthError(prettySupabaseAuthError(signInError.message));
+        setAuthError(prettySupabaseAuthError(signInError.message, locale));
         return;
       }
 
       setAuthInfo(acceptT.info.signedIn);
       await completeInviteAcceptance();
     } catch (e: any) {
-      setAuthError(prettySupabaseAuthError(e?.message));
+      setAuthError(prettySupabaseAuthError(e?.message, locale));
     } finally {
       setAuthBusy(false);
     }

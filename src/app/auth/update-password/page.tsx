@@ -3,24 +3,27 @@
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useI18n } from "@/lib/i18n/useI18n";
 import { supabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-function prettyUpdateError(message?: string) {
+function prettyUpdateError(message: string | undefined, copy: ReturnType<typeof useI18n>["dictionary"]["updatePassword"]["errors"]) {
   const msg = String(message ?? "").toLowerCase();
 
   if (msg.includes("password")) {
-    return "La contraseña no cumple los requisitos. Usa al menos 6 caracteres.";
+    return copy.password;
   }
   if (msg.includes("session") || msg.includes("jwt")) {
-    return "Tu enlace expiró o no abrió una sesión válida. Solicita un nuevo enlace.";
+    return copy.session;
   }
-  return message || "No pudimos actualizar tu contraseña. Intenta de nuevo.";
+  return message || copy.generic;
 }
 
 export default function UpdatePasswordPage() {
   const router = useRouter();
+  const { dictionary } = useI18n();
+  const t = dictionary.updatePassword;
   const [checkingSession, setCheckingSession] = useState(true);
   const [hasSession, setHasSession] = useState(false);
   const [password, setPassword] = useState("");
@@ -66,11 +69,11 @@ export default function UpdatePasswordPage() {
     setError(null);
 
     if (password.length < 6) {
-      setError("La contraseña debe tener al menos 6 caracteres.");
+      setError(t.errors.minLength);
       return;
     }
     if (password !== confirmPassword) {
-      setError("Las contraseñas no coinciden.");
+      setError(t.errors.mismatch);
       return;
     }
 
@@ -79,10 +82,10 @@ export default function UpdatePasswordPage() {
       const { error: updateError } = await supabase.auth.updateUser({ password });
       if (updateError) throw updateError;
 
-      setMessage("Contraseña actualizada. Te llevaremos a la app en un momento.");
+      setMessage(t.success);
       window.setTimeout(() => router.replace("/gastos"), 900);
     } catch (err: any) {
-      setError(prettyUpdateError(err?.message));
+      setError(prettyUpdateError(err?.message, t.errors));
     } finally {
       setBusy(false);
     }
@@ -92,38 +95,38 @@ export default function UpdatePasswordPage() {
     <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-10 text-slate-50">
       <section className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-950/80 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.55)]">
         <div className="text-[10px] uppercase tracking-[0.2em] text-sky-400">RINDAY</div>
-        <h1 className="mt-2 text-xl font-semibold tracking-tight">Nueva contraseña</h1>
+        <h1 className="mt-2 text-xl font-semibold tracking-tight">{t.title}</h1>
         <p className="mt-2 text-sm leading-6 text-slate-300">
-          Define una contraseña nueva para volver a entrar a tu cuenta.
+          {t.body}
         </p>
 
         {checkingSession ? (
           <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs text-slate-300">
-            Validando tu enlace...
+            {t.checking}
           </div>
         ) : !hasSession ? (
           <div className="mt-5 space-y-4">
             <div className="rounded-2xl border border-amber-900/70 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
-              No detectamos una sesión válida para cambiar tu contraseña. Solicita un nuevo
-              enlace de recuperación.
+              {t.noSession}
             </div>
             <Link
               href="/auth/reset-password"
               className="inline-flex w-full justify-center rounded-2xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-600"
             >
-              Pedir nuevo enlace
+              {t.requestNewLink}
             </Link>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="mt-5 space-y-4">
             <div className="space-y-2">
               <label className="block text-xs font-semibold text-slate-200">
-                Nueva contraseña
+                {t.newPassword}
               </label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                placeholder={t.newPasswordPlaceholder}
                 autoComplete="new-password"
                 disabled={busy}
                 className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-sky-300/30 disabled:opacity-70"
@@ -132,12 +135,13 @@ export default function UpdatePasswordPage() {
 
             <div className="space-y-2">
               <label className="block text-xs font-semibold text-slate-200">
-                Confirmar contraseña
+                {t.confirmPassword}
               </label>
               <input
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder={t.confirmPasswordPlaceholder}
                 autoComplete="new-password"
                 disabled={busy}
                 className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-sky-300/30 disabled:opacity-70"
@@ -161,17 +165,17 @@ export default function UpdatePasswordPage() {
               disabled={busy}
               className="w-full rounded-2xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {busy ? "Actualizando..." : "Actualizar contraseña"}
+              {busy ? t.updating : t.update}
             </button>
           </form>
         )}
 
         <div className="mt-4 flex items-center justify-between text-xs text-slate-400">
           <Link href="/auth/reset-password" className="hover:text-slate-100">
-            Pedir otro enlace
+            {t.requestAnotherLink}
           </Link>
           <Link href="/gastos" className="hover:text-slate-100">
-            Ir a la app
+            {t.goApp}
           </Link>
         </div>
       </section>

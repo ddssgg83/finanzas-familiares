@@ -21,7 +21,7 @@ const ONBOARDING_STORAGE_KEY = "ff_seen_onboarding_v1";
 
 export default function AprendePage() {
   const router = useRouter();
-  const { dictionary } = useI18n();
+  const { dictionary, locale } = useI18n();
   const t = dictionary.learn;
 
   // ---------- AUTH ----------
@@ -73,7 +73,7 @@ export default function AprendePage() {
     e.preventDefault();
     setAuthError(null);
 
-    const configError = getSupabaseConfigError();
+    const configError = getSupabaseConfigError(locale);
     if (configError) {
       setAuthError(configError);
       return;
@@ -85,7 +85,7 @@ export default function AprendePage() {
         password: authPassword,
       });
       if (error) {
-        setAuthError(prettySupabaseAuthError(error.message));
+        setAuthError(prettySupabaseAuthError(error.message, locale));
         return;
       }
       setAuthEmail("");
@@ -102,7 +102,7 @@ export default function AprendePage() {
       // Si ya lo vio, se queda en Aprende
     } catch (err: any) {
       console.error("Error during password sign-in", err);
-      setAuthError(prettySupabaseAuthError(err?.message));
+      setAuthError(prettySupabaseAuthError(err?.message, locale));
     }
   };
 
@@ -110,7 +110,7 @@ export default function AprendePage() {
     e.preventDefault();
     setAuthError(null);
 
-    const configError = getSupabaseConfigError();
+    const configError = getSupabaseConfigError(locale);
     if (configError) {
       setAuthError(configError);
       return;
@@ -122,7 +122,7 @@ export default function AprendePage() {
         password: authPassword,
       });
       if (error) {
-        setAuthError(prettySupabaseAuthError(error.message));
+        setAuthError(prettySupabaseAuthError(error.message, locale));
         return;
       }
 
@@ -137,7 +137,7 @@ export default function AprendePage() {
       router.push("/onboarding");
     } catch (err: any) {
       console.error("Error during password sign-up", err);
-      setAuthError(prettySupabaseAuthError(err?.message));
+      setAuthError(prettySupabaseAuthError(err?.message, locale));
     }
   };
 

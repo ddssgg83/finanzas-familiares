@@ -4,6 +4,8 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { en } from "@/lib/i18n/dictionaries/en";
+import { es } from "@/lib/i18n/dictionaries/es";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -59,14 +61,23 @@ function getBearerToken(req: Request) {
   return m?.[1] ?? null;
 }
 
+function getFamilyApiCopy(locale?: string | null) {
+  return String(locale ?? "").toLowerCase().startsWith("en") ? en.familyApi : es.familyApi;
+}
+
+function localeFromRequest(req: Request) {
+  return req.headers.get("x-rinday-locale") || req.headers.get("accept-language") || null;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
     const token = String(body?.token ?? "").trim();
     const mode = (String(body?.mode ?? "accept") as "preview" | "accept") || "accept";
+    const copy = getFamilyApiCopy(body?.locale ?? localeFromRequest(req));
 
     if (!token) {
-      return NextResponse.json({ ok: false, error: "Missing token" }, { status: 400 });
+      return NextResponse.json({ ok: false, error: copy.missingToken }, { status: 400 });
     }
 
     // 1) Buscar invitación por token (server-side, sin depender de RLS)
@@ -79,12 +90,13 @@ export async function POST(req: Request) {
       .maybeSingle();
 
     if (invErr) {
-      return NextResponse.json({ ok: false, error: invErr.message }, { status: 400 });
+      console.error("[family/accept] invite lookup error:", invErr);
+      return NextResponse.json({ ok: false, error: copy.unknown }, { status: 400 });
     }
 
     if (!inv) {
       return NextResponse.json(
-        { ok: false, error: "Invitación no encontrada o token inválido." },
+        { ok: false, error: copy.inviteNotFound },
         { status: 404 }
       );
     }
@@ -114,7 +126,7 @@ export async function POST(req: Request) {
     const accessToken = getBearerToken(req);
     if (!accessToken) {
       return NextResponse.json(
-        { ok: false, error: "Necesitas iniciar sesión para aceptar la invitación.", code: "NEEDS_LOGIN" },
+        { ok: false, error: copy.needsLogin, code: "NEEDS_LOGIN" },
         { status: 401 }
       );
     }
@@ -122,7 +134,7 @@ export async function POST(req: Request) {
     const { data: userRes, error: userErr } = await supabaseAdmin.auth.getUser(accessToken);
     if (userErr || !userRes?.user) {
       return NextResponse.json(
-        { ok: false, error: "Sesión inválida o expirada. Vuelve a iniciar sesión.", code: "NEEDS_LOGIN" },
+        { ok: false, error: copy.invalidSession, code: "NEEDS_LOGIN" },
         { status: 401 }
       );
     }
@@ -136,7 +148,7 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error: "Esta invitación no corresponde a tu correo.",
+          error: copy.emailMismatch,
           code: "EMAIL_MISMATCH",
           inviteEmail: invite.email,
           userEmail: user.email ?? null,
@@ -149,7 +161,7 @@ export async function POST(req: Request) {
     if (invite.status === "pending" && isExpired(invite.expires_at)) {
       await supabaseAdmin.from("family_invites").update({ status: "expired" }).eq("id", invite.id);
       return NextResponse.json(
-        { ok: false, error: "Esta invitación ya expiró. Pide que te envíen una nueva.", code: "EXPIRED" },
+        { ok: false, error: copy.expired, code: "EXPIRED" },
         { status: 400 }
       );
     }
@@ -157,13 +169,13 @@ export async function POST(req: Request) {
     // 5) Estados bloqueados (revoked/expired)
     if (invite.status === "revoked") {
       return NextResponse.json(
-        { ok: false, error: "Esta invitación fue revocada.", code: "REVOKED" },
+        { ok: false, error: copy.revoked, code: "REVOKED" },
         { status: 400 }
       );
     }
     if (invite.status === "expired") {
       return NextResponse.json(
-        { ok: false, error: "Esta invitación ya expiró. Pide una nueva.", code: "EXPIRED" },
+        { ok: false, error: copy.expired, code: "EXPIRED" },
         { status: 400 }
       );
     }
@@ -179,15 +191,15 @@ export async function POST(req: Request) {
         .maybeSingle();
 
       if (existErr) {
-        return NextResponse.json({ ok: false, error: existErr.message }, { status: 400 });
+        console.error("[family/accept] existing member error:", existErr);
+        return NextResponse.json({ ok: false, error: copy.unknown }, { status: 400 });
       }
 
       if (!existing) {
         return NextResponse.json(
           {
             ok: false,
-            error:
-              "La invitación ya fue usada. Si no apareces como miembro, pide que te inviten de nuevo.",
+            error: copy.alreadyUsedNoMember,
             code: "ALREADY_USED_NO_MEMBER",
           },
           { status: 409 }
@@ -205,7 +217,7 @@ export async function POST(req: Request) {
     // 7) Debe estar pending para aceptar
     if (invite.status !== "pending") {
       return NextResponse.json(
-        { ok: false, error: `Invitación no pendiente (estado: ${invite.status}).`, code: "NOT_PENDING" },
+        { ok: false, error: copy.notPending(invite.status), code: "NOT_PENDING" },
         { status: 400 }
       );
     }
@@ -219,7 +231,8 @@ export async function POST(req: Request) {
       .maybeSingle();
 
     if (existErr) {
-      return NextResponse.json({ ok: false, error: existErr.message }, { status: 400 });
+      console.error("[family/accept] member lookup error:", existErr);
+      return NextResponse.json({ ok: false, error: copy.unknown }, { status: 400 });
     }
 
     if (!existing) {
@@ -234,7 +247,8 @@ export async function POST(req: Request) {
         },
       ]);
       if (insErr) {
-        return NextResponse.json({ ok: false, error: insErr.message }, { status: 400 });
+        console.error("[family/accept] member insert error:", insErr);
+        return NextResponse.json({ ok: false, error: copy.unknown }, { status: 400 });
       }
     } else {
       const { error: updMemErr } = await supabaseAdmin
@@ -248,7 +262,8 @@ export async function POST(req: Request) {
         .eq("id", (existing as any).id);
 
       if (updMemErr) {
-        return NextResponse.json({ ok: false, error: updMemErr.message }, { status: 400 });
+        console.error("[family/accept] member update error:", updMemErr);
+        return NextResponse.json({ ok: false, error: copy.unknown }, { status: 400 });
       }
     }
 
@@ -260,11 +275,13 @@ export async function POST(req: Request) {
       .eq("id", invite.id);
 
     if (updInvErr) {
-      return NextResponse.json({ ok: false, error: updInvErr.message }, { status: 400 });
+      console.error("[family/accept] invite update error:", updInvErr);
+      return NextResponse.json({ ok: false, error: copy.unknown }, { status: 400 });
     }
 
     return NextResponse.json({ ok: true, status: "accepted" });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "Unknown error" }, { status: 500 });
+    console.error("[family/accept] fatal:", e);
+    return NextResponse.json({ ok: false, error: getFamilyApiCopy(localeFromRequest(req)).unknown }, { status: 500 });
   }
 }

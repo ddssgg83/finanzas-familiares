@@ -121,6 +121,14 @@ function getEmailDictionary(locale?: string | null) {
   return normalized.startsWith("en") ? en : es;
 }
 
+function getFamilyApiCopy(locale?: string | null) {
+  return getEmailDictionary(locale).familyApi;
+}
+
+function localeFromRequest(req: Request) {
+  return req.headers.get("x-rinday-locale") || req.headers.get("accept-language") || null;
+}
+
 function getBaseUrl() {
   const explicit = (process.env.PUBLIC_APP_URL_FOR_EMAIL ?? "").trim();
   if (explicit) return explicit;
@@ -186,11 +194,13 @@ function toHttpStatusFromSupabaseError(errMsg: string) {
 // ===============================
 export async function POST(req: Request) {
   try {
+    let copy = getFamilyApiCopy(localeFromRequest(req));
+
     // 1) Token
     const accessToken = getBearerToken(req);
     if (!accessToken) {
       return NextResponse.json(
-        { ok: false, error: "Auth session missing! (no bearer token)" },
+        { ok: false, error: copy.authRequired },
         { status: 401 }
       );
     }
@@ -207,7 +217,7 @@ export async function POST(req: Request) {
 
     const { data: userRes, error: userErr } = await supabaseUser.auth.getUser();
     if (userErr || !userRes?.user) {
-      return NextResponse.json({ ok: false, error: "Not authenticated" }, { status: 401 });
+      return NextResponse.json({ ok: false, error: copy.notAuthenticated }, { status: 401 });
     }
     const user = userRes.user;
 
@@ -222,20 +232,21 @@ export async function POST(req: Request) {
       locale?: string | null;
     };
     const emailDictionary = getEmailDictionary(locale);
+    copy = emailDictionary.familyApi;
 
     if (!familyId || !email) {
       return NextResponse.json(
-        { ok: false, error: "Missing familyId or email" },
+        { ok: false, error: copy.missingInvite },
         { status: 400 }
       );
     }
     if (!isUuidLike(familyId)) {
-      return NextResponse.json({ ok: false, error: "Invalid familyId (uuid)" }, { status: 400 });
+      return NextResponse.json({ ok: false, error: copy.invalidFamily }, { status: 400 });
     }
 
     const inviteEmail = String(email).toLowerCase().trim();
     if (!isEmailLike(inviteEmail)) {
-      return NextResponse.json({ ok: false, error: "Invalid email" }, { status: 400 });
+      return NextResponse.json({ ok: false, error: copy.invalidEmail }, { status: 400 });
     }
 
     // Tu CHECK constraint: 'admin'/'member'
@@ -251,10 +262,11 @@ export async function POST(req: Request) {
       .maybeSingle();
 
     if (fgErr) {
-      return NextResponse.json({ ok: false, error: fgErr.message }, { status: 400 });
+      console.error("[invite] family lookup error:", fgErr);
+      return NextResponse.json({ ok: false, error: copy.unknown }, { status: 400 });
     }
     if (!fg) {
-      return NextResponse.json({ ok: false, error: "Family not found" }, { status: 404 });
+      return NextResponse.json({ ok: false, error: copy.familyNotFound }, { status: 404 });
     }
 
     const isOwner = (fg as any).owner_user_id === user.id;
@@ -266,14 +278,15 @@ export async function POST(req: Request) {
       });
 
       if (adminErr) {
-        return NextResponse.json({ ok: false, error: adminErr.message }, { status: 400 });
+        console.error("[invite] admin check error:", adminErr);
+        return NextResponse.json({ ok: false, error: copy.unknown }, { status: 400 });
       }
       isAdmin = !!adminRes;
     }
 
     if (!isOwner && !isAdmin) {
       return NextResponse.json(
-        { ok: false, error: "not allowed" },
+        { ok: false, error: copy.notAllowed },
         { status: 403 }
       );
     }
@@ -311,8 +324,9 @@ export async function POST(req: Request) {
           .maybeSingle();
 
         if (existingErr) {
+          console.error("[invite] duplicate lookup error:", existingErr);
           return NextResponse.json(
-            { ok: false, error: rpcError.message },
+            { ok: false, error: copy.unknown },
             { status: toHttpStatusFromSupabaseError(rpcError.message) }
           );
         }
@@ -327,13 +341,13 @@ export async function POST(req: Request) {
           token: finalToken,
           inviteUrl,
           email_sent: false,
-          email_error: "Invite already exists (pending). Reusing link.",
+          email_error: copy.inviteAlreadyExists,
           created,
         });
       }
 
       return NextResponse.json(
-        { ok: false, error: rpcError.message },
+        { ok: false, error: toHttpStatusFromSupabaseError(rpcError.message) === 403 ? copy.notAllowed : copy.unknown },
         { status: toHttpStatusFromSupabaseError(rpcError.message) }
       );
     }
@@ -355,9 +369,7 @@ export async function POST(req: Request) {
 
     try {
       if (!hasSmtp) {
-        throw new Error(
-          "SMTP env missing. Required: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM"
-        );
+        throw new Error(copy.smtpMissing);
       }
 
       const transporter = nodemailer.createTransport({
@@ -393,7 +405,7 @@ export async function POST(req: Request) {
 
       email_sent = true;
     } catch (err: any) {
-      email_error = err?.message ?? "Failed to send email via SMTP";
+      email_error = err?.message ?? copy.smtpFailed;
       console.error("[invite][smtp] error:", err);
     }
 
@@ -425,7 +437,7 @@ export async function POST(req: Request) {
   } catch (e: any) {
     console.error("[invite] fatal:", e);
     return NextResponse.json(
-      { ok: false, error: e?.message ?? "Unknown error" },
+      { ok: false, error: getFamilyApiCopy(localeFromRequest(req)).unknown },
       { status: 500 }
     );
   }
